@@ -621,8 +621,8 @@ body:has(#gamePanel:not(.hidden)) {
 
 .map-content {
   position: relative;
-  width: 12000px;
-  height: 8000px;
+  width: 8000px;
+  height: 5333px;
   transform-origin: 0 0;
 }
 
@@ -647,8 +647,8 @@ body:has(#gamePanel:not(.hidden)) {
   position: absolute;
   inset: 0;
   z-index: 3;
-  width: 12000px;
-  height: 8000px;
+  width: 8000px;
+  height: 5333px;
   pointer-events: none;
 }
 
@@ -687,8 +687,8 @@ body:has(#gamePanel:not(.hidden)) {
 }
 
 .sector-map {
-  --map-width: 12000px;
-  --map-height: 8000px;
+  --map-width: 8000px;
+  --map-height: 5333px;
 }
 
 .sector-map .map-node,

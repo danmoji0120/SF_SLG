@@ -16,8 +16,8 @@ let currentBase = null;
 let moveFuelPerDistance = 120;
 let mapDragState = null;
 let activeTab = "map";
-const MAP_WIDTH = 12000;
-const MAP_HEIGHT = 8000;
+const MAP_WIDTH = 8000;
+const MAP_HEIGHT = 5333;
 let mapZoom = 0.7;
 let mapConfig = { maxX: 2000, maxY: 2000, distanceUnit: 20 };
 let shipyardOptions = { hulls: [], components: [] };
@@ -321,7 +321,7 @@ function mapCoordY(percent) {
 }
 
 function applyUiScale(nextScale) {
-  uiScale = Math.max(0.75, Math.min(1.5, Number(nextScale || 1)));
+  uiScale = Math.max(0.5, Math.min(1.5, Number(nextScale || 1)));
   document.documentElement.style.setProperty("--ui-scale", uiScale.toFixed(2));
   localStorage.setItem(UI_SCALE_KEY, String(uiScale));
   if (elements.uiScaleRange) elements.uiScaleRange.value = String(uiScale);
@@ -498,10 +498,14 @@ function makeWindowDraggable(element) {
     if (event.button !== 0) return;
 
     const rect = element.getBoundingClientRect();
+    const logicalX = event.clientX / Math.max(0.5, uiScale);
+    const logicalY = event.clientY / Math.max(0.5, uiScale);
+    const logicalLeft = rect.left / Math.max(0.5, uiScale);
+    const logicalTop = rect.top / Math.max(0.5, uiScale);
     dragState = {
       pointerId: event.pointerId,
-      offsetX: event.clientX - rect.left,
-      offsetY: event.clientY - rect.top
+      offsetX: logicalX - logicalLeft,
+      offsetY: logicalY - logicalTop
     };
     element.classList.add("dragging-window");
     element.style.right = "auto";
@@ -515,10 +519,12 @@ function makeWindowDraggable(element) {
 
   element.addEventListener("pointermove", (event) => {
     if (!dragState || dragState.pointerId !== event.pointerId) return;
-    const maxLeft = Math.max(0, window.innerWidth - element.offsetWidth);
-    const maxTop = Math.max(0, window.innerHeight - element.offsetHeight);
-    const left = Math.min(maxLeft, Math.max(0, event.clientX - dragState.offsetX));
-    const top = Math.min(maxTop, Math.max(0, event.clientY - dragState.offsetY));
+    const logicalClientX = event.clientX / Math.max(0.5, uiScale);
+    const logicalClientY = event.clientY / Math.max(0.5, uiScale);
+    const maxLeft = Math.max(0, (window.innerWidth / Math.max(0.5, uiScale)) - element.offsetWidth);
+    const maxTop = Math.max(0, (window.innerHeight / Math.max(0.5, uiScale)) - element.offsetHeight);
+    const left = Math.min(maxLeft, Math.max(0, logicalClientX - dragState.offsetX));
+    const top = Math.min(maxTop, Math.max(0, logicalClientY - dragState.offsetY));
     element.style.left = `${left}px`;
     element.style.top = `${top}px`;
   });
@@ -661,7 +667,8 @@ function renderShipCosts() {
 }
 
 function optionLabel(component) {
-  return `${component.name} / +\uacf5 ${component.attackBonus}, +\ubc29 ${component.defenseBonus}, +HP ${component.hpBonus}, +\uc18d ${component.speedBonus} / \uc804\ub825 ${component.powerCost}, \uae08\uc18d ${component.metalCost}, \uc5f0\ub8cc ${component.fuelCost}`;
+  const bonus = Number(component.powerBonus || 0) > 0 ? `, +전력한계 ${component.powerBonus}` : "";
+  return `${component.name} / +\uacf5 ${component.attackBonus}, +\ubc29 ${component.defenseBonus}, +HP ${component.hpBonus}, +\uc18d ${component.speedBonus}${bonus} / \uc804\ub825 ${component.powerCost}, \uae08\uc18d ${component.metalCost}, \uc5f0\ub8cc ${component.fuelCost}`;
 }
 
 function fillSelect(select, items, labelFn) {
@@ -733,6 +740,8 @@ function calculateDesignPreview() {
   if (components.length !== expectedCount) return null;
 
   const totalPower = components.reduce((sum, item) => sum + item.powerCost, 0);
+  const bonusPowerLimit = components.reduce((sum, item) => sum + Number(item.powerBonus || 0), 0);
+  const effectivePowerLimit = Number(hull.powerLimit || 0) + bonusPowerLimit;
   const totalMetalCost = hull.metalCost + components.reduce((sum, item) => sum + item.metalCost, 0);
   const totalFuelCost = hull.fuelCost + components.reduce((sum, item) => sum + item.fuelCost, 0);
   const finalHp = hull.baseHp + components.reduce((sum, item) => sum + item.hpBonus, 0);
@@ -743,7 +752,7 @@ function calculateDesignPreview() {
   const slotWeight = hull.slots.engine * 0.6 + hull.slots.weapon * 1.2 + hull.slots.defense + hull.slots.utility * 0.7;
   const totalBuildTime = Math.max(20, Math.floor(hull.baseBuildTime * complexity + slotWeight * 25));
 
-  return { hull, byCategory, components, totalPower, totalMetalCost, totalFuelCost, finalHp, finalAttack, finalDefense, finalSpeed, totalBuildTime };
+  return { hull, byCategory, components, totalPower, bonusPowerLimit, effectivePowerLimit, totalMetalCost, totalFuelCost, finalHp, finalAttack, finalDefense, finalSpeed, totalBuildTime };
 }
 
 function renderDesignPreview() {
@@ -753,7 +762,7 @@ function renderDesignPreview() {
     return;
   }
 
-  const overPower = preview.totalPower > preview.hull.powerLimit;
+  const overPower = preview.totalPower > preview.effectivePowerLimit;
   elements.designPreview.innerHTML = `
     <div class="stat-grid">
       <span>\uc120\uccb4 \uae30\ubcf8 \uc804\ud22c\ub825 ${Math.floor((preview.hull.baseHp * 0.12) + (preview.hull.baseSpeed * 4))}</span>
@@ -761,7 +770,8 @@ function renderDesignPreview() {
       <span>\uacf5\uaca9 ${preview.finalAttack}</span>
       <span>\ubc29\uc5b4 ${preview.finalDefense}</span>
       <span>\uc18d\ub3c4 ${preview.finalSpeed}</span>
-      <span class="${overPower ? "danger-text" : ""}">\uc804\ub825 ${preview.totalPower}/${preview.hull.powerLimit}</span>
+      <span class="${overPower ? "danger-text" : ""}">\uc804\ub825 ${preview.totalPower}/${preview.effectivePowerLimit}</span>
+      <span>전력한계 보너스 +${preview.bonusPowerLimit}</span>
       <span>\ube44\uc6a9 \uae08\uc18d ${preview.totalMetalCost}, \uc5f0\ub8cc ${preview.totalFuelCost}</span>
       <span>\uc0dd\uc0b0 \uc2dc\uac04 ${formatBuildHours(preview.totalBuildTime)}</span>
       <span>\uacf5\uaca9 \ubaa8\ub4c8 \ud569 +${preview.byCategory.weapons.reduce((sum, w) => sum + Number(w.attackBonus || 0), 0)}</span>

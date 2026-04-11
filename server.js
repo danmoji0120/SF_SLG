@@ -86,10 +86,10 @@ const DEFAULT_ZONES = [
     level: 1,
     x: 320,
     y: 1160,
-    metalRate: 5,
-    fuelRate: 1,
-    recommendedPower: 80,
-    garrison: { corvette: 5, destroyer: 1, cruiser: 0, battleship: 0, carrier: 0 }
+    metalRate: 9,
+    fuelRate: 3,
+    recommendedPower: 140,
+    garrison: { corvette: 8, destroyer: 2, cruiser: 0, battleship: 0, carrier: 0 }
   },
   {
     id: 2,
@@ -98,10 +98,10 @@ const DEFAULT_ZONES = [
     level: 1,
     x: 560,
     y: 620,
-    metalRate: 1,
-    fuelRate: 4,
-    recommendedPower: 100,
-    garrison: { corvette: 7, destroyer: 2, cruiser: 0, battleship: 0, carrier: 0 }
+    metalRate: 4,
+    fuelRate: 10,
+    recommendedPower: 180,
+    garrison: { corvette: 10, destroyer: 3, cruiser: 0, battleship: 0, carrier: 0 }
   },
   {
     id: 3,
@@ -110,10 +110,10 @@ const DEFAULT_ZONES = [
     level: 2,
     x: 860,
     y: 1280,
-    metalRate: 3,
-    fuelRate: 3,
-    recommendedPower: 180,
-    garrison: { corvette: 9, destroyer: 3, cruiser: 1, battleship: 0, carrier: 0 }
+    metalRate: 8,
+    fuelRate: 8,
+    recommendedPower: 320,
+    garrison: { corvette: 14, destroyer: 5, cruiser: 1, battleship: 0, carrier: 0 }
   },
   {
     id: 4,
@@ -122,10 +122,10 @@ const DEFAULT_ZONES = [
     level: 2,
     x: 1100,
     y: 480,
-    metalRate: 6,
-    fuelRate: 2,
-    recommendedPower: 240,
-    garrison: { corvette: 12, destroyer: 4, cruiser: 1, battleship: 0, carrier: 0 }
+    metalRate: 12,
+    fuelRate: 5,
+    recommendedPower: 420,
+    garrison: { corvette: 18, destroyer: 6, cruiser: 2, battleship: 0, carrier: 0 }
   },
   {
     id: 5,
@@ -134,10 +134,10 @@ const DEFAULT_ZONES = [
     level: 3,
     x: 1240,
     y: 1460,
-    metalRate: 2,
-    fuelRate: 8,
-    recommendedPower: 360,
-    garrison: { corvette: 12, destroyer: 5, cruiser: 2, battleship: 0, carrier: 0 }
+    metalRate: 6,
+    fuelRate: 16,
+    recommendedPower: 650,
+    garrison: { corvette: 22, destroyer: 8, cruiser: 3, battleship: 0, carrier: 0 }
   },
   {
     id: 6,
@@ -146,10 +146,10 @@ const DEFAULT_ZONES = [
     level: 3,
     x: 1480,
     y: 840,
-    metalRate: 7,
-    fuelRate: 5,
-    recommendedPower: 460,
-    garrison: { corvette: 14, destroyer: 6, cruiser: 3, battleship: 0, carrier: 0 }
+    metalRate: 16,
+    fuelRate: 11,
+    recommendedPower: 860,
+    garrison: { corvette: 28, destroyer: 10, cruiser: 4, battleship: 1, carrier: 0 }
   },
   {
     id: 7,
@@ -158,10 +158,10 @@ const DEFAULT_ZONES = [
     level: 4,
     x: 1680,
     y: 360,
-    metalRate: 10,
-    fuelRate: 6,
-    recommendedPower: 720,
-    garrison: { corvette: 18, destroyer: 8, cruiser: 4, battleship: 1, carrier: 0 }
+    metalRate: 24,
+    fuelRate: 14,
+    recommendedPower: 1350,
+    garrison: { corvette: 36, destroyer: 14, cruiser: 6, battleship: 2, carrier: 0 }
   },
   {
     id: 8,
@@ -170,10 +170,10 @@ const DEFAULT_ZONES = [
     level: 4,
     x: 1760,
     y: 1340,
-    metalRate: 8,
-    fuelRate: 9,
-    recommendedPower: 860,
-    garrison: { corvette: 20, destroyer: 9, cruiser: 5, battleship: 1, carrier: 0 }
+    metalRate: 15,
+    fuelRate: 23,
+    recommendedPower: 1650,
+    garrison: { corvette: 42, destroyer: 16, cruiser: 8, battleship: 2, carrier: 1 }
   },
   {
     id: 9,
@@ -182,10 +182,10 @@ const DEFAULT_ZONES = [
     level: 5,
     x: 1900,
     y: 920,
-    metalRate: 14,
-    fuelRate: 12,
-    recommendedPower: 1250,
-    garrison: { corvette: 24, destroyer: 12, cruiser: 6, battleship: 2, carrier: 1 }
+    metalRate: 28,
+    fuelRate: 28,
+    recommendedPower: 2400,
+    garrison: { corvette: 54, destroyer: 22, cruiser: 12, battleship: 4, carrier: 2 }
   }
 ];
 
@@ -198,6 +198,8 @@ for (let id = 10; id <= 620; id += 1) {
   const level = Math.min(5, Math.floor((id - 10) / 122) + 1);
   const x = 20 + Math.floor(pseudoRandomUnit(id, 11) * (MAP_MAX_X - 40));
   const y = 20 + Math.floor(pseudoRandomUnit(id, 29) * (MAP_MAX_Y - 40));
+  const spreadA = pseudoRandomUnit(id, 47);
+  const spreadB = pseudoRandomUnit(id, 71);
   DEFAULT_ZONES.push({
     id,
     name: `\uc12d\ud130 ${id} \uc804\ucd08 \uac70\uc810`,
@@ -205,15 +207,15 @@ for (let id = 10; id <= 620; id += 1) {
     level,
     x,
     y,
-    metalRate: 2 + level * 2 + (id % 3),
-    fuelRate: 1 + level * 2 + (id % 4),
-    recommendedPower: 80 + level * 170 + id * 8,
+    metalRate: 3 + level * 4 + Math.floor(spreadA * (5 + level * 4)),
+    fuelRate: 2 + level * 4 + Math.floor(spreadB * (5 + level * 4)),
+    recommendedPower: 120 + level * 320 + Math.floor(spreadA * 900) + Math.floor(spreadB * 700),
     garrison: {
-      corvette: 4 + level * 4 + (id % 5),
-      destroyer: 1 + level * 2 + (id % 3),
-      cruiser: Math.max(0, level - 2) + (id % 2),
-      battleship: level >= 4 ? 1 + (id % 2) : 0,
-      carrier: level >= 5 && id % 4 === 0 ? 1 : 0
+      corvette: 6 + level * 6 + Math.floor(spreadA * 8),
+      destroyer: 2 + level * 3 + Math.floor(spreadB * 6),
+      cruiser: Math.max(0, level - 1) + Math.floor(spreadA * (level >= 3 ? 3 : 2)),
+      battleship: level >= 4 ? 1 + Math.floor(spreadB * 3) : 0,
+      carrier: level >= 5 ? Math.floor(spreadA * 3) : 0
     }
   });
 }
@@ -383,7 +385,8 @@ const DEFAULT_COMPONENTS = [
   { key: "command_uplink", name: "\uc9c0\ud718 \uc5c5\ub9c1\ud06c", category: "utility", hp: 60, attack: 18, defense: 8, speed: 0, power: 34, metal: 320, fuel: 220 },
   { key: "fuel_optimizer", name: "\uc5f0\ub8cc \ucd5c\uc801\ud654 \ubaa8\ub4c8", category: "utility", hp: 20, attack: 0, defense: 8, speed: 2, power: 18, metal: 180, fuel: 120 },
   { key: "ammo_fabricator", name: "\ud0c4\uc57d \uc81c\uc870 \ubaa8\ub4c8", category: "utility", hp: 50, attack: 26, defense: 4, speed: -1, power: 40, metal: 420, fuel: 260 },
-  { key: "battle_computer", name: "\ubc30\ud2c0 \ucef4\ud4e8\ud130", category: "utility", hp: 75, attack: 34, defense: 10, speed: 0, power: 52, metal: 560, fuel: 420 }
+  { key: "battle_computer", name: "\ubc30\ud2c0 \ucef4\ud4e8\ud130", category: "utility", hp: 75, attack: 34, defense: 10, speed: 0, power: 52, metal: 560, fuel: 420, powerBonus: 0 },
+  { key: "reactor_boost", name: "\uc6d0\uc790\ub85c \ubd80\uc2a4\ud2b8", category: "utility", hp: 0, attack: 0, defense: 0, speed: -1, power: 16, metal: 700, fuel: 520, powerBonus: 110 }
 ];
 
 function run(sql, params = []) {
@@ -531,8 +534,8 @@ async function seedShipyardData() {
       `
         INSERT OR IGNORE INTO components
           (key, name, category, hp_bonus, attack_bonus, defense_bonus, speed_bonus,
-           power_cost, metal_cost, fuel_cost, tech_requirement)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '')
+           power_cost, power_bonus, metal_cost, fuel_cost, tech_requirement)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '')
       `,
       [
         component.key,
@@ -543,8 +546,30 @@ async function seedShipyardData() {
         component.defense,
         component.speed,
         component.power,
+        component.powerBonus || 0,
         component.metal,
         component.fuel
+      ]
+    );
+    await run(
+      `
+        UPDATE components
+        SET name = ?, category = ?, hp_bonus = ?, attack_bonus = ?, defense_bonus = ?, speed_bonus = ?,
+            power_cost = ?, power_bonus = ?, metal_cost = ?, fuel_cost = ?
+        WHERE key = ?
+      `,
+      [
+        component.name,
+        component.category,
+        component.hp,
+        component.attack,
+        component.defense,
+        component.speed,
+        component.power,
+        component.powerBonus || 0,
+        component.metal,
+        component.fuel,
+        component.key
       ]
     );
   }
@@ -682,6 +707,7 @@ async function initDb() {
       tech_requirement TEXT
     )
   `);
+  await ensureColumn("components", "power_bonus", "INTEGER NOT NULL DEFAULT 0");
 
   await run(`
     CREATE TABLE IF NOT EXISTS ship_designs (
@@ -969,6 +995,9 @@ function componentTierByPower(powerCost) {
 
 function componentUnlockRequirement(component) {
   const basicKeys = new Set(["standard_engine", "light_railgun", "reinforced_armor", "cargo_module"]);
+  if (String(component.key || "") === "reactor_boost") {
+    return { type: "logistics", level: 4 };
+  }
   if (basicKeys.has(String(component.key || ""))) {
     return { type: "resource", level: 0 };
   }
@@ -1270,8 +1299,10 @@ async function calculateDesign(input) {
   }
 
   const totalPower = components.reduce((sum, component) => sum + component.power_cost, 0);
-  if (totalPower > hull.power_limit) {
-    const error = new Error(`\uc804\ub825 \uc81c\ud55c\uc744 \ucd08\uacfc\ud588\uc2b5\ub2c8\ub2e4. ${totalPower}/${hull.power_limit}`);
+  const bonusPowerLimit = components.reduce((sum, component) => sum + Number(component.power_bonus || 0), 0);
+  const effectivePowerLimit = Number(hull.power_limit || 0) + bonusPowerLimit;
+  if (totalPower > effectivePowerLimit) {
+    const error = new Error(`\uc804\ub825 \uc81c\ud55c\uc744 \ucd08\uacfc\ud588\uc2b5\ub2c8\ub2e4. ${totalPower}/${effectivePowerLimit}`);
     error.status = 400;
     throw error;
   }
@@ -1300,14 +1331,16 @@ async function calculateDesign(input) {
     finalDefense,
     finalSpeed,
     totalPower,
-    powerLimit: hull.power_limit,
+    powerLimit: effectivePowerLimit,
+    basePowerLimit: Number(hull.power_limit || 0),
+    bonusPowerLimit,
     totalMetalCost,
     totalFuelCost,
     totalBuildTime
   };
 }
 
-function formatDesign(row) {
+function formatDesign(row, powerBonusById = {}) {
   const parseJson = (value, fallbackId) => {
     try {
       const parsed = JSON.parse(value || "[]");
@@ -1318,24 +1351,30 @@ function formatDesign(row) {
     return Number.isInteger(fallbackId) ? [fallbackId] : [];
   };
 
+  const parsedComponents = {
+    engines: parseJson(row.engine_components_json, row.engine_component_id),
+    weapons: parseJson(row.weapon_components_json, row.weapon_component_id),
+    defenses: parseJson(row.defense_components_json, row.defense_component_id),
+    utilities: parseJson(row.utility_components_json, row.utility_component_id)
+  };
+  const allComponentIds = [...parsedComponents.engines, ...parsedComponents.weapons, ...parsedComponents.defenses, ...parsedComponents.utilities];
+  const powerLimitBonus = allComponentIds.reduce((sum, id) => sum + Number(powerBonusById[id] || 0), 0);
+
   return {
     id: row.id,
     name: row.name,
     hullId: row.hull_id,
     hullName: row.hull_name,
     classType: row.class_type,
-    components: {
-      engines: parseJson(row.engine_components_json, row.engine_component_id),
-      weapons: parseJson(row.weapon_components_json, row.weapon_component_id),
-      defenses: parseJson(row.defense_components_json, row.defense_component_id),
-      utilities: parseJson(row.utility_components_json, row.utility_component_id)
-    },
+    components: parsedComponents,
     finalHp: row.final_hp,
     finalAttack: row.final_attack,
     finalDefense: row.final_defense,
     finalSpeed: row.final_speed,
     totalPower: row.total_power,
-    powerLimit: row.power_limit,
+    powerLimit: Number(row.power_limit || 0) + powerLimitBonus,
+    basePowerLimit: Number(row.power_limit || 0),
+    bonusPowerLimit: powerLimitBonus,
     totalMetalCost: row.total_metal_cost,
     totalFuelCost: row.total_fuel_cost,
     totalBuildTime: row.total_build_time,
@@ -1344,6 +1383,10 @@ function formatDesign(row) {
 }
 
 async function getDesigns(userId) {
+  const componentRows = await all("SELECT id, power_bonus FROM components");
+  const powerBonusById = {};
+  for (const row of componentRows) powerBonusById[row.id] = Number(row.power_bonus || 0);
+
   const rows = await all(
     `
       SELECT d.*, h.name AS hull_name, h.class_type, h.power_limit
@@ -1355,7 +1398,7 @@ async function getDesigns(userId) {
     [userId]
   );
 
-  return rows.map(formatDesign);
+  return rows.map((row) => formatDesign(row, powerBonusById));
 }
 
 async function processProductionQueue(userId) {
@@ -2434,6 +2477,7 @@ app.get("/shipyard/options", requireAuth, async (req, res) => {
         defenseBonus: component.defense_bonus,
         speedBonus: component.speed_bonus,
         powerCost: component.power_cost,
+        powerBonus: component.power_bonus,
         metalCost: component.metal_cost,
         fuelCost: component.fuel_cost,
         techRequirement: component.tech_requirement,
