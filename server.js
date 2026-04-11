@@ -77,7 +77,14 @@ const BASE_MOVE_FUEL_PER_DISTANCE = 120;
 const MAP_MAX_X = 2000;
 const MAP_MAX_Y = 2000;
 const MAP_DISTANCE_UNIT = 20;
-const SPEEDUP_RESOURCE_PER_SECOND = 500;
+const SPEEDUP_RESOURCE_PER_SECOND = 100;
+const ZONE_TARGET_POWER_BY_LEVEL = {
+  1: 500,
+  2: 3000,
+  3: 12000,
+  4: 28000,
+  5: 50000
+};
 
 const DEFAULT_ZONES = [
   {
@@ -195,12 +202,74 @@ function pseudoRandomUnit(seed, salt) {
   return x - Math.floor(x);
 }
 
+function baseShipPower(type) {
+  const ship = SHIPS[type];
+  if (!ship) return 1;
+  const defense = Math.floor(Number(ship.hp || 0) / 8);
+  return Number(ship.attack || 0) + defense * 0.45 + Number(ship.hp || 0) * 0.12;
+}
+
+function targetZonePower(level, spreadA, spreadB) {
+  const base = Number(ZONE_TARGET_POWER_BY_LEVEL[level] || ZONE_TARGET_POWER_BY_LEVEL[1]);
+  const variance = 0.82 + ((Number(spreadA || 0) + Number(spreadB || 0)) / 2) * 0.36;
+  return Math.max(200, Math.round(base * variance));
+}
+
+function createZoneGarrison(level, targetPower, spreadA, spreadB) {
+  const allowedByLevel = {
+    1: ["corvette", "destroyer"],
+    2: ["corvette", "destroyer"],
+    3: ["corvette", "destroyer", "cruiser"],
+    4: ["corvette", "destroyer", "cruiser", "battleship"],
+    5: ["corvette", "destroyer", "cruiser", "battleship", "carrier"]
+  };
+  const allowed = allowedByLevel[level] || allowedByLevel[1];
+  const profileByLevel = {
+    1: { corvette: 0.88, destroyer: 0.12, cruiser: 0, battleship: 0, carrier: 0 },
+    2: { corvette: 0.7, destroyer: 0.3, cruiser: 0, battleship: 0, carrier: 0 },
+    3: { corvette: 0.45, destroyer: 0.38, cruiser: 0.17, battleship: 0, carrier: 0 },
+    4: { corvette: 0.28, destroyer: 0.36, cruiser: 0.24, battleship: 0.12, carrier: 0 },
+    5: { corvette: 0.16, destroyer: 0.28, cruiser: 0.27, battleship: 0.18, carrier: 0.11 }
+  };
+  const profile = profileByLevel[level] || profileByLevel[1];
+  const spread = (Number(spreadA || 0) - 0.5) * 0.1;
+
+  const garrison = { corvette: 0, destroyer: 0, cruiser: 0, battleship: 0, carrier: 0 };
+  for (const type of allowed) {
+    const shipPower = baseShipPower(type);
+    const share = Math.max(0.02, Number(profile[type] || 0) + spread);
+    garrison[type] = Math.max(0, Math.floor((targetPower * share) / Math.max(1, shipPower)));
+  }
+
+  let currentPower = 0;
+  for (const type of SHIP_TYPES) {
+    currentPower += garrison[type] * baseShipPower(type);
+  }
+  const deficit = Math.max(0, targetPower - currentPower);
+  if (deficit > 0) {
+    garrison.corvette += Math.max(1, Math.ceil(deficit / baseShipPower("corvette")));
+  }
+
+  return garrison;
+}
+
+function buildZoneCombatProfile(zoneId, level) {
+  const spreadA = pseudoRandomUnit(zoneId, 47);
+  const spreadB = pseudoRandomUnit(zoneId, 71);
+  const power = targetZonePower(level, spreadA, spreadB);
+  return {
+    recommendedPower: power,
+    garrison: createZoneGarrison(level, power, spreadA, spreadB)
+  };
+}
+
 for (let id = 10; id <= 620; id += 1) {
   const level = Math.min(5, Math.floor((id - 10) / 122) + 1);
   const x = 20 + Math.floor(pseudoRandomUnit(id, 11) * (MAP_MAX_X - 40));
   const y = 20 + Math.floor(pseudoRandomUnit(id, 29) * (MAP_MAX_Y - 40));
   const spreadA = pseudoRandomUnit(id, 47);
   const spreadB = pseudoRandomUnit(id, 71);
+  const combat = buildZoneCombatProfile(id, level);
   DEFAULT_ZONES.push({
     id,
     name: `\uc12d\ud130 ${id} \uc804\ucd08 \uac70\uc810`,
@@ -210,15 +279,15 @@ for (let id = 10; id <= 620; id += 1) {
     y,
     metalRate: 6 + level * 8 + Math.floor(spreadA * (10 + level * 8)),
     fuelRate: 5 + level * 7 + Math.floor(spreadB * (10 + level * 8)),
-    recommendedPower: 1000 + level * 8200 + Math.floor(spreadA * 6200) + Math.floor(spreadB * 5400),
-    garrison: {
-      corvette: 32 + level * 55 + Math.floor(spreadA * (50 + level * 40)),
-      destroyer: 10 + level * 24 + Math.floor(spreadB * (18 + level * 20)),
-      cruiser: Math.max(2, level * 6) + Math.floor(spreadA * (6 + level * 8)),
-      battleship: level >= 3 ? 2 + level * 3 + Math.floor(spreadB * (3 + level * 3)) : 0,
-      carrier: level >= 4 ? 1 + Math.floor(spreadA * (2 + level * 2)) : 0
-    }
+    recommendedPower: combat.recommendedPower,
+    garrison: combat.garrison
   });
+}
+
+for (const zone of DEFAULT_ZONES) {
+  const combat = buildZoneCombatProfile(zone.id, Number(zone.level || 1));
+  zone.recommendedPower = combat.recommendedPower;
+  zone.garrison = combat.garrison;
 }
 
 const RESEARCH = {
@@ -2843,7 +2912,6 @@ function formatZone(row) {
     y: row.map_y,
     metalRate: row.metal_rate,
     fuelRate: row.fuel_rate,
-    recommendedPower: row.recommended_power,
     actualPower: Math.floor(designFleetPower(garrisonFleet)),
     garrison,
     ownerId: row.owner_id || null,

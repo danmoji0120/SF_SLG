@@ -1400,7 +1400,7 @@ function renderZoneSearchList() {
                 <strong>Lv.${zone.level} ${zone.name}</strong>
                 <span>${zone.ownerUsername ? `\uc18c\uc720: ${zone.ownerUsername}` : "\uc911\ub9bd"} / \uae08\uc18d +${zone.metalRate}/s, \uc5f0\ub8cc +${zone.fuelRate}/s</span>
               </div>
-              <span>${zone.ownedByMe ? "\ub0b4 \uc810\ub839\uc9c0" : zone.occupied ? "\ud0c8\ucde8 \uac00\ub2a5" : `\uad8c\uc7a5 ${zone.recommendedPower}`}</span>
+              <span>${zone.ownedByMe ? "\ub0b4 \uc810\ub839\uc9c0" : zone.occupied ? "\ud0c8\ucde8 \uac00\ub2a5" : "\uc911\ub9bd \uac70\uc810"}</span>
             </button>
           `;
         })
@@ -1607,7 +1607,6 @@ function renderSelectedZone() {
     <div class="detail-stats">
       <span>\uc0dd\uc0b0: \uae08\uc18d +${zone.metalRate}/s, \uc5f0\ub8cc +${zone.fuelRate}/s</span>
       <span>\uc18c\uc720\uc790: ${zone.ownerUsername || "\uc911\ub9bd"}</span>
-      <span>\uad8c\uc7a5 \uc804\ud22c\ub825: ${zone.recommendedPower}</span>
       <span>\uc8fc\ub454\uad70 \uc804\ud22c\ub825: ${zone.actualPower}</span>
       <span>\uc8fc\ub454\uad70: ${fleetText(zone.garrison)}</span>
     </div>
