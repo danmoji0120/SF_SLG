@@ -1,6 +1,7 @@
 const TOKEN_KEY = "sf_slg_token";
 const USERNAME_KEY = "sf_slg_username";
 const ADMIN_TOKEN_KEY = "sf_slg_admin_token";
+const UI_SCALE_KEY = "sf_slg_ui_scale";
 
 let authToken = localStorage.getItem(TOKEN_KEY) || "";
 let captureButtons = [];
@@ -18,6 +19,7 @@ let activeTab = "map";
 const MAP_WIDTH = 12000;
 const MAP_HEIGHT = 8000;
 let mapZoom = 0.7;
+let mapConfig = { maxX: 2000, maxY: 2000, distanceUnit: 20 };
 let shipyardOptions = { hulls: [], components: [] };
 let shipDesigns = [];
 let zoneSearchOpen = false;
@@ -39,6 +41,7 @@ let incomingAlerts = [];
 let showBaseOverlay = false;
 let detailPanelVisible = true;
 let alertPanelVisible = true;
+let uiScale = Number(localStorage.getItem(UI_SCALE_KEY) || 1);
 
 const elements = {
   authPanel: document.getElementById("authPanel"),
@@ -72,6 +75,8 @@ const elements = {
   toggleDetailButton: document.getElementById("toggleDetailButton"),
   toggleAlertButton: document.getElementById("toggleAlertButton"),
   closeBaseOverlayButton: document.getElementById("closeBaseOverlayButton"),
+  uiScaleRange: document.getElementById("uiScaleRange"),
+  uiScaleLabel: document.getElementById("uiScaleLabel"),
   tradeLogView: document.getElementById("tradeLogView"),
   toggleDevButton: document.getElementById("toggleDevButton"),
   devPanel: document.getElementById("devPanel"),
@@ -259,12 +264,21 @@ function estimateMoveCost(toX, toY) {
 
 function renderBase(data) {
   if (!data?.base) return;
+  if (data?.mapConfig) {
+    mapConfig = {
+      maxX: Number(data.mapConfig.maxX || mapConfig.maxX),
+      maxY: Number(data.mapConfig.maxY || mapConfig.maxY),
+      distanceUnit: Number(data.mapConfig.distanceUnit || mapConfig.distanceUnit)
+    };
+  }
   currentBase = data.base;
   moveFuelPerDistance = Number(data.moveFuelPerDistance || moveFuelPerDistance);
   const spec = data.myBaseSpec
     ? `<br>\uc804\ud22c\ub825 ${Number(data.myBaseSpec.fleetPower || 0).toLocaleString()} / \ubcf4\uc720 \ud568\uc120 ${Number(data.myBaseSpec.shipCount || 0)} / \uc0ac\ub839\uad00 Lv.${Number(data.myBaseSpec.commanderLevel || 1)}`
     : "";
   elements.baseView.innerHTML = `X ${currentBase.x}, Y ${currentBase.y}<br>\uc774\ub3d9 \ube44\uc6a9: \uac70\ub9ac 1\ub2f9 \uc5f0\ub8cc ${moveFuelPerDistance}${spec}`;
+  elements.baseMoveX.max = String(mapConfig.maxX);
+  elements.baseMoveY.max = String(mapConfig.maxY);
   elements.baseMoveX.value = currentBase.x;
   elements.baseMoveY.value = currentBase.y;
   renderMoveCost();
@@ -297,11 +311,19 @@ function ownerColor(ownerId) {
 }
 
 function mapCoordX(percent) {
-  return (Number(percent || 50) / 100) * MAP_WIDTH;
+  return (Number(percent || 0) / Math.max(1, Number(mapConfig.maxX || 2000))) * MAP_WIDTH;
 }
 
 function mapCoordY(percent) {
-  return (Number(percent || 50) / 100) * MAP_HEIGHT;
+  return (Number(percent || 0) / Math.max(1, Number(mapConfig.maxY || 2000))) * MAP_HEIGHT;
+}
+
+function applyUiScale(nextScale) {
+  uiScale = Math.max(0.75, Math.min(1.5, Number(nextScale || 1)));
+  document.documentElement.style.setProperty("--ui-scale", uiScale.toFixed(2));
+  localStorage.setItem(UI_SCALE_KEY, String(uiScale));
+  if (elements.uiScaleRange) elements.uiScaleRange.value = String(uiScale);
+  if (elements.uiScaleLabel) elements.uiScaleLabel.textContent = `${Math.round(uiScale * 100)}%`;
 }
 
 function applyMapZoom(zoom, originClientX = null, originClientY = null) {
@@ -575,7 +597,13 @@ function optionLabel(component) {
 
 function fillSelect(select, items, labelFn) {
   select.innerHTML = items
-    .map((item) => `<option value="${item.id}">${labelFn(item)}</option>`)
+    .map((item) => {
+      const lockedText = item.unlocked === false
+        ? ` (잠금: ${item.unlockRequirement?.type || "research"} Lv.${item.unlockRequirement?.level || 0})`
+        : "";
+      const disabled = item.unlocked === false ? "disabled" : "";
+      return `<option value="${item.id}" ${disabled}>${labelFn(item)}${lockedText}</option>`;
+    })
     .join("");
 }
 
@@ -584,7 +612,7 @@ function getSelectedHull() {
 }
 
 function getCategoryOptions(category) {
-  return shipyardOptions.components.filter((item) => item.category === category);
+  return shipyardOptions.components.filter((item) => item.category === category && item.unlocked !== false);
 }
 
 function createSlotSelects() {
@@ -675,6 +703,21 @@ function renderDesignPreview() {
 
 function renderShipyardOptions() {
   fillSelect(elements.hullSelect, shipyardOptions.hulls, (hull) => `${hull.name} / \uc804\ub825 ${hull.powerLimit}`);
+  const firstUnlockedHull = shipyardOptions.hulls.find((hull) => hull.unlocked !== false);
+  if (firstUnlockedHull && getSelectedHull()?.unlocked === false) {
+    elements.hullSelect.value = String(firstUnlockedHull.id);
+  }
+  if (shipyardOptions.unlockSummary) {
+    const summary = shipyardOptions.unlockSummary;
+    elements.designPreview.innerHTML = `
+      <div class="stat-grid">
+        <span>선체 해금 ${summary.hulls.unlocked}/${summary.hulls.total}</span>
+        <span>다음 선체 ${summary.hulls.next}</span>
+        <span>모듈 해금 ${summary.components.unlocked}/${summary.components.total}</span>
+        <span>다음 모듈 ${summary.components.next}</span>
+      </div>
+    `;
+  }
   createSlotSelects();
   renderDesignPreview();
 }
@@ -909,7 +952,17 @@ function renderResearch(data) {
     return;
   }
 
+  const unlockSummary = data?.unlockSummary;
   elements.researchView.innerHTML = `
+    ${unlockSummary ? `
+      <div class="growth-item">
+        <div>
+          <strong>해금 현황</strong>
+          <span>선체 ${unlockSummary.hulls.unlocked}/${unlockSummary.hulls.total} / 다음: ${unlockSummary.hulls.next}</span>
+          <span>모듈 ${unlockSummary.components.unlocked}/${unlockSummary.components.total} / 다음: ${unlockSummary.components.next}</span>
+        </div>
+      </div>
+    ` : ""}
     <div class="tech-tree">
       ${items
     .map((item) => {
@@ -1028,7 +1081,14 @@ function fleetText(fleet) {
 }
 
 function renderMap(data) {
-  renderBase({ base: data?.base, moveFuelPerDistance, myBaseSpec: data?.myBaseSpec });
+  if (data?.mapConfig) {
+    mapConfig = {
+      maxX: Number(data.mapConfig.maxX || mapConfig.maxX),
+      maxY: Number(data.mapConfig.maxY || mapConfig.maxY),
+      distanceUnit: Number(data.mapConfig.distanceUnit || mapConfig.distanceUnit)
+    };
+  }
+  renderBase({ base: data?.base, moveFuelPerDistance, myBaseSpec: data?.myBaseSpec, mapConfig: data?.mapConfig });
   currentPlayers = Array.isArray(data?.players) ? data.players : [];
   activeMissions = Array.isArray(data?.activeMissions) ? data.activeMissions : [];
   renderIncomingAlerts(data?.incomingAlerts);
@@ -1231,7 +1291,7 @@ function renderZones(zones) {
           type="button"
           class="${classes}"
           data-select-zone="${zone.id}"
-          style="--x: ${Number(zone.x || 50) / 100}; --y: ${Number(zone.y || 50) / 100}; --owner-color: ${zone.ownerColor || ownerColor(zone.ownerId)};"
+          style="--x: ${Number(zone.x || 0) / Math.max(1, Number(mapConfig.maxX || 2000))}; --y: ${Number(zone.y || 0) / Math.max(1, Number(mapConfig.maxY || 2000))}; --owner-color: ${zone.ownerColor || ownerColor(zone.ownerId)};"
           title="${zone.name} / \uc794\uc874\ubcd1\ub825 ${garrisonTotal}"
         >
           <span>${zone.level}</span>
@@ -1246,7 +1306,7 @@ function renderZones(zones) {
           type="button"
           class="player-base-node ${Number(player.id) === Number(selectedPlayerId) ? "selected" : ""}"
           data-select-player="${player.id}"
-          style="--x: ${Number(player.base?.x || 50) / 100}; --y: ${Number(player.base?.y || 50) / 100}; --owner-color: ${player.playerColor || ownerColor(player.id)};"
+          style="--x: ${Number(player.base?.x || 0) / Math.max(1, Number(mapConfig.maxX || 2000))}; --y: ${Number(player.base?.y || 0) / Math.max(1, Number(mapConfig.maxY || 2000))}; --owner-color: ${player.playerColor || ownerColor(player.id)};"
           title="${player.username}"
         >
           P
@@ -1257,7 +1317,7 @@ function renderZones(zones) {
       <button
         type="button"
         class="base-node"
-        style="--x: ${Number(currentBase.x || 50) / 100}; --y: ${Number(currentBase.y || 50) / 100};"
+        style="--x: ${Number(currentBase.x || 0) / Math.max(1, Number(mapConfig.maxX || 2000))}; --y: ${Number(currentBase.y || 0) / Math.max(1, Number(mapConfig.maxY || 2000))};"
         title="\ub0b4 \uae30\uc9c0"
       >
         B
@@ -1503,7 +1563,7 @@ async function moveBase() {
       })
     });
 
-    renderBase({ base: data.base, moveFuelPerDistance });
+    renderBase({ base: data.base, moveFuelPerDistance, mapConfig: data.mapConfig });
     renderResources(data.resources);
     await loadZones();
     showTab("map");
@@ -2135,6 +2195,7 @@ function bindEvents() {
   elements.refreshDevUsersButton.addEventListener("click", () => refreshDevUsers().catch(handleAuthError));
   elements.zoomInButton?.addEventListener("click", () => applyMapZoom(mapZoom + 0.1));
   elements.zoomOutButton?.addEventListener("click", () => applyMapZoom(mapZoom - 0.1));
+  elements.uiScaleRange?.addEventListener("input", () => applyUiScale(Number(elements.uiScaleRange.value)));
   elements.toggleDetailButton?.addEventListener("click", () => setDetailPanelVisible(!detailPanelVisible));
   elements.toggleAlertButton?.addEventListener("click", () => setAlertPanelVisible(!alertPanelVisible));
   elements.closeAlertHudButton?.addEventListener("click", () => setAlertPanelVisible(false));
@@ -2163,6 +2224,7 @@ function bindEvents() {
   if (elements.mapZoomLabel) {
     elements.mapZoomLabel.textContent = `${Math.round(mapZoom * 100)}%`;
   }
+  applyUiScale(uiScale);
 
   elements.passwordInput.addEventListener("keydown", (event) => {
     if (event.key === "Enter") login();

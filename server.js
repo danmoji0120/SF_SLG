@@ -74,6 +74,9 @@ const SHIP_TYPES = Object.keys(SHIPS);
 const FLEET_COLUMNS = SHIP_TYPES.join(", ");
 const BASE_PRODUCTION = { metal: 2, fuel: 1 };
 const BASE_MOVE_FUEL_PER_DISTANCE = 120;
+const MAP_MAX_X = 2000;
+const MAP_MAX_Y = 2000;
+const MAP_DISTANCE_UNIT = 20;
 
 const DEFAULT_ZONES = [
   {
@@ -186,10 +189,10 @@ const DEFAULT_ZONES = [
   }
 ];
 
-for (let id = 10; id <= 60; id += 1) {
-  const level = Math.min(5, Math.floor((id - 10) / 11) + 1);
-  const x = 6 + ((id * 17) % 89);
-  const y = 7 + ((id * 29) % 86);
+for (let id = 10; id <= 620; id += 1) {
+  const level = Math.min(5, Math.floor((id - 10) / 122) + 1);
+  const x = 25 + ((id * 73) % (MAP_MAX_X - 50));
+  const y = 25 + ((id * 97) % (MAP_MAX_Y - 50));
   DEFAULT_ZONES.push({
     id,
     name: `\uc12d\ud130 ${id} \uc804\ucd08 \uac70\uc810`,
@@ -543,7 +546,7 @@ async function seedShipyardData() {
 }
 
 function randomBaseCoordinate() {
-  return Math.floor(8 + Math.random() * 84);
+  return Math.floor(40 + Math.random() * (MAP_MAX_X - 80));
 }
 
 async function ensureBase(userId) {
@@ -566,7 +569,8 @@ async function ensureBase(userId) {
 function movementCost(from, to) {
   const dx = Number(from.x) - Number(to.x);
   const dy = Number(from.y) - Number(to.y);
-  return Math.ceil(Math.sqrt(dx * dx + dy * dy) * BASE_MOVE_FUEL_PER_DISTANCE);
+  const normalizedDistance = Math.sqrt(dx * dx + dy * dy) / MAP_DISTANCE_UNIT;
+  return Math.ceil(normalizedDistance * BASE_MOVE_FUEL_PER_DISTANCE);
 }
 
 async function initDb() {
@@ -1142,6 +1146,36 @@ function formatResearchState(research) {
   });
 }
 
+function formatRequirementText(requirement) {
+  return `${requirement.type} Lv.${requirement.level}`;
+}
+
+function buildUnlockSummary(research, hulls, components) {
+  const unlockedHulls = hulls.filter((hull) => isUnlockedByResearch(hullUnlockRequirement(hull.key), research));
+  const unlockedComponents = components.filter((component) => isUnlockedByResearch(componentUnlockRequirement(component), research));
+  const nextHull = hulls
+    .filter((hull) => !isUnlockedByResearch(hullUnlockRequirement(hull.key), research))
+    .map((hull) => ({ name: hull.name, requirement: hullUnlockRequirement(hull.key) }))
+    .sort((a, b) => a.requirement.level - b.requirement.level)[0] || null;
+  const nextComponent = components
+    .filter((component) => !isUnlockedByResearch(componentUnlockRequirement(component), research))
+    .map((component) => ({ name: component.name, requirement: componentUnlockRequirement(component) }))
+    .sort((a, b) => a.requirement.level - b.requirement.level)[0] || null;
+
+  return {
+    hulls: {
+      unlocked: unlockedHulls.length,
+      total: hulls.length,
+      next: nextHull ? `${nextHull.name} (${formatRequirementText(nextHull.requirement)})` : "모든 선체 해금"
+    },
+    components: {
+      unlocked: unlockedComponents.length,
+      total: components.length,
+      next: nextComponent ? `${nextComponent.name} (${formatRequirementText(nextComponent.requirement)})` : "모든 모듈 해금"
+    }
+  };
+}
+
 function parseComponentList(value, fallback) {
   if (Array.isArray(value)) return value.map((id) => Number.parseInt(id, 10)).filter(Number.isInteger);
   if (typeof value === "string" && value.trim()) {
@@ -1521,7 +1555,7 @@ function designFleetSpeed(fleet) {
 function travelTimeSecondsForDesignFleet(from, to, fleet, bonuses) {
   const dx = Number(from.x) - Number(to.x);
   const dy = Number(from.y) - Number(to.y);
-  const distance = Math.sqrt(dx * dx + dy * dy);
+  const distance = Math.sqrt(dx * dx + dy * dy) / MAP_DISTANCE_UNIT;
   const speed = designFleetSpeed(fleet) * Number(bonuses?.movementMultiplier || 1);
   return Math.max(10, Math.ceil((distance / Math.max(0.5, speed)) * 60));
 }
@@ -2354,17 +2388,11 @@ app.get("/shipyard/options", requireAuth, async (req, res) => {
     const research = await getResearch(req.user.id);
     const hulls = await all("SELECT * FROM hulls ORDER BY id");
     const components = await all("SELECT * FROM components ORDER BY category, id");
-    const unlockedHulls = hulls.filter((hull) => {
-      const requirement = hullUnlockRequirement(hull.key);
-      return isUnlockedByResearch(requirement, research);
-    });
-    const unlockedComponents = components.filter((component) => {
-      const requirement = componentUnlockRequirement(component);
-      return isUnlockedByResearch(requirement, research);
-    });
 
     return res.json({
-      hulls: unlockedHulls.map((hull) => ({
+      hulls: hulls.map((hull) => {
+        const requirement = hullUnlockRequirement(hull.key);
+        return ({
         id: hull.id,
         key: hull.key,
         name: hull.name,
@@ -2380,9 +2408,14 @@ app.get("/shipyard/options", requireAuth, async (req, res) => {
           weapon: Number(hull.slot_weapon || 1),
           defense: Number(hull.slot_defense || 1),
           utility: Number(hull.slot_utility || 1)
-        }
-      })),
-      components: unlockedComponents.map((component) => ({
+        },
+        unlocked: isUnlockedByResearch(requirement, research),
+        unlockRequirement: requirement
+      });
+      }),
+      components: components.map((component) => {
+        const requirement = componentUnlockRequirement(component);
+        return ({
         id: component.id,
         key: component.key,
         name: component.name,
@@ -2394,8 +2427,12 @@ app.get("/shipyard/options", requireAuth, async (req, res) => {
         powerCost: component.power_cost,
         metalCost: component.metal_cost,
         fuelCost: component.fuel_cost,
-        techRequirement: component.tech_requirement
-      }))
+        techRequirement: component.tech_requirement,
+        unlocked: isUnlockedByResearch(requirement, research),
+        unlockRequirement: requirement
+      });
+      }),
+      unlockSummary: buildUnlockSummary(research, hulls, components)
     });
   } catch (err) {
     console.error(err);
@@ -2741,7 +2778,8 @@ app.get("/base", requireAuth, async (req, res) => {
     const base = await ensureBase(req.user.id);
     return res.json({
       base,
-      moveFuelPerDistance: BASE_MOVE_FUEL_PER_DISTANCE
+      moveFuelPerDistance: BASE_MOVE_FUEL_PER_DISTANCE,
+      mapConfig: { maxX: MAP_MAX_X, maxY: MAP_MAX_Y, distanceUnit: MAP_DISTANCE_UNIT }
     });
   } catch (err) {
     console.error(err);
@@ -2753,8 +2791,8 @@ app.post("/base/move", requireAuth, async (req, res) => {
   try {
     const x = Math.round(Number(req.body.x));
     const y = Math.round(Number(req.body.y));
-    if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || x > 100 || y < 0 || y > 100) {
-      return res.status(400).json({ error: "\uc774\ub3d9\ud560 \uc88c\ud45c\ub294 0~100 \uc0ac\uc774\uc5ec\uc57c \ud569\ub2c8\ub2e4." });
+    if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || x > MAP_MAX_X || y < 0 || y > MAP_MAX_Y) {
+      return res.status(400).json({ error: `\uc774\ub3d9\ud560 \uc88c\ud45c\ub294 0~${MAP_MAX_X} / 0~${MAP_MAX_Y} \uc0ac\uc774\uc5ec\uc57c \ud569\ub2c8\ub2e4.` });
     }
 
     const base = await ensureBase(req.user.id);
@@ -2780,6 +2818,7 @@ app.post("/base/move", requireAuth, async (req, res) => {
       message: `\uae30\uc9c0\ub97c (${x}, ${y}) \uc88c\ud45c\ub85c \uc774\ub3d9\ud588\uc2b5\ub2c8\ub2e4. \uc5f0\ub8cc ${cost}\uc744 \uc18c\ubaa8\ud588\uc2b5\ub2c8\ub2e4.`,
       base: { userId: req.user.id, x, y },
       cost,
+      mapConfig: { maxX: MAP_MAX_X, maxY: MAP_MAX_Y, distanceUnit: MAP_DISTANCE_UNIT },
       resources: {
         metal: nextState.resources.metal,
         fuel: nextState.resources.fuel,
@@ -2816,7 +2855,11 @@ app.get("/zones", requireAuth, async (req, res) => {
     );
 
     const base = await ensureBase(req.user.id);
-    return res.json({ base, zones: rows.map(formatZone) });
+    return res.json({
+      base,
+      zones: rows.map(formatZone),
+      mapConfig: { maxX: MAP_MAX_X, maxY: MAP_MAX_Y, distanceUnit: MAP_DISTANCE_UNIT }
+    });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ error: "\uc911\ub9bd \uad6c\uc5ed \uc870\ud68c \uc911 \uc624\ub958\uac00 \ubc1c\uc0dd\ud588\uc2b5\ub2c8\ub2e4." });
@@ -2856,9 +2899,11 @@ app.get("/map", requireAuth, async (req, res) => {
     return res.json({
       base,
       zones: rows.map(formatZone),
+      sectorCount: rows.length,
       players,
       activeMissions: await getActiveMissions(req.user.id),
       incomingAlerts: await getIncomingAlerts(req.user.id),
+      mapConfig: { maxX: MAP_MAX_X, maxY: MAP_MAX_Y, distanceUnit: MAP_DISTANCE_UNIT },
       myBaseSpec: {
         fleetPower: Math.floor(designFleetPower(myFleet) * myBonuses.combatMultiplier),
         shipCount: myFleet.reduce((sum, ship) => sum + Number(ship.quantity || 0), 0),
@@ -2901,9 +2946,12 @@ app.get("/research", requireAuth, async (req, res) => {
   try {
     const research = await getResearch(req.user.id);
     const bonuses = await getPlayerBonuses(req.user.id);
+    const hulls = await all("SELECT key, name FROM hulls ORDER BY id");
+    const components = await all("SELECT category, name, power_cost FROM components ORDER BY id");
 
     return res.json({
       research: formatResearchState(research),
+      unlockSummary: buildUnlockSummary(research, hulls, components),
       bonuses: {
         resourceMultiplier: bonuses.resourceMultiplier,
         buildCostMultiplier: bonuses.buildCostMultiplier,
@@ -2949,10 +2997,13 @@ app.post("/research/:type/upgrade", requireAuth, async (req, res) => {
     const nextResearch = await getResearch(req.user.id);
     const nextState = await getUpdatedResources(req.user.id);
     const bonuses = await getPlayerBonuses(req.user.id);
+    const hulls = await all("SELECT key, name FROM hulls ORDER BY id");
+    const components = await all("SELECT category, name, power_cost FROM components ORDER BY id");
 
     return res.json({
       message: `${RESEARCH[type].name} Lv.${nextResearch[type]} \uc5f0\uad6c \uc644\ub8cc.`,
       research: formatResearchState(nextResearch),
+      unlockSummary: buildUnlockSummary(nextResearch, hulls, components),
       resources: {
         metal: nextState.resources.metal,
         fuel: nextState.resources.fuel,

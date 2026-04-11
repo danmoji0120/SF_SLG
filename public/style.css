@@ -2,11 +2,16 @@
   box-sizing: border-box;
 }
 
+:root {
+  --ui-scale: 1;
+}
+
 body {
   margin: 0;
   min-height: 100vh;
   color: #f5f7fb;
   font-family: Arial, Helvetica, sans-serif;
+  font-size: calc(16px * var(--ui-scale));
   background:
     radial-gradient(circle at 20% 10%, rgba(67, 131, 169, 0.35), transparent 30%),
     radial-gradient(circle at 80% 0%, rgba(150, 84, 67, 0.28), transparent 26%),
@@ -560,6 +565,13 @@ body:has(#gamePanel:not(.hidden)) {
   text-align: center;
   font-size: 12px;
   color: #dce8ef;
+}
+
+.map-tools input[type="range"] {
+  width: 110px;
+  min-height: 24px;
+  margin: 0;
+  padding: 0;
 }
 
 .sector-map {
