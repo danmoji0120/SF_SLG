@@ -1039,6 +1039,61 @@ body:has(#gamePanel:not(.hidden)) {
   flex: 0 0 auto;
 }
 
+.fleet-builder {
+  display: grid;
+  gap: 10px;
+}
+
+.fleet-checklist {
+  display: grid;
+  gap: 6px;
+  max-height: 220px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.fleet-check-row {
+  display: grid;
+  grid-template-columns: 20px 1fr 92px;
+  gap: 8px;
+  align-items: center;
+  margin: 0;
+}
+
+.fleet-check-row input[type="number"] {
+  margin: 0;
+  max-width: 92px;
+}
+
+.fleet-selected-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 6px;
+}
+
+.fleet-drag-item {
+  display: grid;
+  grid-template-columns: 18px 1fr auto;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 10px;
+  background: rgba(12, 23, 31, 0.78);
+  border: 1px solid #355066;
+  border-radius: 8px;
+  cursor: grab;
+}
+
+.fleet-drag-item.dragging {
+  opacity: 0.55;
+}
+
+.button-row button.active {
+  background: #0f766e;
+  border-color: #20a397;
+}
+
 .zone-item {
   display: flex;
   align-items: center;

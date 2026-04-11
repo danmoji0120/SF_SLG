@@ -77,6 +77,7 @@ const BASE_MOVE_FUEL_PER_DISTANCE = 120;
 const MAP_MAX_X = 2000;
 const MAP_MAX_Y = 2000;
 const MAP_DISTANCE_UNIT = 20;
+const SPEEDUP_RESOURCE_PER_SECOND = 500;
 
 const DEFAULT_ZONES = [
   {
@@ -88,8 +89,8 @@ const DEFAULT_ZONES = [
     y: 1160,
     metalRate: 9,
     fuelRate: 3,
-    recommendedPower: 140,
-    garrison: { corvette: 8, destroyer: 2, cruiser: 0, battleship: 0, carrier: 0 }
+    recommendedPower: 900,
+    garrison: { corvette: 28, destroyer: 6, cruiser: 1, battleship: 0, carrier: 0 }
   },
   {
     id: 2,
@@ -100,8 +101,8 @@ const DEFAULT_ZONES = [
     y: 620,
     metalRate: 4,
     fuelRate: 10,
-    recommendedPower: 180,
-    garrison: { corvette: 10, destroyer: 3, cruiser: 0, battleship: 0, carrier: 0 }
+    recommendedPower: 1300,
+    garrison: { corvette: 36, destroyer: 8, cruiser: 1, battleship: 0, carrier: 0 }
   },
   {
     id: 3,
@@ -112,8 +113,8 @@ const DEFAULT_ZONES = [
     y: 1280,
     metalRate: 8,
     fuelRate: 8,
-    recommendedPower: 320,
-    garrison: { corvette: 14, destroyer: 5, cruiser: 1, battleship: 0, carrier: 0 }
+    recommendedPower: 4200,
+    garrison: { corvette: 82, destroyer: 28, cruiser: 8, battleship: 1, carrier: 0 }
   },
   {
     id: 4,
@@ -124,8 +125,8 @@ const DEFAULT_ZONES = [
     y: 480,
     metalRate: 12,
     fuelRate: 5,
-    recommendedPower: 420,
-    garrison: { corvette: 18, destroyer: 6, cruiser: 2, battleship: 0, carrier: 0 }
+    recommendedPower: 6500,
+    garrison: { corvette: 104, destroyer: 36, cruiser: 12, battleship: 2, carrier: 0 }
   },
   {
     id: 5,
@@ -136,8 +137,8 @@ const DEFAULT_ZONES = [
     y: 1460,
     metalRate: 6,
     fuelRate: 16,
-    recommendedPower: 650,
-    garrison: { corvette: 22, destroyer: 8, cruiser: 3, battleship: 0, carrier: 0 }
+    recommendedPower: 12000,
+    garrison: { corvette: 160, destroyer: 56, cruiser: 20, battleship: 5, carrier: 1 }
   },
   {
     id: 6,
@@ -148,8 +149,8 @@ const DEFAULT_ZONES = [
     y: 840,
     metalRate: 16,
     fuelRate: 11,
-    recommendedPower: 860,
-    garrison: { corvette: 28, destroyer: 10, cruiser: 4, battleship: 1, carrier: 0 }
+    recommendedPower: 17000,
+    garrison: { corvette: 210, destroyer: 78, cruiser: 30, battleship: 8, carrier: 2 }
   },
   {
     id: 7,
@@ -160,8 +161,8 @@ const DEFAULT_ZONES = [
     y: 360,
     metalRate: 24,
     fuelRate: 14,
-    recommendedPower: 1350,
-    garrison: { corvette: 36, destroyer: 14, cruiser: 6, battleship: 2, carrier: 0 }
+    recommendedPower: 28000,
+    garrison: { corvette: 290, destroyer: 120, cruiser: 48, battleship: 14, carrier: 4 }
   },
   {
     id: 8,
@@ -172,8 +173,8 @@ const DEFAULT_ZONES = [
     y: 1340,
     metalRate: 15,
     fuelRate: 23,
-    recommendedPower: 1650,
-    garrison: { corvette: 42, destroyer: 16, cruiser: 8, battleship: 2, carrier: 1 }
+    recommendedPower: 36000,
+    garrison: { corvette: 350, destroyer: 150, cruiser: 64, battleship: 18, carrier: 5 }
   },
   {
     id: 9,
@@ -184,8 +185,8 @@ const DEFAULT_ZONES = [
     y: 920,
     metalRate: 28,
     fuelRate: 28,
-    recommendedPower: 2400,
-    garrison: { corvette: 54, destroyer: 22, cruiser: 12, battleship: 4, carrier: 2 }
+    recommendedPower: 52000,
+    garrison: { corvette: 430, destroyer: 190, cruiser: 86, battleship: 26, carrier: 8 }
   }
 ];
 
@@ -207,15 +208,15 @@ for (let id = 10; id <= 620; id += 1) {
     level,
     x,
     y,
-    metalRate: 3 + level * 4 + Math.floor(spreadA * (5 + level * 4)),
-    fuelRate: 2 + level * 4 + Math.floor(spreadB * (5 + level * 4)),
-    recommendedPower: 120 + level * 320 + Math.floor(spreadA * 900) + Math.floor(spreadB * 700),
+    metalRate: 6 + level * 8 + Math.floor(spreadA * (10 + level * 8)),
+    fuelRate: 5 + level * 7 + Math.floor(spreadB * (10 + level * 8)),
+    recommendedPower: 1000 + level * 8200 + Math.floor(spreadA * 6200) + Math.floor(spreadB * 5400),
     garrison: {
-      corvette: 6 + level * 6 + Math.floor(spreadA * 8),
-      destroyer: 2 + level * 3 + Math.floor(spreadB * 6),
-      cruiser: Math.max(0, level - 1) + Math.floor(spreadA * (level >= 3 ? 3 : 2)),
-      battleship: level >= 4 ? 1 + Math.floor(spreadB * 3) : 0,
-      carrier: level >= 5 ? Math.floor(spreadA * 3) : 0
+      corvette: 32 + level * 55 + Math.floor(spreadA * (50 + level * 40)),
+      destroyer: 10 + level * 24 + Math.floor(spreadB * (18 + level * 20)),
+      cruiser: Math.max(2, level * 6) + Math.floor(spreadA * (6 + level * 8)),
+      battleship: level >= 3 ? 2 + level * 3 + Math.floor(spreadB * (3 + level * 3)) : 0,
+      carrier: level >= 4 ? 1 + Math.floor(spreadA * (2 + level * 2)) : 0
     }
   });
 }
@@ -247,6 +248,54 @@ const RESEARCH = {
     metalGrowth: 1.75,
     fuelGrowth: 1.65,
     effectPerLevel: 0.07
+  }
+};
+
+const CITY_BUILDINGS = {
+  shipyard: {
+    key: "shipyard",
+    name: "조선소",
+    description: "함선 제작 시간 단축, 제작 라인 증가",
+    baseMetal: 1200,
+    baseFuel: 700,
+    metalGrowth: 1.65,
+    fuelGrowth: 1.58
+  },
+  government: {
+    key: "government",
+    name: "중앙 정부",
+    description: "기지 생산량, 식민지 상한 증가",
+    baseMetal: 900,
+    baseFuel: 500,
+    metalGrowth: 1.58,
+    fuelGrowth: 1.52
+  },
+  housing: {
+    key: "housing",
+    name: "주거 지역",
+    description: "인구 상한(함선 보유 제한) 증가",
+    baseMetal: 700,
+    baseFuel: 420,
+    metalGrowth: 1.54,
+    fuelGrowth: 1.48
+  },
+  research_lab: {
+    key: "research_lab",
+    name: "연구소",
+    description: "연구 레벨 상한 증가",
+    baseMetal: 1050,
+    baseFuel: 780,
+    metalGrowth: 1.6,
+    fuelGrowth: 1.55
+  },
+  tactical_center: {
+    key: "tactical_center",
+    name: "중앙 전술소",
+    description: "전투력/이동 속도, 함대 슬롯 강화",
+    baseMetal: 1400,
+    baseFuel: 980,
+    metalGrowth: 1.66,
+    fuelGrowth: 1.6
   }
 };
 
@@ -294,6 +343,18 @@ const DEFAULT_HULLS = [
     metalCost: 900,
     fuelCost: 360,
     slots: { engine: 1, weapon: 3, defense: 2, utility: 2 }
+  },
+  {
+    key: "monitor",
+    name: "\ubaa8\ub2c8\ud130 \uc120\uccb4",
+    classType: "monitor",
+    baseHp: 520,
+    baseSpeed: 3,
+    powerLimit: 360,
+    baseBuildTime: 840,
+    metalCost: 1750,
+    fuelCost: 620,
+    slots: { engine: 1, weapon: 2, defense: 6, utility: 2 }
   },
   {
     key: "battleship",
@@ -386,7 +447,51 @@ const DEFAULT_COMPONENTS = [
   { key: "fuel_optimizer", name: "\uc5f0\ub8cc \ucd5c\uc801\ud654 \ubaa8\ub4c8", category: "utility", hp: 20, attack: 0, defense: 8, speed: 2, power: 18, metal: 180, fuel: 120 },
   { key: "ammo_fabricator", name: "\ud0c4\uc57d \uc81c\uc870 \ubaa8\ub4c8", category: "utility", hp: 50, attack: 26, defense: 4, speed: -1, power: 40, metal: 420, fuel: 260 },
   { key: "battle_computer", name: "\ubc30\ud2c0 \ucef4\ud4e8\ud130", category: "utility", hp: 75, attack: 34, defense: 10, speed: 0, power: 52, metal: 560, fuel: 420, powerBonus: 0 },
-  { key: "reactor_boost", name: "\uc6d0\uc790\ub85c \ubd80\uc2a4\ud2b8", category: "utility", hp: 0, attack: 0, defense: 0, speed: -1, power: 16, metal: 700, fuel: 520, powerBonus: 110 }
+  { key: "reactor_boost", name: "\uc6d0\uc790\ub85c \ubd80\uc2a4\ud2b8", category: "utility", hp: 0, attack: 0, defense: 0, speed: -1, power: 16, metal: 700, fuel: 520, powerBonus: 110 },
+
+  { key: "micro_burst_drive", name: "\ub9c8\uc774\ud06c\ub85c \ubc84\uc2a4\ud2b8 \ub4dc\ub77c\uc774\ube0c", category: "engine", hp: 0, attack: 4, defense: -3, speed: 6, power: 42, metal: 360, fuel: 340 },
+  { key: "armored_impulse_engine", name: "\uc7a5\uac11 \uc784\ud384\uc2a4 \uc5d4\uc9c4", category: "engine", hp: 120, attack: 0, defense: 24, speed: -2, power: 68, metal: 760, fuel: 420 },
+  { key: "siege_drive", name: "\uc2dc\uc988 \ub4dc\ub77c\uc774\ube0c", category: "engine", hp: 220, attack: 0, defense: 30, speed: -4, power: 88, metal: 980, fuel: 560 },
+  { key: "escort_afterburner", name: "\uc5d0\uc2a4\ucf54\ud2b8 \uc560\ud504\ud130\ubc84\ub108", category: "engine", hp: 20, attack: 8, defense: -2, speed: 4, power: 30, metal: 280, fuel: 260 },
+  { key: "silent_cruise_engine", name: "\uc0ac\uc77c\ub7f0\ud2b8 \ud06c\ub8e8\uc988 \uc5d4\uc9c4", category: "engine", hp: 40, attack: -4, defense: 10, speed: 2, power: 24, metal: 230, fuel: 170 },
+  { key: "overclocked_ion_drive", name: "\uc624\ubc84\ud074\ub7ed \uc774\uc628 \ub4dc\ub77c\uc774\ube0c", category: "engine", hp: -20, attack: 6, defense: -4, speed: 7, power: 48, metal: 420, fuel: 410 },
+  { key: "ballast_drive", name: "\ubc38\ub7ec\uc2a4\ud2b8 \ub4dc\ub77c\uc774\ube0c", category: "engine", hp: 260, attack: 0, defense: 34, speed: -5, power: 96, metal: 1250, fuel: 680 },
+  { key: "long_range_cruise_core", name: "\uc7a5\uac70\ub9ac \uc21c\ud56d \ucf54\uc5b4", category: "engine", hp: 60, attack: 0, defense: 8, speed: 3, power: 36, metal: 340, fuel: 280 },
+  { key: "interceptor_vector_pack", name: "\uc694\uaca9 \ubca1\ud130 \ud329", category: "engine", hp: 10, attack: 10, defense: -1, speed: 5, power: 44, metal: 390, fuel: 360 },
+  { key: "bastion_propulsion", name: "\ubc14\uc2a4\ud2f0\uc628 \ucd94\uc9c4\uae30", category: "engine", hp: 180, attack: 0, defense: 28, speed: -3, power: 80, metal: 920, fuel: 540 },
+
+  { key: "anti_armor_cannon", name: "\ub300\uc7a5\uac11 \uce90\ub17c", category: "weapon", hp: 0, attack: 92, defense: 0, speed: -3, power: 68, metal: 640, fuel: 340 },
+  { key: "swarm_rocket_pod", name: "\uc2a4\uc6dc \ub85c\ucf13 \ud3ec\ub4dc", category: "weapon", hp: 0, attack: 52, defense: -2, speed: 1, power: 34, metal: 300, fuel: 220 },
+  { key: "interceptor_laser_net", name: "\uc694\uaca9 \ub808\uc774\uc800 \ub124\ud2b8", category: "weapon", hp: 0, attack: 36, defense: 10, speed: 0, power: 28, metal: 260, fuel: 130 },
+  { key: "breacher_rams", name: "\ube0c\ub9ac\ucc98 \ub7a8", category: "weapon", hp: 80, attack: 44, defense: 6, speed: -2, power: 36, metal: 340, fuel: 120 },
+  { key: "ion_spear", name: "\uc774\uc628 \uc2a4\ud53c\uc5b4", category: "weapon", hp: 0, attack: 74, defense: 0, speed: -1, power: 50, metal: 430, fuel: 290 },
+  { key: "suppression_mortar", name: "\uc81c\uc555 \ubaa8\ud0c0", category: "weapon", hp: 0, attack: 118, defense: 0, speed: -4, power: 92, metal: 980, fuel: 620 },
+  { key: "rail_burst_array", name: "\ub808\uc77c \ubc84\uc2a4\ud2b8 \ubc30\uc5f4", category: "weapon", hp: 0, attack: 62, defense: 2, speed: -1, power: 42, metal: 380, fuel: 210 },
+  { key: "carrier_strike_rack", name: "\uce90\ub9ac\uc5b4 \uacf5\uc2b5 \ub799", category: "weapon", hp: 20, attack: 88, defense: 0, speed: -2, power: 66, metal: 620, fuel: 440 },
+  { key: "guardian_turret_ring", name: "\uac00\ub514\uc5b8 \ud130\ub81b \ub9c1", category: "weapon", hp: 30, attack: 48, defense: 12, speed: -1, power: 40, metal: 360, fuel: 200 },
+  { key: "volatile_plasma_silo", name: "\ud718\ubc1c\uc131 \ud50c\ub77c\uc988\ub9c8 \uc0ac\uc77c\ub85c", category: "weapon", hp: -40, attack: 142, defense: -6, speed: -3, power: 104, metal: 1200, fuel: 840 },
+
+  { key: "kinetic_mesh_armor", name: "\ud0a4\ub124\ud2f1 \uba54\uc26c \uc544\uba38", category: "defense", hp: 170, attack: 0, defense: 24, speed: -1, power: 40, metal: 410, fuel: 180 },
+  { key: "fortified_keel", name: "\ud3ec\ud2f0\ud30c\uc774\ub4dc \ud0ac", category: "defense", hp: 290, attack: 0, defense: 32, speed: -2, power: 64, metal: 690, fuel: 280 },
+  { key: "countermeasure_shell", name: "\uce74\uc6b4\ud130\uba54\uc800 \uc178", category: "defense", hp: 90, attack: 8, defense: 16, speed: 1, power: 28, metal: 260, fuel: 170 },
+  { key: "polarized_armor", name: "\ud3f4\ub77c\ub77c\uc774\uc988 \uc544\uba38", category: "defense", hp: 140, attack: 0, defense: 28, speed: 0, power: 38, metal: 330, fuel: 240 },
+  { key: "shock_absorber_layer", name: "\ucda9\uaca9 \ud761\uc218 \ub808\uc774\uc5b4", category: "defense", hp: 220, attack: 0, defense: 18, speed: 0, power: 36, metal: 300, fuel: 210 },
+  { key: "guardian_bulkhead", name: "\uac00\ub514\uc5b8 \ubcbd\uccb4", category: "defense", hp: 360, attack: 0, defense: 42, speed: -3, power: 90, metal: 1080, fuel: 520 },
+  { key: "hardened_radiator_shell", name: "\uac15\ud654 \ub77c\ub514\uc5d0\uc774\ud130 \uc178", category: "defense", hp: 130, attack: 0, defense: 22, speed: 1, power: 34, metal: 320, fuel: 200 },
+  { key: "auxiliary_shield_bank", name: "\ubcf4\uc870 \uc2e4\ub4dc \ubc45\ud06c", category: "defense", hp: 250, attack: 0, defense: 20, speed: -1, power: 48, metal: 470, fuel: 360 },
+  { key: "siege_fortress_plating", name: "\uc2dc\uc988 \ud3ec\ud2b8\ub9ac\uc2a4 \ud50c\ub808\uc774\ud305", category: "defense", hp: 520, attack: 0, defense: 60, speed: -5, power: 150, metal: 2350, fuel: 1260 },
+  { key: "mirror_field_barrier", name: "\ubbf8\ub7ec \ud544\ub4dc \ubc14\ub9ac\uc5b4", category: "defense", hp: 160, attack: 0, defense: 26, speed: 1, power: 44, metal: 450, fuel: 320 },
+
+  { key: "reactor_cooling_suite", name: "\ub9ac\uc561\ud130 \ucee8\ub9c1 \uc218\ud2b8", category: "utility", hp: 40, attack: 0, defense: 8, speed: 0, power: 18, metal: 200, fuel: 150, powerBonus: 26 },
+  { key: "siege_targeting_ai", name: "\uc2dc\uc988 \ud0c0\uac9f\ud305 AI", category: "utility", hp: 0, attack: 52, defense: -4, speed: -1, power: 58, metal: 640, fuel: 440 },
+  { key: "combat_medbay", name: "\uc804\ud22c \uba54\ub4dc\ubca0\uc774", category: "utility", hp: 160, attack: 0, defense: 8, speed: 0, power: 42, metal: 500, fuel: 280 },
+  { key: "deception_field", name: "\uae30\ub9cc \ud544\ub4dc", category: "utility", hp: 30, attack: 10, defense: 12, speed: 2, power: 34, metal: 340, fuel: 260 },
+  { key: "drone_control_spine", name: "\ub4dc\ub860 \uc81c\uc5b4 \uc2a4\ud30c\uc778", category: "utility", hp: 90, attack: 24, defense: 6, speed: -1, power: 46, metal: 520, fuel: 320 },
+  { key: "fuel_refinery_pod", name: "\uc5f0\ub8cc \uc815\uc81c \ud3ec\ub4dc", category: "utility", hp: 35, attack: 0, defense: 6, speed: 1, power: 16, metal: 190, fuel: 110 },
+  { key: "auxiliary_reactor_node", name: "\ubcf4\uc870 \ub9ac\uc561\ud130 \ub178\ub4dc", category: "utility", hp: 0, attack: 0, defense: 2, speed: -1, power: 24, metal: 520, fuel: 360, powerBonus: 70 },
+  { key: "command_broadcast_hub", name: "\uc9c0\ud718 \ube0c\ub85c\ub4dc\uce90\uc2a4\ud2b8 \ud5c8\ube0c", category: "utility", hp: 70, attack: 20, defense: 12, speed: 0, power: 40, metal: 410, fuel: 280 },
+  { key: "stability_gyro_array", name: "\uc548\uc815\ud654 \uc790\uc774\ub85c \ubc30\uc5f4", category: "utility", hp: 50, attack: 0, defense: 18, speed: 1, power: 30, metal: 300, fuel: 230 },
+  { key: "overheat_converter", name: "\uc624\ubc84\ud788\ud2b8 \ucee8\ubc84\ud130", category: "utility", hp: -30, attack: 30, defense: -5, speed: 2, power: 28, metal: 260, fuel: 220, powerBonus: 30 }
 ];
 
 function run(sql, params = []) {
@@ -844,6 +949,16 @@ async function initDb() {
       FOREIGN KEY (user_id) REFERENCES users(id)
     )
   `);
+  await run(`
+    CREATE TABLE IF NOT EXISTS speedup_usage (
+      user_id INTEGER NOT NULL,
+      category TEXT NOT NULL,
+      streak INTEGER NOT NULL DEFAULT 0,
+      last_used_at INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (user_id, category),
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    )
+  `);
 
   await run(`
     CREATE TABLE IF NOT EXISTS incoming_alerts (
@@ -860,6 +975,8 @@ async function initDb() {
       FOREIGN KEY (target_user_id) REFERENCES users(id)
     )
   `);
+  await ensureColumn("incoming_alerts", "target_kind", "TEXT NOT NULL DEFAULT 'base'");
+  await ensureColumn("incoming_alerts", "target_name", "TEXT NOT NULL DEFAULT ''");
 
   await run(`
     CREATE TABLE IF NOT EXISTS trade_logs (
@@ -871,6 +988,52 @@ async function initDb() {
       created_at INTEGER NOT NULL,
       FOREIGN KEY (from_user_id) REFERENCES users(id),
       FOREIGN KEY (to_user_id) REFERENCES users(id)
+    )
+  `);
+  await run(`
+    CREATE TABLE IF NOT EXISTS ship_trade_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      from_user_id INTEGER NOT NULL,
+      to_user_id INTEGER NOT NULL,
+      design_id INTEGER NOT NULL,
+      design_name TEXT NOT NULL,
+      quantity INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      FOREIGN KEY (from_user_id) REFERENCES users(id),
+      FOREIGN KEY (to_user_id) REFERENCES users(id)
+    )
+  `);
+  await run(`
+    CREATE TABLE IF NOT EXISTS city_buildings (
+      user_id INTEGER PRIMARY KEY,
+      shipyard_level INTEGER NOT NULL DEFAULT 1,
+      government_level INTEGER NOT NULL DEFAULT 1,
+      housing_level INTEGER NOT NULL DEFAULT 1,
+      research_lab_level INTEGER NOT NULL DEFAULT 1,
+      tactical_center_level INTEGER NOT NULL DEFAULT 1,
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    )
+  `);
+  await run(`
+    CREATE TABLE IF NOT EXISTS fleet_groups (
+      user_id INTEGER NOT NULL,
+      slot_index INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      admiral_id INTEGER,
+      ship_plan_json TEXT NOT NULL DEFAULT '[]',
+      PRIMARY KEY (user_id, slot_index),
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    )
+  `);
+  await run(`
+    CREATE TABLE IF NOT EXISTS zone_garrisons (
+      user_id INTEGER NOT NULL,
+      zone_id INTEGER NOT NULL,
+      ship_plan_json TEXT NOT NULL DEFAULT '[]',
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (user_id, zone_id),
+      FOREIGN KEY (user_id) REFERENCES users(id),
+      FOREIGN KEY (zone_id) REFERENCES neutral_zones(id)
     )
   `);
 
@@ -888,6 +1051,9 @@ async function initDb() {
   await ensureColumn("neutral_zones", "map_x", "INTEGER NOT NULL DEFAULT 50");
   await ensureColumn("neutral_zones", "map_y", "INTEGER NOT NULL DEFAULT 50");
   await ensureColumn("neutral_zones", "recommended_power", "INTEGER NOT NULL DEFAULT 100");
+  await ensureColumn("missions", "attacker_fleet_json", "TEXT NOT NULL DEFAULT '[]'");
+  await ensureColumn("missions", "attacker_fleet_slot", "INTEGER NOT NULL DEFAULT 1");
+  await ensureColumn("missions", "attacker_admiral_id", "INTEGER");
   await seedNeutralZones();
   await normalizeZoneOwnership();
   await seedShipyardData();
@@ -897,6 +1063,11 @@ async function initDb() {
     await ensureBase(user.id);
     await ensureStarterDesign(user.id);
     await run("INSERT OR IGNORE INTO user_settings (user_id, admiral_policy) VALUES (?, 'capture')", [user.id]);
+    await run(
+      "INSERT OR IGNORE INTO city_buildings (user_id, shipyard_level, government_level, housing_level, research_lab_level, tactical_center_level) VALUES (?, 1, 1, 1, 1, 1)",
+      [user.id]
+    );
+    await ensureFleetGroups(user.id);
   }
 }
 
@@ -977,6 +1148,7 @@ function hullUnlockRequirement(hullKey) {
     corvette: { type: "resource", level: 0 },
     destroyer: { type: "resource", level: 2 },
     cruiser: { type: "resource", level: 3 },
+    monitor: { type: "logistics", level: 3 },
     battleship: { type: "logistics", level: 4 },
     carrier: { type: "tactics", level: 4 },
     dreadnought: { type: "resource", level: 6 },
@@ -1035,12 +1207,298 @@ async function getIncomingAlerts(userId) {
     missionId: row.mission_id,
     attackerUserId: row.attacker_user_id,
     attackerUsername: row.attacker_username,
+    targetKind: String(row.target_kind || "base"),
+    targetName: String(row.target_name || ""),
     attackPower: Number(row.attack_power || 0),
     shipCount: Number(row.ship_count || 0),
     arriveAt: Number(row.arrive_at || 0),
     remainingSeconds: Math.max(0, Math.ceil((Number(row.arrive_at || 0) - Date.now()) / 1000)),
     createdAt: Number(row.created_at || 0)
   }));
+}
+
+async function getSpeedupState(userId, category) {
+  const key = String(category || "").trim().toLowerCase();
+  let row = await get(
+    "SELECT streak, last_used_at FROM speedup_usage WHERE user_id = ? AND category = ?",
+    [userId, key]
+  );
+  if (!row) {
+    await run(
+      "INSERT INTO speedup_usage (user_id, category, streak, last_used_at) VALUES (?, ?, 0, 0)",
+      [userId, key]
+    );
+    row = { streak: 0, last_used_at: 0 };
+  }
+  return {
+    streak: Math.max(0, Number(row.streak || 0)),
+    lastUsedAt: Math.max(0, Number(row.last_used_at || 0))
+  };
+}
+
+function speedupPenaltyMultiplier(streak) {
+  const s = Math.max(0, Number(streak || 0));
+  if (s >= 15) return 5.5;
+  if (s >= 12) return 4.2;
+  if (s >= 9) return 3.3;
+  if (s >= 6) return 2.4;
+  if (s >= 3) return 1.7;
+  return 1.0;
+}
+
+async function consumeSpeedup(userId, category, amount) {
+  const state = await getSpeedupState(userId, category);
+  const now = Date.now();
+  const resetWindowMs = 30 * 60 * 1000;
+  const activeStreak = now - state.lastUsedAt > resetWindowMs ? 0 : state.streak;
+  const multiplier = speedupPenaltyMultiplier(activeStreak);
+  const resourcePerSecond = Math.max(1, Math.ceil(SPEEDUP_RESOURCE_PER_SECOND * multiplier));
+  const reducedSeconds = Math.floor(Number(amount || 0) / resourcePerSecond);
+  if (reducedSeconds < 1) {
+    return {
+      ok: false,
+      reducedSeconds: 0,
+      streak: activeStreak,
+      nextStreak: activeStreak,
+      multiplier,
+      resourcePerSecond
+    };
+  }
+  const nextStreak = Math.min(99, activeStreak + 1);
+  await run(
+    "UPDATE speedup_usage SET streak = ?, last_used_at = ? WHERE user_id = ? AND category = ?",
+    [nextStreak, now, userId, String(category || "").trim().toLowerCase()]
+  );
+  return {
+    ok: true,
+    reducedSeconds,
+    streak: activeStreak,
+    nextStreak,
+    multiplier,
+    resourcePerSecond
+  };
+}
+
+function cityUpgradeCost(buildingKey, level) {
+  const building = CITY_BUILDINGS[buildingKey];
+  return {
+    metal: Math.floor(building.baseMetal * Math.pow(building.metalGrowth, Math.max(0, level - 1))),
+    fuel: Math.floor(building.baseFuel * Math.pow(building.fuelGrowth, Math.max(0, level - 1)))
+  };
+}
+
+async function getCityState(userId) {
+  let row = await get(
+    "SELECT shipyard_level, government_level, housing_level, research_lab_level, tactical_center_level FROM city_buildings WHERE user_id = ?",
+    [userId]
+  );
+  if (!row) {
+    await run(
+      "INSERT INTO city_buildings (user_id, shipyard_level, government_level, housing_level, research_lab_level, tactical_center_level) VALUES (?, 1, 1, 1, 1, 1)",
+      [userId]
+    );
+    row = {
+      shipyard_level: 1,
+      government_level: 1,
+      housing_level: 1,
+      research_lab_level: 1,
+      tactical_center_level: 1
+    };
+  }
+
+  const levels = {
+    shipyard: Math.max(1, Number(row.shipyard_level || 1)),
+    government: Math.max(1, Number(row.government_level || 1)),
+    housing: Math.max(1, Number(row.housing_level || 1)),
+    research_lab: Math.max(1, Number(row.research_lab_level || 1)),
+    tactical_center: Math.max(1, Number(row.tactical_center_level || 1))
+  };
+  const bonuses = {
+    baseMetalFlat: levels.government * 3 + Math.floor(levels.housing * 0.8),
+    baseFuelFlat: levels.government * 2 + Math.floor(levels.research_lab * 0.6),
+    colonyCap: 2 + levels.government * 2,
+    researchCap: 2 + levels.research_lab * 2,
+    populationCap: 40 + levels.housing * 24,
+    buildLines: 1 + Math.floor((levels.shipyard - 1) / 2),
+    buildTimeMultiplier: Math.max(0.2, 1 - levels.shipyard * 0.1),
+    buildCostMultiplier: Math.max(0.45, 1 - levels.shipyard * 0.02),
+    combatBonus: levels.tactical_center * 0.08,
+    movementBonus: levels.tactical_center * 0.03,
+    fleetSlotLimit: Math.min(5, 3 + Math.floor((levels.tactical_center - 1) / 2))
+  };
+  const buildingList = Object.values(CITY_BUILDINGS).map((item) => {
+    const level = levels[item.key];
+    return {
+      key: item.key,
+      name: item.name,
+      description: item.description,
+      level,
+      nextCost: cityUpgradeCost(item.key, level + 1)
+    };
+  });
+
+  return { levels, bonuses, buildings: buildingList };
+}
+
+async function ensureFleetGroups(userId) {
+  const defaults = [1, 2, 3, 4, 5].map((slot) => ({ slot, name: `함대 ${slot}` }));
+  for (const item of defaults) {
+    await run(
+      "INSERT OR IGNORE INTO fleet_groups (user_id, slot_index, name, admiral_id, ship_plan_json) VALUES (?, ?, ?, NULL, '[]')",
+      [userId, item.slot, item.name]
+    );
+  }
+}
+
+function normalizeShipPlan(plan) {
+  if (!Array.isArray(plan)) return [];
+  const normalized = [];
+  const used = new Set();
+  for (const raw of plan) {
+    const designId = Number.parseInt(raw?.designId, 10);
+    const quantity = Math.max(0, Number.parseInt(raw?.quantity, 10) || 0);
+    if (!Number.isInteger(designId) || quantity <= 0 || used.has(designId)) continue;
+    used.add(designId);
+    normalized.push({ designId, quantity });
+  }
+  return normalized;
+}
+
+async function getFleetGroups(userId) {
+  await ensureFleetGroups(userId);
+  const rows = await all(
+    `
+      SELECT fg.slot_index, fg.name, fg.admiral_id, fg.ship_plan_json, a.name AS admiral_name, a.rarity AS admiral_rarity
+      FROM fleet_groups fg
+      LEFT JOIN admirals a ON a.id = fg.admiral_id AND a.user_id = fg.user_id
+      WHERE fg.user_id = ?
+      ORDER BY fg.slot_index ASC
+    `,
+    [userId]
+  );
+  return rows.map((row) => {
+    let plan = [];
+    try {
+      plan = normalizeShipPlan(JSON.parse(row.ship_plan_json || "[]"));
+    } catch (err) {
+      plan = [];
+    }
+    return {
+      slot: Number(row.slot_index || 0),
+      name: String(row.name || ""),
+      admiralId: row.admiral_id ? Number(row.admiral_id) : null,
+      admiralName: row.admiral_name || null,
+      admiralRarity: row.admiral_rarity || null,
+      ships: plan
+    };
+  });
+}
+
+async function getLaunchFleetFromSlot(userId, slot) {
+  const slotNumber = Number.parseInt(slot, 10);
+  if (!Number.isInteger(slotNumber) || slotNumber < 1) {
+    return { slot: 1, fleet: [], admiral: null };
+  }
+  await ensureFleetGroups(userId);
+  const row = await get(
+    `
+      SELECT fg.slot_index, fg.admiral_id, fg.ship_plan_json,
+             a.id AS aid, a.name AS aname, a.rarity AS ararity,
+             a.combat_bonus AS acombat, a.resource_bonus AS aresource, a.cost_bonus AS acost
+      FROM fleet_groups fg
+      LEFT JOIN admirals a ON a.id = fg.admiral_id AND a.user_id = fg.user_id AND a.status = 'active'
+      WHERE fg.user_id = ? AND fg.slot_index = ?
+    `,
+    [userId, slotNumber]
+  );
+  if (!row) return { slot: slotNumber, fleet: [], admiral: null };
+
+  let plan = [];
+  try {
+    plan = normalizeShipPlan(JSON.parse(row.ship_plan_json || "[]"));
+  } catch (err) {
+    plan = [];
+  }
+  const owned = await all(
+    `
+      SELECT os.design_id, os.quantity, d.name, d.final_hp, d.final_attack, d.final_defense, d.final_speed
+      FROM owned_ships os
+      JOIN ship_designs d ON d.id = os.design_id
+      WHERE os.user_id = ? AND os.quantity > 0
+    `,
+    [userId]
+  );
+  const ownedByDesign = new Map();
+  for (const ship of owned) {
+    ownedByDesign.set(Number(ship.design_id), {
+      quantity: Number(ship.quantity || 0),
+      name: ship.name,
+      finalHp: Number(ship.final_hp || 0),
+      finalAttack: Number(ship.final_attack || 0),
+      finalDefense: Number(ship.final_defense || 0),
+      finalSpeed: Number(ship.final_speed || 0)
+    });
+  }
+  const fleet = [];
+  for (const item of plan) {
+    const ownedShip = ownedByDesign.get(item.designId);
+    if (!ownedShip) continue;
+    const useCount = Math.min(ownedShip.quantity, Number(item.quantity || 0));
+    if (useCount <= 0) continue;
+    fleet.push({
+      designId: item.designId,
+      name: ownedShip.name,
+      quantity: useCount,
+      finalHp: ownedShip.finalHp,
+      finalAttack: ownedShip.finalAttack,
+      finalDefense: ownedShip.finalDefense,
+      finalSpeed: ownedShip.finalSpeed
+    });
+  }
+
+  const admiral = row.aid
+    ? {
+        id: Number(row.aid),
+        name: row.aname,
+        rarity: row.ararity,
+        combatBonus: Number(row.acombat || 0),
+        resourceBonus: Number(row.aresource || 0),
+        costBonus: Number(row.acost || 0)
+      }
+    : null;
+
+  return { slot: slotNumber, fleet, admiral };
+}
+
+async function getTotalShipCount(userId) {
+  const owned = await get("SELECT COALESCE(SUM(quantity), 0) AS cnt FROM owned_ships WHERE user_id = ?", [userId]);
+  const queued = await get("SELECT COALESCE(SUM(quantity), 0) AS cnt FROM production_queue WHERE user_id = ? AND status = 'building'", [userId]);
+  return Number(owned?.cnt || 0) + Number(queued?.cnt || 0);
+}
+
+async function applyFleetLosses(userId, startFleet, remainingFleet) {
+  const startMap = new Map();
+  for (const ship of Array.isArray(startFleet) ? startFleet : []) {
+    const key = Number.parseInt(ship.designId, 10);
+    if (!Number.isInteger(key)) continue;
+    startMap.set(key, Number(ship.quantity || 0));
+  }
+  const remainMap = new Map();
+  for (const ship of Array.isArray(remainingFleet) ? remainingFleet : []) {
+    const key = Number.parseInt(ship.designId, 10);
+    if (!Number.isInteger(key)) continue;
+    remainMap.set(key, Number(ship.quantity || 0));
+  }
+
+  for (const [designId, startQty] of startMap.entries()) {
+    const remainQty = Math.max(0, Number(remainMap.get(designId) || 0));
+    const loss = Math.max(0, startQty - remainQty);
+    if (loss <= 0) continue;
+    await run(
+      "UPDATE owned_ships SET quantity = CASE WHEN quantity > ? THEN quantity - ? ELSE 0 END WHERE user_id = ? AND design_id = ?",
+      [loss, loss, userId, designId]
+    );
+  }
 }
 
 async function getProductionRates(userId) {
@@ -1057,13 +1515,16 @@ async function getProductionRates(userId) {
   );
 
   const playerBonuses = await getPlayerBonuses(userId);
-  const rawMetal = BASE_PRODUCTION.metal + Number(bonus?.metal || 0);
-  const rawFuel = BASE_PRODUCTION.fuel + Number(bonus?.fuel || 0);
+  const city = playerBonuses.city?.bonuses || {};
+  const baseMetal = BASE_PRODUCTION.metal + Number(city.baseMetalFlat || 0);
+  const baseFuel = BASE_PRODUCTION.fuel + Number(city.baseFuelFlat || 0);
+  const rawMetal = baseMetal + Number(bonus?.metal || 0);
+  const rawFuel = baseFuel + Number(bonus?.fuel || 0);
 
   return {
     metal: Math.floor(rawMetal * playerBonuses.resourceMultiplier * 100) / 100,
     fuel: Math.floor(rawFuel * playerBonuses.resourceMultiplier * 100) / 100,
-    base: BASE_PRODUCTION,
+    base: { metal: baseMetal, fuel: baseFuel },
     zones: {
       metal: Number(bonus?.metal || 0),
       fuel: Number(bonus?.fuel || 0)
@@ -1138,18 +1599,31 @@ async function getPlayerBonuses(userId) {
   const research = await getResearch(userId);
   const admiral = await getAssignedAdmiral(userId);
   const commander = await getCommanderProgress(userId);
+  const city = await getCityState(userId);
   const commanderResource = commander.level * 0.03;
   const commanderCost = commander.level * 0.015;
   const commanderCombat = commander.level * 0.04;
   const commanderMove = commander.level * 0.03;
-  const resourceBonus = research.resource * RESEARCH.resource.effectPerLevel + Number(admiral?.resourceBonus || 0) + commanderResource;
-  const costBonus = research.logistics * RESEARCH.logistics.effectPerLevel + Number(admiral?.costBonus || 0) + commanderCost;
-  const combatBonus = research.tactics * RESEARCH.tactics.effectPerLevel + Number(admiral?.combatBonus || 0) + commanderCombat;
+  const resourceBonus =
+    research.resource * RESEARCH.resource.effectPerLevel +
+    Number(admiral?.resourceBonus || 0) +
+    commanderResource;
+  const costBonus =
+    research.logistics * RESEARCH.logistics.effectPerLevel +
+    Number(admiral?.costBonus || 0) +
+    commanderCost +
+    Number(city.bonuses.buildCostMultiplier ? 1 - city.bonuses.buildCostMultiplier : 0);
+  const combatBonus =
+    research.tactics * RESEARCH.tactics.effectPerLevel +
+    Number(admiral?.combatBonus || 0) +
+    commanderCombat +
+    Number(city.bonuses.combatBonus || 0);
   const movementBonus =
     research.logistics * 0.05 +
     Number(admiral?.combatBonus || 0) * 0.5 +
     Number(admiral?.resourceBonus || 0) * 0.25 +
-    commanderMove;
+    commanderMove +
+    Number(city.bonuses.movementBonus || 0);
 
   return {
     resourceMultiplier: 1 + resourceBonus,
@@ -1158,7 +1632,8 @@ async function getPlayerBonuses(userId) {
     movementMultiplier: 1 + movementBonus,
     commander,
     research,
-    admiral: admiral || null
+    admiral: admiral || null,
+    city
   };
 }
 
@@ -1215,11 +1690,11 @@ function buildUnlockSummary(research, hulls, components) {
 }
 
 function parseComponentList(value, fallback) {
-  if (Array.isArray(value)) return value.map((id) => Number.parseInt(id, 10)).filter(Number.isInteger);
+  if (Array.isArray(value)) return value.map((id) => Number.parseInt(id, 10)).filter((id) => Number.isInteger(id) && id > 0);
   if (typeof value === "string" && value.trim()) {
-    return value.split(",").map((id) => Number.parseInt(id, 10)).filter(Number.isInteger);
+    return value.split(",").map((id) => Number.parseInt(id, 10)).filter((id) => Number.isInteger(id) && id > 0);
   }
-  if (Number.isInteger(fallback)) return [fallback];
+  if (Number.isInteger(fallback) && fallback > 0) return [fallback];
   return [];
 }
 
@@ -1259,9 +1734,9 @@ async function calculateDesign(input) {
     utility: Number(hull.slot_utility || 1)
   };
 
-  if (engines.length !== expected.engine || weapons.length !== expected.weapon || defenses.length !== expected.defense || utilities.length !== expected.utility) {
+  if (engines.length > expected.engine || weapons.length > expected.weapon || defenses.length > expected.defense || utilities.length > expected.utility) {
     const error = new Error(
-      `\uc2ac\ub86f \uac1c\uc218\uac00 \ub9de\uc9c0 \uc54a\uc2b5\ub2c8\ub2e4. \uc5d4\uc9c4 ${expected.engine}, \ubb34\uae30 ${expected.weapon}, \ubc29\uc5b4 ${expected.defense}, \ubcf4\uc870 ${expected.utility}`
+      `\uc2ac\ub86f \ucd08\uacfc \uc7a5\ucc29\uc785\ub2c8\ub2e4. \uc5d4\uc9c4 ${expected.engine}, \ubb34\uae30 ${expected.weapon}, \ubc29\uc5b4 ${expected.defense}, \ubcf4\uc870 ${expected.utility}`
     );
     error.status = 400;
     throw error;
@@ -1291,8 +1766,20 @@ async function calculateDesign(input) {
 
   const byCategory = groupComponentsByCategory(components);
   for (const [category, count] of Object.entries(expected)) {
-    if (byCategory[category].length !== count) {
-      const error = new Error(`${category} \ubd80\ud488\uc774 ${count}\uac1c \ud544\uc694\ud569\ub2c8\ub2e4.`);
+    if (byCategory[category].length > count) {
+      const error = new Error(`${category} \ubd80\ud488\uc740 \ucd5c\ub300 ${count}\uac1c\uae4c\uc9c0 \uc7a5\ucc29 \uac00\ub2a5\ud569\ub2c8\ub2e4.`);
+      error.status = 400;
+      throw error;
+    }
+  }
+  if (hull.key === "monitor") {
+    if (byCategory.defense.length < Math.min(4, expected.defense)) {
+      const error = new Error("\ubaa8\ub2c8\ud130 \uc120\uccb4\ub294 \ubc29\uc5b4 \ubaa8\ub4c8\uc744 \ucd5c\uc18c 4\uac1c \uc7a5\ucc29\ud574\uc57c \ud569\ub2c8\ub2e4.");
+      error.status = 400;
+      throw error;
+    }
+    if (byCategory.weapon.length > 1) {
+      const error = new Error("\ubaa8\ub2c8\ud130 \uc120\uccb4\ub294 \ubb34\uae30 \uc2ac\ub86f\uc744 1\uac1c\uae4c\uc9c0\ub9cc \uc0ac\uc6a9 \uac00\ub2a5\ud569\ub2c8\ub2e4.");
       error.status = 400;
       throw error;
     }
@@ -1344,11 +1831,11 @@ function formatDesign(row, powerBonusById = {}) {
   const parseJson = (value, fallbackId) => {
     try {
       const parsed = JSON.parse(value || "[]");
-      if (Array.isArray(parsed) && parsed.length) return parsed;
+      if (Array.isArray(parsed) && parsed.length) return parsed.map((id) => Number.parseInt(id, 10)).filter((id) => Number.isInteger(id) && id > 0);
     } catch (err) {
       // ignore
     }
-    return Number.isInteger(fallbackId) ? [fallbackId] : [];
+    return Number.isInteger(fallbackId) && fallbackId > 0 ? [fallbackId] : [];
   };
 
   const parsedComponents = {
@@ -1459,11 +1946,11 @@ function parseDesignComponentIds(design) {
   const parseOrFallback = (jsonValue, fallback) => {
     try {
       const arr = JSON.parse(jsonValue || "[]");
-      if (Array.isArray(arr) && arr.length) return arr.map((id) => Number.parseInt(id, 10)).filter(Number.isInteger);
+      if (Array.isArray(arr) && arr.length) return arr.map((id) => Number.parseInt(id, 10)).filter((id) => Number.isInteger(id) && id > 0);
     } catch (err) {
       // ignore
     }
-    return Number.isInteger(fallback) ? [fallback] : [];
+    return Number.isInteger(fallback) && fallback > 0 ? [fallback] : [];
   };
 
   return {
@@ -1725,6 +2212,8 @@ function formatMission(row) {
     targetUserId: row.target_user_id,
     targetZoneId: row.target_zone_id,
     targetName: row.target_name,
+    fleetSlot: Number(row.attacker_fleet_slot || 1),
+    attackerAdmiralId: row.attacker_admiral_id ? Number(row.attacker_admiral_id) : null,
     from: { x: row.from_x, y: row.from_y },
     to: { x: row.to_x, y: row.to_y },
     startedAt: row.started_at,
@@ -1784,10 +2273,15 @@ async function deleteUserCompletely(userId) {
     await run("DELETE FROM owned_ships WHERE user_id = ?", [userId]);
     await run("DELETE FROM ship_designs WHERE user_id = ?", [userId]);
     await run("DELETE FROM occupied_zones WHERE user_id = ?", [userId]);
+    await run("DELETE FROM zone_garrisons WHERE user_id = ?", [userId]);
+    await run("DELETE FROM fleet_groups WHERE user_id = ?", [userId]);
+    await run("DELETE FROM city_buildings WHERE user_id = ?", [userId]);
+    await run("DELETE FROM ship_trade_logs WHERE from_user_id = ? OR to_user_id = ?", [userId, userId]);
     await run("DELETE FROM admirals WHERE user_id = ?", [userId]);
     await run("DELETE FROM commander_progress WHERE user_id = ?", [userId]);
     await run("DELETE FROM research WHERE user_id = ?", [userId]);
     await run("DELETE FROM user_settings WHERE user_id = ?", [userId]);
+    await run("DELETE FROM speedup_usage WHERE user_id = ?", [userId]);
     await run("DELETE FROM bases WHERE user_id = ?", [userId]);
     await run("DELETE FROM fleets WHERE user_id = ?", [userId]);
     await run("DELETE FROM resources WHERE user_id = ?", [userId]);
@@ -1818,7 +2312,15 @@ async function resolveMission(mission) {
       };
     }
 
-    const attackerFleet = await getOwnedShipFleet(mission.user_id);
+    let attackerFleet = [];
+    try {
+      attackerFleet = cloneDesignFleet(JSON.parse(mission.attacker_fleet_json || "[]"));
+    } catch (err) {
+      attackerFleet = [];
+    }
+    if (!hasDesignShips(attackerFleet)) {
+      attackerFleet = await getOwnedShipFleet(mission.user_id);
+    }
     if (!hasDesignShips(attackerFleet)) {
       return {
         result: "failed",
@@ -1829,6 +2331,15 @@ async function resolveMission(mission) {
 
     const defenderFleet = await getOwnedShipFleet(targetUser.id);
     const attackerBonuses = await getPlayerBonuses(mission.user_id);
+    let fleetAdmiral = null;
+    if (mission.attacker_admiral_id) {
+      fleetAdmiral = await get(
+        "SELECT id, combat_bonus AS combatBonus FROM admirals WHERE id = ? AND user_id = ? AND status = 'active'",
+        [mission.attacker_admiral_id, mission.user_id]
+      );
+    }
+    const attackerCombatMultiplier =
+      attackerBonuses.combatMultiplier * (1 + Number(fleetAdmiral?.combatBonus || 0) * 0.9);
     const defenderBonuses = await getPlayerBonuses(targetUser.id);
     const travelSeconds = Math.max(10, Math.ceil((mission.arrive_at - mission.started_at) / 1000));
 
@@ -1850,7 +2361,7 @@ async function resolveMission(mission) {
         attackerFleet,
         defenderFleet,
         `${targetUser.username} \uae30\uc9c0\ub97c \uae30\uc2b5\ud569\ub2c8\ub2e4.`,
-        attackerBonuses.combatMultiplier,
+        attackerCombatMultiplier,
         defenderBonuses.combatMultiplier
       );
     }
@@ -1876,8 +2387,8 @@ async function resolveMission(mission) {
 
     await run("BEGIN TRANSACTION");
     try {
-      await updateOwnedShipsFromBattle(mission.user_id, battle.remainingFleet);
-      await updateOwnedShipsFromBattle(targetUser.id, battle.remainingEnemy);
+      await applyFleetLosses(mission.user_id, attackerFleet, battle.remainingFleet);
+      await applyFleetLosses(targetUser.id, defenderFleet, battle.remainingEnemy);
 
       if (battle.result === "victory" && (loot.metal > 0 || loot.fuel > 0)) {
         await run("UPDATE resources SET metal = metal + ?, fuel = fuel + ? WHERE user_id = ?", [loot.metal, loot.fuel, mission.user_id]);
@@ -1960,7 +2471,15 @@ async function resolveMission(mission) {
       };
     }
 
-    const fleet = await getOwnedShipFleet(mission.user_id);
+    let fleet = [];
+    try {
+      fleet = cloneDesignFleet(JSON.parse(mission.attacker_fleet_json || "[]"));
+    } catch (err) {
+      fleet = [];
+    }
+    if (!hasDesignShips(fleet)) {
+      fleet = await getOwnedShipFleet(mission.user_id);
+    }
     if (!hasDesignShips(fleet)) {
       return {
         result: "failed",
@@ -1969,23 +2488,67 @@ async function resolveMission(mission) {
       };
     }
 
-    const enemy = owner ? await getOwnedShipFleet(owner.user_id) : garrisonToDesignFleet(parseGarrison(zone));
+    let enemy = garrisonToDesignFleet(parseGarrison(zone));
+    if (owner) {
+      const garrisonRow = await get(
+        "SELECT ship_plan_json FROM zone_garrisons WHERE user_id = ? AND zone_id = ?",
+        [owner.user_id, zone.id]
+      );
+      if (garrisonRow) {
+        try {
+          const compact = normalizeShipPlan(JSON.parse(garrisonRow.ship_plan_json || "[]"));
+          const ownerFleet = await getOwnedShipFleet(owner.user_id);
+          const byId = new Map(ownerFleet.map((ship) => [Number(ship.designId), ship]));
+          const picked = compact
+            .map((item) => {
+              const found = byId.get(Number(item.designId));
+              if (!found) return null;
+              return { ...found, quantity: Math.min(Number(found.quantity || 0), Number(item.quantity || 0)) };
+            })
+            .filter((item) => item && Number(item.quantity || 0) > 0);
+          enemy = hasDesignShips(picked) ? picked : ownerFleet;
+        } catch (err) {
+          enemy = await getOwnedShipFleet(owner.user_id);
+        }
+      } else {
+        enemy = await getOwnedShipFleet(owner.user_id);
+      }
+    }
     const playerBonuses = await getPlayerBonuses(mission.user_id);
+    let fleetAdmiral = null;
+    if (mission.attacker_admiral_id) {
+      fleetAdmiral = await get(
+        "SELECT id, combat_bonus AS combatBonus FROM admirals WHERE id = ? AND user_id = ? AND status = 'active'",
+        [mission.attacker_admiral_id, mission.user_id]
+      );
+    }
+    const attackerCombatMultiplier =
+      playerBonuses.combatMultiplier * (1 + Number(fleetAdmiral?.combatBonus || 0) * 0.9);
     const defenderBonuses = owner ? await getPlayerBonuses(owner.user_id) : { combatMultiplier: 1 };
     const travelSeconds = Math.max(10, Math.ceil((mission.arrive_at - mission.started_at) / 1000));
     const battle = simulateDesignBattle(
       fleet,
       enemy,
       owner ? `${owner.username}\uc758 ${zone.name} \uc810\ub839\uc9c0 \ud0c8\ucde8 \uc804\ud22c` : `${zone.name} \uc810\ub839 \uc804\ud22c`,
-      playerBonuses.combatMultiplier,
+      attackerCombatMultiplier,
       defenderBonuses.combatMultiplier
     );
 
     await run("BEGIN TRANSACTION");
     try {
-      await updateOwnedShipsFromBattle(mission.user_id, battle.remainingFleet);
-      if (owner) await updateOwnedShipsFromBattle(owner.user_id, battle.remainingEnemy);
+      await applyFleetLosses(mission.user_id, fleet, battle.remainingFleet);
+      if (owner) await applyFleetLosses(owner.user_id, enemy, battle.remainingEnemy);
       if (battle.result === "victory") {
+        const occupiedCount = await get("SELECT COUNT(*) AS cnt FROM occupied_zones WHERE user_id = ?", [mission.user_id]);
+        const city = await getCityState(mission.user_id);
+        if (Number(occupiedCount?.cnt || 0) >= Number(city.bonuses.colonyCap || 0)) {
+          await run("COMMIT");
+          return {
+            result: "defeat",
+            title: `${zone.name} 점령`,
+            log: [...battle.log, `[점령 실패] 식민지 상한(${city.bonuses.colonyCap})에 도달했습니다.`]
+          };
+        }
         await run("DELETE FROM occupied_zones WHERE zone_id = ?", [zone.id]);
         await run("INSERT INTO occupied_zones (user_id, zone_id, captured_at) VALUES (?, ?, ?)", [mission.user_id, zone.id, Date.now()]);
       }
@@ -2043,7 +2606,7 @@ async function processMissionQueueForUser(userId) {
         "UPDATE missions SET status = 'completed', result = ?, log_json = ? WHERE id = ?",
         [resolved.result, JSON.stringify(resolved.log || []), mission.id]
       );
-      if (mission.mission_type === "pvp" && mission.target_user_id) {
+      if ((mission.mission_type === "pvp" || mission.mission_type === "zone") && mission.target_user_id) {
         await run("UPDATE incoming_alerts SET status = 'resolved' WHERE mission_id = ?", [mission.id]);
       }
     } catch (err) {
@@ -2051,7 +2614,7 @@ async function processMissionQueueForUser(userId) {
         "UPDATE missions SET status = 'failed', result = 'failed', log_json = ? WHERE id = ?",
         [JSON.stringify(["[\uc2dc\uc2a4\ud15c \uc624\ub958] \uc804\ud22c \ucc98\ub9ac\uc5d0 \uc2e4\ud328\ud588\uc2b5\ub2c8\ub2e4."]), mission.id]
       );
-      if (mission.mission_type === "pvp" && mission.target_user_id) {
+      if ((mission.mission_type === "pvp" || mission.mission_type === "zone") && mission.target_user_id) {
         await run("UPDATE incoming_alerts SET status = 'failed' WHERE mission_id = ?", [mission.id]);
       }
       console.error(err);
@@ -2337,10 +2900,15 @@ app.post("/signup", async (req, res) => {
     await run("INSERT INTO commander_progress (user_id, level, xp) VALUES (?, 1, 0)", [result.lastID]);
     await run("INSERT INTO user_settings (user_id, admiral_policy) VALUES (?, 'capture')", [result.lastID]);
     await run(
+      "INSERT INTO city_buildings (user_id, shipyard_level, government_level, housing_level, research_lab_level, tactical_center_level) VALUES (?, 1, 1, 1, 1, 1)",
+      [result.lastID]
+    );
+    await run(
       "INSERT INTO bases (user_id, map_x, map_y, moved_at) VALUES (?, ?, ?, ?)",
       [result.lastID, randomBaseCoordinate(), randomBaseCoordinate(), Date.now()]
     );
     await ensureStarterDesign(result.lastID);
+    await ensureFleetGroups(result.lastID);
 
     return res.status(201).json({ message: "\ud68c\uc6d0\uac00\uc785 \uc644\ub8cc. \uc774\uc81c \ub85c\uadf8\uc778\ud558\uc138\uc694." });
   } catch (err) {
@@ -2397,6 +2965,7 @@ app.get("/resources", requireAuth, async (req, res) => {
       metal: state.resources.metal,
       fuel: state.resources.fuel,
       commander: bonuses.commander,
+      city: bonuses.city,
       settings,
       incomingAlerts: await getIncomingAlerts(req.user.id),
       production: {
@@ -2535,10 +3104,10 @@ app.post("/designs", requireAuth, async (req, res) => {
         req.user.id,
         name,
         calculated.hull.id,
-        calculated.componentIds.engines[0],
-        calculated.componentIds.weapons[0],
-        calculated.componentIds.defenses[0],
-        calculated.componentIds.utilities[0],
+        calculated.componentIds.engines[0] || 0,
+        calculated.componentIds.weapons[0] || 0,
+        calculated.componentIds.defenses[0] || 0,
+        calculated.componentIds.utilities[0] || 0,
         JSON.stringify(calculated.componentIds.engines),
         JSON.stringify(calculated.componentIds.weapons),
         JSON.stringify(calculated.componentIds.defenses),
@@ -2597,10 +3166,10 @@ app.put("/designs/:id", requireAuth, async (req, res) => {
       [
         name,
         calculated.hull.id,
-        calculated.componentIds.engines[0],
-        calculated.componentIds.weapons[0],
-        calculated.componentIds.defenses[0],
-        calculated.componentIds.utilities[0],
+        calculated.componentIds.engines[0] || 0,
+        calculated.componentIds.weapons[0] || 0,
+        calculated.componentIds.defenses[0] || 0,
+        calculated.componentIds.utilities[0] || 0,
         JSON.stringify(calculated.componentIds.engines),
         JSON.stringify(calculated.componentIds.weapons),
         JSON.stringify(calculated.componentIds.defenses),
@@ -2669,9 +3238,10 @@ app.post("/production", requireAuth, async (req, res) => {
   try {
     await processProductionQueue(req.user.id);
 
-    const active = await get("SELECT id FROM production_queue WHERE user_id = ? AND status = 'building'", [req.user.id]);
-    if (active) {
-      return res.status(400).json({ error: "\uc774\ubbf8 \uc9c4\ud589 \uc911\uc778 \uc0dd\uc0b0 \ud050\uac00 \uc788\uc2b5\ub2c8\ub2e4." });
+    const city = await getCityState(req.user.id);
+    const active = await get("SELECT COUNT(*) AS cnt FROM production_queue WHERE user_id = ? AND status = 'building'", [req.user.id]);
+    if (Number(active?.cnt || 0) >= Number(city.bonuses.buildLines || 1)) {
+      return res.status(400).json({ error: `생산 라인 제한(${city.bonuses.buildLines})을 초과했습니다.` });
     }
 
     const designId = Number.parseInt(req.body.designId, 10);
@@ -2684,6 +3254,10 @@ app.post("/production", requireAuth, async (req, res) => {
     if (!design) {
       return res.status(404).json({ error: "\uc124\uacc4\uc548\uc744 \ucc3e\uc744 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4." });
     }
+    const totalShips = await getTotalShipCount(req.user.id);
+    if (totalShips + quantity > Number(city.bonuses.populationCap || 0)) {
+      return res.status(400).json({ error: `인구 상한(보유 함선 제한 ${city.bonuses.populationCap})을 초과합니다.` });
+    }
 
     const state = await getUpdatedResources(req.user.id);
     const bonuses = await getPlayerBonuses(req.user.id);
@@ -2695,7 +3269,8 @@ app.post("/production", requireAuth, async (req, res) => {
     }
 
     const now = Date.now();
-    const endTime = now + design.total_build_time * quantity * 1000;
+    const buildSeconds = Math.max(60, Math.floor(design.total_build_time * quantity * Number(city.bonuses.buildTimeMultiplier || 1)));
+    const endTime = now + buildSeconds * 1000;
     await run("BEGIN TRANSACTION");
     try {
       await run("UPDATE resources SET metal = metal - ?, fuel = fuel - ? WHERE user_id = ?", [metalCost, fuelCost, req.user.id]);
@@ -2793,7 +3368,13 @@ app.post("/production/:id/speedup", requireAuth, async (req, res) => {
     if (Number(state.resources[resourceType] || 0) < amount) {
       return res.status(400).json({ error: `가속에 필요한 ${resourceType} 자원이 부족합니다. 필요: ${amount}` });
     }
-    const reducedMs = Math.floor(amount * (resourceType === "fuel" ? 1800 : 1100));
+    const speed = await consumeSpeedup(req.user.id, "production", amount);
+    if (!speed.ok) {
+      return res.status(400).json({
+        error: `가속 효율 저하 단계입니다. 현재 1초 단축에 ${speed.resourcePerSecond} 재화가 필요합니다.`
+      });
+    }
+    const reducedMs = speed.reducedSeconds * 1000;
     const nextEnd = Math.max(Date.now() + 1000, Number(queue.end_time) - reducedMs);
     await run("BEGIN TRANSACTION");
     try {
@@ -2805,7 +3386,7 @@ app.post("/production/:id/speedup", requireAuth, async (req, res) => {
       throw err;
     }
     return res.json({
-      message: `${resourceType} ${amount}을 사용해 생산 시간을 단축했습니다.`,
+      message: `${resourceType} ${amount} 사용: 생산 ${speed.reducedSeconds}초 단축 (페널티 x${speed.multiplier.toFixed(2)}, 연속 ${speed.nextStreak}회)`,
       queue: await getProductionQueue(req.user.id),
       ownedShips: await getOwnedShips(req.user.id),
       resources: (await getUpdatedResources(req.user.id))?.resources || null
@@ -2813,6 +3394,20 @@ app.post("/production/:id/speedup", requireAuth, async (req, res) => {
   } catch (err) {
     console.error(err);
     return res.status(500).json({ error: "\uc0dd\uc0b0 \uac00\uc18d \uc911 \uc624\ub958\uac00 \ubc1c\uc0dd\ud588\uc2b5\ub2c8\ub2e4." });
+  }
+});
+
+app.delete("/production/logs", requireAuth, async (req, res) => {
+  try {
+    await processProductionQueue(req.user.id);
+    await run(
+      "DELETE FROM production_queue WHERE user_id = ? AND status IN ('completed', 'failed', 'cancelled')",
+      [req.user.id]
+    );
+    return res.json({ message: "생산 로그를 초기화했습니다.", queue: await getProductionQueue(req.user.id) });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "생산 로그 초기화 중 오류가 발생했습니다." });
   }
 });
 
@@ -2949,9 +3544,53 @@ app.get("/map", requireAuth, async (req, res) => {
     const base = await ensureBase(req.user.id);
     const myFleet = await getOwnedShipFleet(req.user.id);
     const myBonuses = await getPlayerBonuses(req.user.id);
+    const myZoneGarrisonRows = await all(
+      "SELECT zone_id, ship_plan_json FROM zone_garrisons WHERE user_id = ?",
+      [req.user.id]
+    );
+    const myZoneGarrisonMap = new Map();
+    for (const row of myZoneGarrisonRows) {
+      try {
+        const compact = normalizeShipPlan(JSON.parse(row.ship_plan_json || "[]"));
+        const ownedByDesign = new Map(myFleet.map((ship) => [Number(ship.designId), ship]));
+        const fleet = compact
+          .map((item) => {
+            const found = ownedByDesign.get(Number(item.designId));
+            if (!found) return null;
+            return {
+              ...found,
+              quantity: Math.min(Number(found.quantity || 0), Number(item.quantity || 0))
+            };
+          })
+          .filter((item) => item && Number(item.quantity || 0) > 0);
+        myZoneGarrisonMap.set(Number(row.zone_id), {
+          totalPower: Math.floor(designFleetPower(fleet)),
+          asLegacy: (() => {
+            const g = { corvette: 0, destroyer: 0, cruiser: 0, battleship: 0, carrier: 0 };
+            const keys = ["corvette", "destroyer", "cruiser", "battleship", "carrier"];
+            fleet.forEach((ship) => {
+              const key = String(ship.name || "").toLowerCase();
+              const matched = keys.find((item) => key.includes(item));
+              if (matched) g[matched] += Math.max(0, Number(ship.quantity || 0));
+            });
+            return g;
+          })()
+        });
+      } catch (err) {
+        // ignore bad garrison rows
+      }
+    }
     return res.json({
       base,
-      zones: rows.map(formatZone),
+      zones: rows.map((row) => {
+        const item = formatZone(row);
+        if (item.ownedByMe && myZoneGarrisonMap.has(Number(item.id))) {
+          const myGarrison = myZoneGarrisonMap.get(Number(item.id));
+          item.actualPower = Number(myGarrison.totalPower || item.actualPower || 0);
+          item.garrison = myGarrison.asLegacy || item.garrison;
+        }
+        return item;
+      }),
       sectorCount: rows.length,
       players,
       activeMissions: await getActiveMissions(req.user.id),
@@ -2995,10 +3634,150 @@ app.get("/empire", requireAuth, async (req, res) => {
   }
 });
 
+app.get("/zones/:id/garrison", requireAuth, async (req, res) => {
+  try {
+    const zoneId = Number.parseInt(req.params.id, 10);
+    const owner = await get("SELECT user_id FROM occupied_zones WHERE zone_id = ?", [zoneId]);
+    if (!owner || owner.user_id !== req.user.id) {
+      return res.status(403).json({ error: "내 점령지에서만 주둔군을 설정할 수 있습니다." });
+    }
+    const row = await get("SELECT ship_plan_json, updated_at FROM zone_garrisons WHERE user_id = ? AND zone_id = ?", [req.user.id, zoneId]);
+    let ships = [];
+    try {
+      ships = normalizeShipPlan(JSON.parse(row?.ship_plan_json || "[]"));
+    } catch (err) {
+      ships = [];
+    }
+    return res.json({ zoneId, ships, updatedAt: Number(row?.updated_at || 0) });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "주둔군 조회 중 오류가 발생했습니다." });
+  }
+});
+
+app.post("/zones/:id/garrison", requireAuth, async (req, res) => {
+  try {
+    const zoneId = Number.parseInt(req.params.id, 10);
+    const owner = await get("SELECT user_id FROM occupied_zones WHERE zone_id = ?", [zoneId]);
+    if (!owner || owner.user_id !== req.user.id) {
+      return res.status(403).json({ error: "내 점령지에서만 주둔군을 배치할 수 있습니다." });
+    }
+    const slot = Number.parseInt(req.body.fleetSlot, 10) || 1;
+    const bonuses = await getPlayerBonuses(req.user.id);
+    if (slot > Number(bonuses.city?.bonuses?.fleetSlotLimit || 3)) {
+      return res.status(400).json({ error: `현재 전술소 레벨로는 슬롯 ${slot}을 사용할 수 없습니다.` });
+    }
+    const launch = await getLaunchFleetFromSlot(req.user.id, slot);
+    if (!hasDesignShips(launch.fleet)) {
+      return res.status(400).json({ error: "선택한 함대 슬롯에 배치 가능한 함선이 없습니다." });
+    }
+    const compactShips = launch.fleet.map((ship) => ({
+      designId: Number(ship.designId),
+      quantity: Number(ship.quantity || 0)
+    }));
+    await run(
+      "INSERT INTO zone_garrisons (user_id, zone_id, ship_plan_json, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(user_id, zone_id) DO UPDATE SET ship_plan_json = excluded.ship_plan_json, updated_at = excluded.updated_at",
+      [req.user.id, zoneId, JSON.stringify(compactShips), Date.now()]
+    );
+    return res.json({ message: `함대 ${slot}을 ${zoneId}번 점령지 주둔군으로 배치했습니다.` });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "주둔군 배치 중 오류가 발생했습니다." });
+  }
+});
+
+app.get("/garrison/overview", requireAuth, async (req, res) => {
+  try {
+    const zones = await all(
+      `
+        SELECT z.id, z.name, z.level, z.map_x, z.map_y, zg.ship_plan_json, zg.updated_at
+        FROM occupied_zones oz
+        JOIN neutral_zones z ON z.id = oz.zone_id
+        LEFT JOIN zone_garrisons zg ON zg.user_id = oz.user_id AND zg.zone_id = oz.zone_id
+        WHERE oz.user_id = ?
+        ORDER BY z.level DESC, z.id ASC
+      `,
+      [req.user.id]
+    );
+    const ownedFleet = await getOwnedShipFleet(req.user.id);
+    const byId = new Map(ownedFleet.map((ship) => [Number(ship.designId), ship]));
+
+    const zoneData = zones.map((zone) => {
+      let compact = [];
+      try {
+        compact = normalizeShipPlan(JSON.parse(zone.ship_plan_json || "[]"));
+      } catch (err) {
+        compact = [];
+      }
+      const assigned = compact
+        .map((item) => {
+          const found = byId.get(Number(item.designId));
+          if (!found) return null;
+          return {
+            designId: Number(item.designId),
+            designName: found.name,
+            quantity: Math.min(Number(found.quantity || 0), Number(item.quantity || 0)),
+            finalAttack: Number(found.finalAttack || 0),
+            finalDefense: Number(found.finalDefense || 0),
+            finalHp: Number(found.finalHp || 0)
+          };
+        })
+        .filter((item) => item && Number(item.quantity || 0) > 0);
+      const power = Math.floor(assigned.reduce((sum, item) => {
+        return sum + Number(item.quantity || 0) * (Number(item.finalAttack || 0) + Number(item.finalDefense || 0) * 0.45 + Number(item.finalHp || 0) * 0.12);
+      }, 0));
+      return {
+        zoneId: Number(zone.id),
+        zoneName: zone.name,
+        level: Number(zone.level || 1),
+        x: Number(zone.map_x || 0),
+        y: Number(zone.map_y || 0),
+        assignedPower: power,
+        assignedShips: assigned,
+        updatedAt: Number(zone.updated_at || 0)
+      };
+    });
+
+    const records = await all(
+      `
+        SELECT id, title, result, travel_seconds, created_at, log_json
+        FROM battle_records
+        WHERE user_id = ? AND (title LIKE '방어:%' OR title LIKE '%점령%')
+        ORDER BY id DESC
+        LIMIT 50
+      `,
+      [req.user.id]
+    );
+    const alerts = await getIncomingAlerts(req.user.id);
+    return res.json({
+      zones: zoneData,
+      alerts: alerts.filter((item) => item.targetKind === "outpost" || item.targetKind === "base"),
+      records: records.map((row) => ({
+        id: Number(row.id),
+        title: row.title,
+        result: row.result,
+        travelSeconds: Number(row.travel_seconds || 0),
+        createdAt: Number(row.created_at || 0),
+        log: (() => {
+          try {
+            return JSON.parse(row.log_json || "[]");
+          } catch (err) {
+            return [];
+          }
+        })()
+      }))
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "주둔 전투 화면 데이터를 불러오지 못했습니다." });
+  }
+});
+
 app.get("/research", requireAuth, async (req, res) => {
   try {
     const research = await getResearch(req.user.id);
     const bonuses = await getPlayerBonuses(req.user.id);
+    const city = bonuses.city;
     const hulls = await all("SELECT key, name FROM hulls ORDER BY id");
     const components = await all("SELECT category, name, power_cost FROM components ORDER BY id");
 
@@ -3010,7 +3789,8 @@ app.get("/research", requireAuth, async (req, res) => {
         buildCostMultiplier: bonuses.buildCostMultiplier,
         combatMultiplier: bonuses.combatMultiplier,
         movementMultiplier: bonuses.movementMultiplier
-      }
+      },
+      city
     });
   } catch (err) {
     console.error(err);
@@ -3027,6 +3807,10 @@ app.post("/research/:type/upgrade", requireAuth, async (req, res) => {
 
     const research = await getResearch(req.user.id);
     const level = research[type] || 0;
+    const city = await getCityState(req.user.id);
+    if (level >= Number(city.bonuses.researchCap || 0)) {
+      return res.status(400).json({ error: `연구소 레벨로 허용된 연구 상한(${city.bonuses.researchCap})에 도달했습니다.` });
+    }
     const cost = researchCost(type, level);
     const state = await getUpdatedResources(req.user.id);
 
@@ -3073,6 +3857,123 @@ app.post("/research/:type/upgrade", requireAuth, async (req, res) => {
   } catch (err) {
     console.error(err);
     return res.status(500).json({ error: "\uc5f0\uad6c \uc5c5\uadf8\ub808\uc774\ub4dc \uc911 \uc624\ub958\uac00 \ubc1c\uc0dd\ud588\uc2b5\ub2c8\ub2e4." });
+  }
+});
+
+app.get("/city", requireAuth, async (req, res) => {
+  try {
+    const city = await getCityState(req.user.id);
+    return res.json(city);
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "도시 정보 조회 중 오류가 발생했습니다." });
+  }
+});
+
+app.post("/city/:key/upgrade", requireAuth, async (req, res) => {
+  try {
+    const key = String(req.params.key || "");
+    if (!CITY_BUILDINGS[key]) {
+      return res.status(400).json({ error: "업그레이드할 수 없는 건물입니다." });
+    }
+    const city = await getCityState(req.user.id);
+    const level = Number(city.levels[key] || 1);
+    if (level >= 30) {
+      return res.status(400).json({ error: "해당 건물은 최대 레벨입니다." });
+    }
+    const cost = cityUpgradeCost(key, level + 1);
+    const state = await getUpdatedResources(req.user.id);
+    if (Number(state.resources.metal || 0) < cost.metal || Number(state.resources.fuel || 0) < cost.fuel) {
+      return res.status(400).json({ error: `자원이 부족합니다. 필요: 금속 ${cost.metal}, 연료 ${cost.fuel}` });
+    }
+    const column = `${key}_level`;
+    await run("BEGIN TRANSACTION");
+    try {
+      await run("UPDATE resources SET metal = metal - ?, fuel = fuel - ? WHERE user_id = ?", [cost.metal, cost.fuel, req.user.id]);
+      await run(`UPDATE city_buildings SET ${column} = ${column} + 1 WHERE user_id = ?`, [req.user.id]);
+      await run("COMMIT");
+    } catch (err) {
+      await run("ROLLBACK");
+      throw err;
+    }
+    return res.json({
+      message: `${CITY_BUILDINGS[key].name} 레벨이 ${level + 1}로 상승했습니다.`,
+      city: await getCityState(req.user.id),
+      resources: (await getUpdatedResources(req.user.id))?.resources || null
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "도시 업그레이드 중 오류가 발생했습니다." });
+  }
+});
+
+app.get("/fleet-groups", requireAuth, async (req, res) => {
+  try {
+    const groups = await getFleetGroups(req.user.id);
+    const ownedShips = await getOwnedShips(req.user.id);
+    const admirals = await all(
+      "SELECT id, name, rarity, status FROM admirals WHERE user_id = ? ORDER BY assigned DESC, id DESC",
+      [req.user.id]
+    );
+    const bonuses = await getPlayerBonuses(req.user.id);
+    return res.json({
+      groups,
+      ownedShips,
+      admirals,
+      commander: bonuses.commander,
+      fleetSlotLimit: bonuses.city?.bonuses?.fleetSlotLimit || 3
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "함대 편성 정보를 불러오지 못했습니다." });
+  }
+});
+
+app.put("/fleet-groups/:slot", requireAuth, async (req, res) => {
+  try {
+    const slot = Number.parseInt(req.params.slot, 10);
+    if (!Number.isInteger(slot) || slot < 1 || slot > 5) {
+      return res.status(400).json({ error: "함대 슬롯 번호가 올바르지 않습니다." });
+    }
+    const bonuses = await getPlayerBonuses(req.user.id);
+    if (slot > Number(bonuses.city?.bonuses?.fleetSlotLimit || 3)) {
+      return res.status(400).json({ error: `현재 전술소 레벨로는 슬롯 ${slot}을 사용할 수 없습니다.` });
+    }
+    await ensureFleetGroups(req.user.id);
+    const name = String(req.body.name || `함대 ${slot}`).trim().slice(0, 24) || `함대 ${slot}`;
+    const ships = normalizeShipPlan(req.body.ships);
+    const ownedShips = await all("SELECT design_id, quantity FROM owned_ships WHERE user_id = ?", [req.user.id]);
+    const ownedMap = new Map();
+    for (const row of ownedShips) {
+      ownedMap.set(Number(row.design_id), Number(row.quantity || 0));
+    }
+    for (const item of ships) {
+      if (!ownedMap.has(item.designId)) {
+        return res.status(400).json({ error: `보유하지 않은 설계안(${item.designId})은 편성할 수 없습니다.` });
+      }
+      if (item.quantity > Number(ownedMap.get(item.designId) || 0)) {
+        return res.status(400).json({ error: `설계안 ${item.designId} 수량이 보유량을 초과합니다.` });
+      }
+    }
+
+    let admiralId = req.body.admiralId == null ? null : Number.parseInt(req.body.admiralId, 10);
+    if (!Number.isInteger(admiralId)) admiralId = null;
+    if (admiralId) {
+      const admiral = await get(
+        "SELECT id FROM admirals WHERE id = ? AND user_id = ? AND status = 'active'",
+        [admiralId, req.user.id]
+      );
+      if (!admiral) return res.status(400).json({ error: "배치 가능한 제독이 아닙니다." });
+    }
+
+    await run(
+      "INSERT INTO fleet_groups (user_id, slot_index, name, admiral_id, ship_plan_json) VALUES (?, ?, ?, ?, ?) ON CONFLICT(user_id, slot_index) DO UPDATE SET name = excluded.name, admiral_id = excluded.admiral_id, ship_plan_json = excluded.ship_plan_json",
+      [req.user.id, slot, name, admiralId, JSON.stringify(ships)]
+    );
+    return res.json({ message: `함대 ${slot} 편성을 저장했습니다.`, groups: await getFleetGroups(req.user.id) });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "함대 편성 저장 중 오류가 발생했습니다." });
   }
 });
 
@@ -3363,6 +4264,116 @@ app.get("/trade/logs", requireAuth, async (req, res) => {
   }
 });
 
+app.post("/trade/ships", requireAuth, async (req, res) => {
+  try {
+    const toUserId = Number.parseInt(req.body.toUserId, 10);
+    const designId = Number.parseInt(req.body.designId, 10);
+    const quantity = Math.max(1, Number.parseInt(req.body.quantity, 10) || 0);
+    if (!Number.isInteger(toUserId) || toUserId === req.user.id) {
+      return res.status(400).json({ error: "거래 대상이 올바르지 않습니다." });
+    }
+    if (!Number.isInteger(designId)) {
+      return res.status(400).json({ error: "거래할 설계안을 선택하세요." });
+    }
+    if (quantity > 5000) {
+      return res.status(400).json({ error: "1회 함선 거래 수량 제한을 초과했습니다." });
+    }
+
+    const target = await get("SELECT id, username FROM users WHERE id = ?", [toUserId]);
+    if (!target) {
+      return res.status(404).json({ error: "거래 대상을 찾을 수 없습니다." });
+    }
+    const owned = await get(
+      `
+        SELECT os.quantity, d.name AS design_name
+        FROM owned_ships os
+        JOIN ship_designs d ON d.id = os.design_id
+        WHERE os.user_id = ? AND os.design_id = ?
+      `,
+      [req.user.id, designId]
+    );
+    if (!owned || Number(owned.quantity || 0) < quantity) {
+      return res.status(400).json({ error: "보유 수량이 부족합니다." });
+    }
+
+    const receiverDesign = await get("SELECT id FROM ship_designs WHERE id = ? AND user_id = ?", [designId, toUserId]);
+    if (!receiverDesign) {
+      return res.status(400).json({ error: "상대 유저가 해당 설계안을 보유해야 함선 거래가 가능합니다." });
+    }
+
+    await run("BEGIN TRANSACTION");
+    try {
+      await run("UPDATE owned_ships SET quantity = quantity - ? WHERE user_id = ? AND design_id = ?", [quantity, req.user.id, designId]);
+      await run(
+        "INSERT INTO owned_ships (user_id, design_id, quantity) VALUES (?, ?, ?) ON CONFLICT(user_id, design_id) DO UPDATE SET quantity = owned_ships.quantity + excluded.quantity",
+        [toUserId, designId, quantity]
+      );
+      await run("DELETE FROM owned_ships WHERE user_id = ? AND design_id = ? AND quantity <= 0", [req.user.id, designId]);
+      await run(
+        "INSERT INTO ship_trade_logs (from_user_id, to_user_id, design_id, design_name, quantity, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+        [req.user.id, toUserId, designId, String(owned.design_name || "설계안"), quantity, Date.now()]
+      );
+      await run("COMMIT");
+    } catch (err) {
+      await run("ROLLBACK");
+      throw err;
+    }
+
+    return res.json({
+      message: `${target.username}에게 ${String(owned.design_name || "설계안")} ${quantity}척을 전달했습니다.`,
+      ownedShips: await getOwnedShips(req.user.id),
+      shipLogs: await all(
+        `
+          SELECT st.id, st.design_name, st.quantity, st.created_at,
+                 fu.username AS from_name, tu.username AS to_name
+          FROM ship_trade_logs st
+          JOIN users fu ON fu.id = st.from_user_id
+          JOIN users tu ON tu.id = st.to_user_id
+          WHERE st.from_user_id = ? OR st.to_user_id = ?
+          ORDER BY st.id DESC
+          LIMIT 40
+        `,
+        [req.user.id, req.user.id]
+      )
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "함선 거래 처리 중 오류가 발생했습니다." });
+  }
+});
+
+app.get("/trade/ship-logs", requireAuth, async (req, res) => {
+  try {
+    const rows = await all(
+      `
+        SELECT st.id, st.design_id, st.design_name, st.quantity, st.created_at,
+               fu.username AS from_name, tu.username AS to_name
+        FROM ship_trade_logs st
+        JOIN users fu ON fu.id = st.from_user_id
+        JOIN users tu ON tu.id = st.to_user_id
+        WHERE st.from_user_id = ? OR st.to_user_id = ?
+        ORDER BY st.id DESC
+        LIMIT 40
+      `,
+      [req.user.id, req.user.id]
+    );
+    return res.json({
+      logs: rows.map((row) => ({
+        id: row.id,
+        designId: Number(row.design_id || 0),
+        designName: row.design_name,
+        quantity: Number(row.quantity || 0),
+        fromName: row.from_name,
+        toName: row.to_name,
+        createdAt: Number(row.created_at || 0)
+      }))
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "함선 거래 기록 조회 중 오류가 발생했습니다." });
+  }
+});
+
 app.get("/missions", requireAuth, async (req, res) => {
   try {
     await processMissionQueueForUser(req.user.id);
@@ -3389,7 +4400,7 @@ app.post("/missions/:id/cancel", requireAuth, async (req, res) => {
     const mission = await get("SELECT * FROM missions WHERE id = ? AND user_id = ? AND status = 'traveling'", [id, req.user.id]);
     if (!mission) return res.status(404).json({ error: "\ucde8\uc18c\ud560 \uc784\ubb34\ub97c \ucc3e\uc744 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4." });
     await run("UPDATE missions SET status = 'failed', result = 'cancelled', log_json = ? WHERE id = ?", [JSON.stringify(["[\uc784\ubb34 \ucde8\uc18c] \uc720\uc800\uac00 \ucd9c\uaca9\uc744 \ucde8\uc18c\ud588\uc2b5\ub2c8\ub2e4."]), id]);
-    if (mission.mission_type === "pvp" && mission.target_user_id) {
+    if ((mission.mission_type === "pvp" || mission.mission_type === "zone") && mission.target_user_id) {
       await run("UPDATE incoming_alerts SET status = 'cancelled' WHERE mission_id = ?", [id]);
     }
     return res.json({ message: "\ucd9c\uaca9 \uc784\ubb34\ub97c \ucde8\uc18c\ud588\uc2b5\ub2c8\ub2e4.", activeMissions: await getActiveMissions(req.user.id) });
@@ -3410,13 +4421,19 @@ app.post("/missions/:id/speedup", requireAuth, async (req, res) => {
     if (Number(state.resources[resourceType] || 0) < amount) {
       return res.status(400).json({ error: `가속에 필요한 ${resourceType} 자원이 부족합니다. 필요: ${amount}` });
     }
-    const reducedMs = Math.floor(amount * (resourceType === "fuel" ? 1500 : 900));
+    const speed = await consumeSpeedup(req.user.id, "mission", amount);
+    if (!speed.ok) {
+      return res.status(400).json({
+        error: `가속 효율 저하 단계입니다. 현재 1초 단축에 ${speed.resourcePerSecond} 재화가 필요합니다.`
+      });
+    }
+    const reducedMs = speed.reducedSeconds * 1000;
     const nextArrive = Math.max(Date.now() + 1000, Number(mission.arrive_at) - reducedMs);
     await run("BEGIN TRANSACTION");
     try {
       await run(`UPDATE resources SET ${resourceType} = ${resourceType} - ? WHERE user_id = ?`, [amount, req.user.id]);
       await run("UPDATE missions SET arrive_at = ? WHERE id = ?", [nextArrive, id]);
-      if (mission.mission_type === "pvp" && mission.target_user_id) {
+      if ((mission.mission_type === "pvp" || mission.mission_type === "zone") && mission.target_user_id) {
         await run("UPDATE incoming_alerts SET arrive_at = ? WHERE mission_id = ? AND status = 'active'", [nextArrive, id]);
       }
       await run("COMMIT");
@@ -3425,7 +4442,7 @@ app.post("/missions/:id/speedup", requireAuth, async (req, res) => {
       throw err;
     }
     return res.json({
-      message: `${resourceType} ${amount}을 사용해 출격 시간을 단축했습니다.`,
+      message: `${resourceType} ${amount} 사용: 이동 ${speed.reducedSeconds}초 단축 (페널티 x${speed.multiplier.toFixed(2)}, 연속 ${speed.nextStreak}회)`,
       activeMissions: await getActiveMissions(req.user.id),
       resources: (await getUpdatedResources(req.user.id))?.resources || null
     });
@@ -3473,35 +4490,59 @@ app.post("/pvp/attack", requireAuth, async (req, res) => {
       return res.status(400).json({ error: "\uc774\ubbf8 \uc9c4\ud589 \uc911\uc778 \ucd9c\uaca9 \uc784\ubb34\uac00 \uc788\uc2b5\ub2c8\ub2e4." });
     }
 
-    const attackerFleet = await getOwnedShipFleet(req.user.id);
+    const attackerBonuses = await getPlayerBonuses(req.user.id);
+    const requestedSlot = Number.parseInt(req.body.fleetSlot, 10) || 1;
+    if (requestedSlot > Number(attackerBonuses.city?.bonuses?.fleetSlotLimit || 3)) {
+      return res.status(400).json({ error: `현재 전술소 레벨로는 슬롯 ${requestedSlot}을 사용할 수 없습니다.` });
+    }
+    const launch = await getLaunchFleetFromSlot(req.user.id, requestedSlot);
+    const attackerFleet = launch.fleet;
     if (!hasDesignShips(attackerFleet)) {
-      return res.status(400).json({ error: "\ucd9c\uaca9 \uac00\ub2a5\ud55c \uc124\uacc4 \ud568\uc120\uc774 \uc5c6\uc2b5\ub2c8\ub2e4." });
+      return res.status(400).json({ error: "선택한 함대 슬롯에 출격 가능한 함선이 없습니다." });
     }
 
-    const attackerBonuses = await getPlayerBonuses(req.user.id);
+    const fleetCombatMultiplier = 1 + Number(launch.admiral?.combatBonus || 0) * 0.9;
+    const fleetMoveMultiplier = 1 + Number(launch.admiral?.resourceBonus || 0) * 0.45;
     const attackerBase = await ensureBase(req.user.id);
     const defenderBase = await ensureBase(targetUserId);
-    const attackerPower = Math.floor(designFleetPower(attackerFleet) * attackerBonuses.combatMultiplier);
+    const attackerPower = Math.floor(designFleetPower(attackerFleet) * attackerBonuses.combatMultiplier * fleetCombatMultiplier);
     const attackerShipCount = attackerFleet.reduce((sum, ship) => sum + Number(ship.quantity || 0), 0);
-    const travelSeconds = travelTimeSecondsForDesignFleet(attackerBase, defenderBase, attackerFleet, attackerBonuses);
+    const travelSeconds = travelTimeSecondsForDesignFleet(attackerBase, defenderBase, attackerFleet, {
+      movementMultiplier: attackerBonuses.movementMultiplier * fleetMoveMultiplier
+    });
     const now = Date.now();
     const arriveAt = now + travelSeconds * 1000;
 
     const result = await run(
       `
         INSERT INTO missions
-          (user_id, mission_type, target_user_id, target_name, from_x, from_y, to_x, to_y, started_at, arrive_at, status, attacker_power, attacker_ship_count)
-        VALUES (?, 'pvp', ?, ?, ?, ?, ?, ?, ?, ?, 'traveling', ?, ?)
+          (user_id, mission_type, target_user_id, target_name, from_x, from_y, to_x, to_y, started_at, arrive_at, status, attacker_power, attacker_ship_count, attacker_fleet_json, attacker_fleet_slot, attacker_admiral_id)
+        VALUES (?, 'pvp', ?, ?, ?, ?, ?, ?, ?, ?, 'traveling', ?, ?, ?, ?, ?)
       `,
-      [req.user.id, targetUserId, targetUser.username, attackerBase.x, attackerBase.y, defenderBase.x, defenderBase.y, now, arriveAt, attackerPower, attackerShipCount]
+      [
+        req.user.id,
+        targetUserId,
+        targetUser.username,
+        attackerBase.x,
+        attackerBase.y,
+        defenderBase.x,
+        defenderBase.y,
+        now,
+        arriveAt,
+        attackerPower,
+        attackerShipCount,
+        JSON.stringify(attackerFleet),
+        launch.slot,
+        launch.admiral?.id || null
+      ]
     );
     await run(
       `
         INSERT INTO incoming_alerts
-          (target_user_id, mission_id, attacker_user_id, attacker_username, attack_power, ship_count, arrive_at, status, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?)
+          (target_user_id, mission_id, attacker_user_id, attacker_username, attack_power, ship_count, arrive_at, status, created_at, target_kind, target_name)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, 'base', ?)
       `,
-      [targetUserId, result.lastID, req.user.id, req.user.username, attackerPower, attackerShipCount, arriveAt, now]
+      [targetUserId, result.lastID, req.user.id, req.user.username, attackerPower, attackerShipCount, arriveAt, now, "본진"]
     );
 
     return res.json({
@@ -3534,7 +4575,6 @@ app.post("/battle", requireAuth, async (req, res) => {
     }
 
     const enemy = garrisonToDesignFleet({ corvette: 7, destroyer: 2, cruiser: 1, battleship: 0, carrier: 0 });
-    const playerBonuses = await getPlayerBonuses(req.user.id);
     const battle = simulateDesignBattle(
       fleet,
       enemy,
@@ -3572,35 +4612,72 @@ app.post("/zones/:id/capture", requireAuth, async (req, res) => {
     if (owner?.user_id === req.user.id) {
       return res.status(400).json({ error: "\uc774\ubbf8 \uc810\ub839\ud55c \uad6c\uc5ed\uc785\ub2c8\ub2e4." });
     }
+    const city = await getCityState(req.user.id);
+    const occupiedCount = await get("SELECT COUNT(*) AS cnt FROM occupied_zones WHERE user_id = ?", [req.user.id]);
+    if (Number(occupiedCount?.cnt || 0) >= Number(city.bonuses.colonyCap || 0)) {
+      return res.status(400).json({ error: `식민지 상한(${city.bonuses.colonyCap})에 도달해 추가 점령이 불가능합니다.` });
+    }
 
     const activeMission = await get("SELECT id FROM missions WHERE user_id = ? AND status = 'traveling' LIMIT 1", [req.user.id]);
     if (activeMission) {
       return res.status(400).json({ error: "\uc774\ubbf8 \uc9c4\ud589 \uc911\uc778 \ucd9c\uaca9 \uc784\ubb34\uac00 \uc788\uc2b5\ub2c8\ub2e4." });
     }
 
-    const fleet = await getOwnedShipFleet(req.user.id);
+    const playerBonuses = await getPlayerBonuses(req.user.id);
+    const requestedSlot = Number.parseInt(req.body.fleetSlot, 10) || 1;
+    if (requestedSlot > Number(playerBonuses.city?.bonuses?.fleetSlotLimit || 3)) {
+      return res.status(400).json({ error: `현재 전술소 레벨로는 슬롯 ${requestedSlot}을 사용할 수 없습니다.` });
+    }
+    const launch = await getLaunchFleetFromSlot(req.user.id, requestedSlot);
+    const fleet = launch.fleet;
     if (!hasDesignShips(fleet)) {
-      return res.status(400).json({ error: "\ucd9c\uaca9 \uac00\ub2a5\ud55c \uc124\uacc4 \ud568\uc120\uc774 \uc5c6\uc2b5\ub2c8\ub2e4." });
+      return res.status(400).json({ error: "선택한 함대 슬롯에 출격 가능한 함선이 없습니다." });
     }
 
-    const playerBonuses = await getPlayerBonuses(req.user.id);
+    const fleetMoveMultiplier = 1 + Number(launch.admiral?.resourceBonus || 0) * 0.45;
     const attackerBase = await ensureBase(req.user.id);
     const travelSeconds = travelTimeSecondsForDesignFleet(
       attackerBase,
       { x: zone.map_x, y: zone.map_y },
       fleet,
-      playerBonuses
+      { movementMultiplier: playerBonuses.movementMultiplier * fleetMoveMultiplier }
     );
     const now = Date.now();
     const arriveAt = now + travelSeconds * 1000;
     const missionResult = await run(
       `
         INSERT INTO missions
-          (user_id, mission_type, target_zone_id, target_name, from_x, from_y, to_x, to_y, started_at, arrive_at, status)
-        VALUES (?, 'zone', ?, ?, ?, ?, ?, ?, ?, ?, 'traveling')
+          (user_id, mission_type, target_zone_id, target_name, from_x, from_y, to_x, to_y, started_at, arrive_at, status, target_user_id, attacker_fleet_json, attacker_fleet_slot, attacker_admiral_id)
+        VALUES (?, 'zone', ?, ?, ?, ?, ?, ?, ?, ?, 'traveling', ?, ?, ?, ?)
       `,
-      [req.user.id, zoneId, zone.name, attackerBase.x, attackerBase.y, zone.map_x, zone.map_y, now, arriveAt]
+      [
+        req.user.id,
+        zoneId,
+        zone.name,
+        attackerBase.x,
+        attackerBase.y,
+        zone.map_x,
+        zone.map_y,
+        now,
+        arriveAt,
+        owner?.user_id || null,
+        JSON.stringify(fleet),
+        launch.slot,
+        launch.admiral?.id || null
+      ]
     );
+    if (owner?.user_id) {
+      const attackerPower = Math.floor(designFleetPower(fleet) * playerBonuses.combatMultiplier * (1 + Number(launch.admiral?.combatBonus || 0) * 0.9));
+      const attackerShipCount = fleet.reduce((sum, ship) => sum + Number(ship.quantity || 0), 0);
+      await run(
+        `
+          INSERT INTO incoming_alerts
+            (target_user_id, mission_id, attacker_user_id, attacker_username, attack_power, ship_count, arrive_at, status, created_at, target_kind, target_name)
+          VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, 'outpost', ?)
+        `,
+        [owner.user_id, missionResult.lastID, req.user.id, req.user.username, attackerPower, attackerShipCount, arriveAt, now, zone.name]
+      );
+    }
 
     return res.json({
       queued: true,
@@ -3679,9 +4756,19 @@ app.post("/admin/users/:id/reset", requireAuth, requireAdmin, async (req, res) =
       await run("DELETE FROM battle_records WHERE user_id = ?", [userId]);
       await run("DELETE FROM missions WHERE user_id = ? OR target_user_id = ?", [userId, userId]);
       await run("DELETE FROM incoming_alerts WHERE target_user_id = ? OR attacker_user_id = ?", [userId, userId]);
+      await run("DELETE FROM speedup_usage WHERE user_id = ?", [userId]);
       await run("DELETE FROM occupied_zones WHERE user_id = ?", [userId]);
+      await run("DELETE FROM zone_garrisons WHERE user_id = ?", [userId]);
+      await run("DELETE FROM fleet_groups WHERE user_id = ?", [userId]);
+      await run("DELETE FROM city_buildings WHERE user_id = ?", [userId]);
+      await run("DELETE FROM ship_trade_logs WHERE from_user_id = ? OR to_user_id = ?", [userId, userId]);
       await run("DELETE FROM admirals WHERE user_id = ?", [userId]);
       await ensureStarterDesign(userId);
+      await run(
+        "INSERT OR IGNORE INTO city_buildings (user_id, shipyard_level, government_level, housing_level, research_lab_level, tactical_center_level) VALUES (?, 1, 1, 1, 1, 1)",
+        [userId]
+      );
+      await ensureFleetGroups(userId);
       await run("COMMIT");
     } catch (err) {
       await run("ROLLBACK");

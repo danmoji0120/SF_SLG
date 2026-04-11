@@ -42,6 +42,10 @@ let showBaseOverlay = false;
 let detailPanelVisible = true;
 let alertPanelVisible = true;
 let uiScale = Number(localStorage.getItem(UI_SCALE_KEY) || 1);
+let fleetGroupsState = [];
+let cityState = null;
+let garrisonOverviewState = null;
+let garrisonZoneFilterId = null;
 
 const elements = {
   authPanel: document.getElementById("authPanel"),
@@ -60,6 +64,7 @@ const elements = {
   hudResources: document.getElementById("hudResources"),
   hudPower: document.getElementById("hudPower"),
   hudCommander: document.getElementById("hudCommander"),
+  hudCityBonus: document.getElementById("hudCityBonus"),
   missionHud: document.getElementById("missionHud"),
   missionHudText: document.getElementById("missionHudText"),
   missionSpeedupResource: document.getElementById("missionSpeedupResource"),
@@ -71,6 +76,7 @@ const elements = {
   closeAlertHudButton: document.getElementById("closeAlertHudButton"),
   zoomInButton: document.getElementById("zoomInButton"),
   zoomOutButton: document.getElementById("zoomOutButton"),
+  centerBaseButton: document.getElementById("centerBaseButton"),
   mapZoomLabel: document.getElementById("mapZoomLabel"),
   toggleDetailButton: document.getElementById("toggleDetailButton"),
   toggleAlertButton: document.getElementById("toggleAlertButton"),
@@ -78,6 +84,14 @@ const elements = {
   uiScaleRange: document.getElementById("uiScaleRange"),
   uiScaleLabel: document.getElementById("uiScaleLabel"),
   tradeLogView: document.getElementById("tradeLogView"),
+  shipTradeLogView: document.getElementById("shipTradeLogView"),
+  tradeTargetUserIdInput: document.getElementById("tradeTargetUserIdInput"),
+  tradeMetalAmountInput: document.getElementById("tradeMetalAmountInput"),
+  tradeFuelAmountInput: document.getElementById("tradeFuelAmountInput"),
+  tradeResourceButton: document.getElementById("tradeResourceButton"),
+  tradeShipDesignSelect: document.getElementById("tradeShipDesignSelect"),
+  tradeShipQtyInput: document.getElementById("tradeShipQtyInput"),
+  tradeShipButton: document.getElementById("tradeShipButton"),
   toggleDevButton: document.getElementById("toggleDevButton"),
   devPanel: document.getElementById("devPanel"),
   devView: document.getElementById("devView"),
@@ -101,6 +115,7 @@ const elements = {
   startProductionButton: document.getElementById("startProductionButton"),
   speedupProductionButton: document.getElementById("speedupProductionButton"),
   cancelProductionButton: document.getElementById("cancelProductionButton"),
+  resetProductionLogsButton: document.getElementById("resetProductionLogsButton"),
   productionSpeedupResource: document.getElementById("productionSpeedupResource"),
   productionSpeedupAmount: document.getElementById("productionSpeedupAmount"),
   resetBattleRecordsButton: document.getElementById("resetBattleRecordsButton"),
@@ -133,8 +148,11 @@ const elements = {
   resourcesView: document.getElementById("resourcesView"),
   productionView: document.getElementById("productionView"),
   fleetView: document.getElementById("fleetView"),
+  fleetGroupView: document.getElementById("fleetGroupView"),
   shipCostView: document.getElementById("shipCostView"),
   researchView: document.getElementById("researchView"),
+  cityView: document.getElementById("cityView"),
+  garrisonBattleView: document.getElementById("garrisonBattleView"),
   admiralView: document.getElementById("admiralView"),
   playerTargetView: document.getElementById("playerTargetView"),
   zoneMapView: document.getElementById("zoneMapView"),
@@ -180,6 +198,7 @@ function setBusy(isBusy) {
     elements.startProductionButton,
     elements.speedupProductionButton,
     elements.cancelProductionButton,
+    elements.resetProductionLogsButton,
     elements.cancelMissionButton,
     elements.speedupMissionButton,
     elements.designSubtabButton,
@@ -190,6 +209,9 @@ function setBusy(isBusy) {
     elements.resetBattleRecordsButton,
     elements.saveAdmiralPolicyButton,
     elements.toggleZoneSearchButton,
+    elements.tradeResourceButton,
+    elements.tradeShipButton,
+    elements.centerBaseButton,
     ...captureButtons,
     ...researchButtons,
     ...admiralButtons,
@@ -304,6 +326,16 @@ function showTab(tabName) {
   tabPanels.forEach((panel) => {
     panel.classList.toggle("active", panel.dataset.tabPanel === tabName);
   });
+
+  if (tabName === "city" && authToken) {
+    loadCity().catch(() => {});
+  } else if (tabName === "trade" && authToken) {
+    Promise.all([loadTradeLogs(), loadShipTradeLogs()]).catch(() => {});
+  } else if (tabName === "main" && authToken) {
+    loadFleetGroups().catch(() => {});
+  } else if (tabName === "garrison" && authToken) {
+    loadGarrisonOverview().catch(() => {});
+  }
 }
 
 function ownerColor(ownerId) {
@@ -318,6 +350,13 @@ function mapCoordX(percent) {
 
 function mapCoordY(percent) {
   return (Number(percent || 0) / Math.max(1, Number(mapConfig.maxY || 2000))) * MAP_HEIGHT;
+}
+
+function fleetSlotOptionsHtml() {
+  const limit = Math.min(5, Math.max(1, Number(cityState?.bonuses?.fleetSlotLimit || 3)));
+  return Array.from({ length: limit }, (_, idx) => idx + 1)
+    .map((slot) => `<option value="${slot}">함대 ${slot}</option>`)
+    .join("");
 }
 
 function applyUiScale(nextScale) {
@@ -563,7 +602,8 @@ function renderResources(resources) {
     base,
     zones,
     multiplier: Number(production.multiplier || 1),
-    commander: safeResources.commander || null
+    commander: safeResources.commander || null,
+    city: safeResources.city || null
   };
 
   elements.resourcesView.innerHTML = `
@@ -594,8 +634,13 @@ function renderHud() {
   const commanderLevel = Number(currentRatesState?.commander?.level || 1);
   const commanderXp = Number(currentRatesState?.commander?.xp || 0);
   const nextXp = Number(currentRatesState?.commander?.nextXp || 0);
+  const cityBonuses = currentRatesState?.city?.bonuses || {};
   elements.hudResources.textContent = `\uae08\uc18d ${Math.floor(currentResourcesState.metal).toLocaleString()} / \uc5f0\ub8cc ${Math.floor(currentResourcesState.fuel).toLocaleString()}`;
   elements.hudCommander.textContent = `\uc0ac\ub839\uad00 Lv.${commanderLevel} (${commanderXp}/${nextXp})`;
+  if (elements.hudCityBonus) {
+    elements.hudCityBonus.textContent =
+      `도시: 제작라인 ${Number(cityBonuses.buildLines || 1)}, 식민지 ${Number(cityBonuses.colonyCap || 0)}, 함대슬롯 ${Number(cityBonuses.fleetSlotLimit || 3)}`;
+  }
 }
 
 function renderIncomingAlerts(alerts) {
@@ -612,6 +657,7 @@ function renderIncomingAlerts(alerts) {
       return `
         <div class="alert-item">
           <strong>${alert.attackerUsername}</strong>
+          <span>${alert.targetKind === "outpost" ? `목표: 전초기지 ${alert.targetName || ""}` : "목표: 본진"}</span>
           <span>\uc804\ud22c\ub825 ${Number(alert.attackPower || 0).toLocaleString()} / \ud568\uc120 ${Number(alert.shipCount || 0)}\ucc99</span>
           <span>\ub3c4\ucc29 \uc608\uc815 ${formatSeconds(Math.max(0, Number(alert.remainingSeconds || 0)))}</span>
         </div>
@@ -706,8 +752,9 @@ function createSlotSelects() {
     const count = Number(hull.slots?.[category] || 1);
     const options = getCategoryOptions(category);
     container.innerHTML = Array.from({ length: count }, (_, idx) => {
+      const emptyOption = `<option value="">(\ube48 \uc2ac\ub86f)</option>`;
       const optionsHtml = options.map((item) => `<option value="${item.id}">${optionLabel(item)}</option>`).join("");
-      return `<select data-slot-category="${category}" data-slot-index="${idx}">${optionsHtml}</select>`;
+      return `<select data-slot-category="${category}" data-slot-index="${idx}">${emptyOption}${optionsHtml}</select>`;
     }).join("");
   }
 }
@@ -736,8 +783,6 @@ function calculateDesignPreview() {
     ...byCategory.defenses,
     ...byCategory.utilities
   ];
-  const expectedCount = Number(hull.slots.engine || 1) + Number(hull.slots.weapon || 1) + Number(hull.slots.defense || 1) + Number(hull.slots.utility || 1);
-  if (components.length !== expectedCount) return null;
 
   const totalPower = components.reduce((sum, item) => sum + item.powerCost, 0);
   const bonusPowerLimit = components.reduce((sum, item) => sum + Number(item.powerBonus || 0), 0);
@@ -751,8 +796,27 @@ function calculateDesignPreview() {
   const complexity = Math.pow(1 + totalPower / 110, 1.45);
   const slotWeight = hull.slots.engine * 0.6 + hull.slots.weapon * 1.2 + hull.slots.defense + hull.slots.utility * 0.7;
   const totalBuildTime = Math.max(20, Math.floor(hull.baseBuildTime * complexity + slotWeight * 25));
+  const monitorDefenseNeeded = Math.min(Number(hull.slots.defense || 0), 4);
+  const monitorRuleFailed = hull.key === "monitor" && (
+    byCategory.defenses.length < monitorDefenseNeeded || byCategory.weapons.length > 1
+  );
 
-  return { hull, byCategory, components, totalPower, bonusPowerLimit, effectivePowerLimit, totalMetalCost, totalFuelCost, finalHp, finalAttack, finalDefense, finalSpeed, totalBuildTime };
+  return {
+    hull,
+    byCategory,
+    components,
+    totalPower,
+    bonusPowerLimit,
+    effectivePowerLimit,
+    totalMetalCost,
+    totalFuelCost,
+    finalHp,
+    finalAttack,
+    finalDefense,
+    finalSpeed,
+    totalBuildTime,
+    monitorRuleFailed
+  };
 }
 
 function renderDesignPreview() {
@@ -762,7 +826,7 @@ function renderDesignPreview() {
     return;
   }
 
-  const overPower = preview.totalPower > preview.effectivePowerLimit;
+  const overPower = preview.totalPower > preview.effectivePowerLimit || preview.monitorRuleFailed;
   elements.designPreview.innerHTML = `
     <div class="stat-grid">
       <span>\uc120\uccb4 \uae30\ubcf8 \uc804\ud22c\ub825 ${Math.floor((preview.hull.baseHp * 0.12) + (preview.hull.baseSpeed * 4))}</span>
@@ -776,6 +840,7 @@ function renderDesignPreview() {
       <span>\uc0dd\uc0b0 \uc2dc\uac04 ${formatBuildHours(preview.totalBuildTime)}</span>
       <span>\uacf5\uaca9 \ubaa8\ub4c8 \ud569 +${preview.byCategory.weapons.reduce((sum, w) => sum + Number(w.attackBonus || 0), 0)}</span>
       <span>\ubc29\uc5b4 \ubaa8\ub4c8 \ud569 +${preview.byCategory.defenses.reduce((sum, w) => sum + Number(w.defenseBonus || 0), 0)}</span>
+      ${preview.hull.key === "monitor" ? `<span class="${preview.monitorRuleFailed ? "danger-text" : ""}">\ubaa8\ub2c8\ud130 \uc870\uac74: \ubc29\uc5b4 4\uce78 \uc774\uc0c1, \ubb34\uae30 1\uce78 \uc774\ud558</span>` : ""}
     </div>
   `;
 }
@@ -902,6 +967,11 @@ function renderProduction(data) {
       </div>
     `).join("")
     : `<div class="growth-item"><div>\ubcf4\uc720\ud55c \uc124\uacc4\ubcc4 \ud568\uc120\uc774 \uc5c6\uc2b5\ub2c8\ub2e4.</div></div>`;
+  if (elements.tradeShipDesignSelect) {
+    elements.tradeShipDesignSelect.innerHTML = owned.length
+      ? owned.map((item) => `<option value="${item.designId}">${item.designName || item.name} (${item.quantity}척)</option>`).join("")
+      : `<option value="">설계안 없음</option>`;
+  }
   updateDebug({ productionQueueCount: queue.length, ownedDesignFleetCount: owned.length });
 }
 
@@ -1287,6 +1357,14 @@ function focusPlayerOnMap(playerId) {
   selectPlayer(playerId);
 }
 
+function centerOnBase() {
+  if (!currentBase || !elements.zoneMapView) return;
+  const targetX = mapCoordX(currentBase.x || 0) * mapZoom;
+  const targetY = mapCoordY(currentBase.y || 0) * mapZoom;
+  elements.zoneMapView.scrollLeft = Math.max(0, targetX - elements.zoneMapView.clientWidth / 2);
+  elements.zoneMapView.scrollTop = Math.max(0, targetY - elements.zoneMapView.clientHeight / 2);
+}
+
 function renderPlayerSearchList() {
   if (!elements.playerSearchView) return;
   const players = filteredPlayers();
@@ -1510,7 +1588,15 @@ function renderSelectedZone() {
 
   const action = zone.occupied
     ? zone.ownedByMe
-      ? `<button type="button" disabled>\uc774\ubbf8 \uc810\ub839\ud55c \uac70\uc810</button>`
+      ? `
+        <div class="speedup-controls">
+          <label for="zoneGarrisonFleetSlot">주둔 함대</label>
+          <select id="zoneGarrisonFleetSlot">
+            ${fleetSlotOptionsHtml()}
+          </select>
+          <button type="button" data-garrison-zone="${zone.id}">주둔군 배치</button>
+        </div>
+      `
       : `<button type="button" data-capture-zone="${zone.id}" class="primary">\uc810\ub839\uc9c0 \ud0c8\ucde8</button>`
     : `<button type="button" data-capture-zone="${zone.id}" class="primary">\uc810\ub839 \ucd9c\uaca9</button>`;
 
@@ -1525,12 +1611,25 @@ function renderSelectedZone() {
       <span>\uc8fc\ub454\uad70 \uc804\ud22c\ub825: ${zone.actualPower}</span>
       <span>\uc8fc\ub454\uad70: ${fleetText(zone.garrison)}</span>
     </div>
+    <div class="speedup-controls">
+      <label for="zoneFleetSlotSelect">출격 함대</label>
+      <select id="zoneFleetSlotSelect">
+        ${fleetSlotOptionsHtml()}
+      </select>
+    </div>
     ${action}
   `;
 
   captureButtons = Array.from(document.querySelectorAll("[data-capture-zone]"));
   captureButtons.forEach((button) => {
-    button.addEventListener("click", () => captureZone(button.dataset.captureZone));
+    button.addEventListener("click", () => {
+      const slot = Number(elements.zoneDetailView.querySelector("#zoneFleetSlotSelect")?.value || 1);
+      captureZone(button.dataset.captureZone, slot);
+    });
+  });
+  elements.zoneDetailView.querySelector("[data-garrison-zone]")?.addEventListener("click", () => {
+    const slot = Number(elements.zoneDetailView.querySelector("#zoneGarrisonFleetSlot")?.value || 1);
+    assignZoneGarrison(zone.id, slot);
   });
   elements.zoneDetailView.querySelector("[data-close-detail]")?.addEventListener("click", () => setDetailPanelVisible(false));
 }
@@ -1555,6 +1654,10 @@ function renderSelectedPlayer() {
       <span>\ucd94\uc815 \uc790\uc6d0: \uae08\uc18d ${Number(player.estimatedMetal || 0).toLocaleString()}, \uc5f0\ub8cc ${Number(player.estimatedFuel || 0).toLocaleString()}</span>
       <span>\ubc30\uce58 \uc81c\ub3c5: ${admiral}</span>
     </div>
+    <div class="speedup-controls">
+      <label for="pvpFleetSlotSelect">출격 함대</label>
+      <select id="pvpFleetSlotSelect">${fleetSlotOptionsHtml()}</select>
+    </div>
     <div class="trade-box">
       <label for="tradeMetalInput">거래 금속</label>
       <input id="tradeMetalInput" type="number" min="0" value="0">
@@ -1567,9 +1670,17 @@ function renderSelectedPlayer() {
 
   pvpButtons = Array.from(document.querySelectorAll("[data-pvp-target]"));
   pvpButtons.forEach((button) => {
-    button.addEventListener("click", () => attackPlayer(button.dataset.pvpTarget));
+    button.addEventListener("click", () => {
+      const slot = Number(elements.zoneDetailView.querySelector("#pvpFleetSlotSelect")?.value || 1);
+      attackPlayer(button.dataset.pvpTarget, slot);
+    });
   });
-  elements.zoneDetailView.querySelector("[data-trade-target]")?.addEventListener("click", () => sendTrade(player.id));
+  elements.zoneDetailView.querySelector("[data-trade-target]")?.addEventListener("click", () => {
+    sendTrade(player.id);
+    if (elements.tradeTargetUserIdInput) {
+      elements.tradeTargetUserIdInput.value = String(player.id);
+    }
+  });
   elements.zoneDetailView.querySelector("[data-close-detail]")?.addEventListener("click", () => setDetailPanelVisible(false));
 }
 
@@ -1655,7 +1766,9 @@ async function loadFleet() {
   clearMessages();
   setBusy(true);
   try {
-    renderFleet(await api("/fleet"));
+    const [fleet, groups] = await Promise.all([api("/fleet"), api("/fleet-groups")]);
+    renderFleet(fleet);
+    renderFleetGroupsV2(groups);
     setStatus("\ud568\ub300 \uc815\ubcf4\ub97c \uac31\uc2e0\ud588\uc2b5\ub2c8\ub2e4.");
   } catch (err) {
     handleAuthError(err);
@@ -1955,6 +2068,469 @@ async function loadTradeLogs() {
     : `<div class="growth-item"><div>거래 기록이 없습니다.</div></div>`;
 }
 
+function renderShipTradeLogs(logs) {
+  if (!elements.shipTradeLogView) return;
+  const items = Array.isArray(logs) ? logs : [];
+  elements.shipTradeLogView.innerHTML = items.length
+    ? items.map((item) => {
+      const time = new Date(item.createdAt).toLocaleString();
+      return `<div class="growth-item"><div><strong>${item.fromName} -> ${item.toName}</strong><span>${item.designName} ${Number(item.quantity || 0).toLocaleString()}척</span><span>${time}</span></div></div>`;
+    }).join("")
+    : `<div class="growth-item"><div>함선 거래 기록이 없습니다.</div></div>`;
+}
+
+function renderFleetGroups(data) {
+  fleetGroupsState = Array.isArray(data?.groups) ? data.groups : [];
+  if (!elements.fleetGroupView) return;
+  const ownedMap = new Map((Array.isArray(data?.ownedShips) ? data.ownedShips : []).map((item) => [Number(item.designId), item]));
+  const admiralOptions = [`<option value="">없음</option>`]
+    .concat((Array.isArray(data?.admirals) ? data.admirals : [])
+      .filter((item) => String(item.status || "active") === "active")
+      .map((item) => `<option value="${item.id}">[${item.rarity}] ${item.name}</option>`))
+    .join("");
+
+  elements.fleetGroupView.innerHTML = fleetGroupsState.length
+    ? fleetGroupsState.map((group) => {
+      const preview = (group.ships || [])
+        .map((item) => {
+          const found = ownedMap.get(Number(item.designId));
+          return found ? `${found.designName} ${Number(item.quantity || 0)}척` : null;
+        })
+        .filter(Boolean)
+        .join(", ");
+      return `
+        <div class="growth-item">
+          <div>
+            <strong>함대 ${group.slot}: ${group.name}</strong>
+            <span>${preview || "편성 없음"}</span>
+            <span>제독: ${group.admiralName ? `[${group.admiralRarity}] ${group.admiralName}` : "없음"}</span>
+          </div>
+          <div class="button-row">
+            <button type="button" data-edit-fleet-group="${group.slot}">편성 수정</button>
+          </div>
+        </div>
+      `;
+    }).join("")
+    : `<div class="growth-item"><div>함대 편성 정보가 없습니다.</div></div>`;
+
+  Array.from(elements.fleetGroupView.querySelectorAll("[data-edit-fleet-group]")).forEach((button) => {
+    button.addEventListener("click", () => {
+      const slot = Number(button.dataset.editFleetGroup);
+      const group = fleetGroupsState.find((item) => Number(item.slot) === slot);
+      if (!group) return;
+      const raw = prompt(`함대 ${slot} 편성(JSON)\n예: [{\"designId\":1,\"quantity\":10}]`, JSON.stringify(group.ships || []));
+      if (raw == null) return;
+      const admiralRaw = prompt(`함대 ${slot} 제독 ID (없으면 빈칸)`, group.admiralId ? String(group.admiralId) : "");
+      let ships;
+      try {
+        ships = JSON.parse(raw);
+      } catch (err) {
+        setError("편성 JSON 형식이 올바르지 않습니다.");
+        return;
+      }
+      saveFleetGroup(slot, group.name, ships, admiralRaw ? Number(admiralRaw) : null);
+    });
+  });
+}
+
+function renderFleetGroupsV2(data) {
+  fleetGroupsState = Array.isArray(data?.groups) ? data.groups : [];
+  if (!elements.fleetGroupView) return;
+  const ownedShips = Array.isArray(data?.ownedShips) ? data.ownedShips : [];
+  const admirals = (Array.isArray(data?.admirals) ? data.admirals : []).filter((item) => String(item.status || "active") === "active");
+  const slotLimit = Math.min(5, Math.max(1, Number(data?.fleetSlotLimit || 3)));
+  const bySlot = new Map(fleetGroupsState.map((item) => [Number(item.slot), item]));
+  const admiralOptions = [`<option value="">없음</option>`]
+    .concat(admirals.map((item) => `<option value="${item.id}">[${item.rarity}] ${item.name}</option>`))
+    .join("");
+
+  elements.fleetGroupView.innerHTML = Array.from({ length: slotLimit }, (_, idx) => {
+    const slot = idx + 1;
+    const group = bySlot.get(slot) || { slot, name: `함대 ${slot}`, ships: [], admiralId: null };
+    const selectedMap = new Map((group.ships || []).map((item) => [Number(item.designId), Number(item.quantity || 0)]));
+    const rows = ownedShips.length
+      ? ownedShips.map((ship) => {
+        const qty = selectedMap.get(Number(ship.designId)) || 0;
+        return `
+          <label class="fleet-check-row">
+            <input type="checkbox" data-fleet-check="${slot}" data-design-id="${ship.designId}" ${qty > 0 ? "checked" : ""}>
+            <span>${ship.designName || ship.name} (보유 ${Number(ship.quantity || 0)}척)</span>
+            <input type="number" min="1" max="${Math.max(1, Number(ship.quantity || 1))}" value="${Math.max(1, qty || 1)}" data-fleet-qty="${slot}" data-design-id="${ship.designId}">
+          </label>
+        `;
+      }).join("")
+      : `<div class="hint">보유 함선이 없습니다.</div>`;
+
+    return `
+      <div class="growth-item fleet-builder">
+        <div>
+          <strong>함대 ${slot}</strong>
+          <span>체크 + 수량 입력, 선택 목록 드래그로 순서를 정하세요.</span>
+        </div>
+        <div class="design-grid">
+          <div>
+            <label>함대명</label>
+            <input type="text" data-fleet-name="${slot}" value="${group.name || `함대 ${slot}`}">
+          </div>
+          <div>
+            <label>배치 제독</label>
+            <select data-fleet-admiral="${slot}">${admiralOptions}</select>
+          </div>
+        </div>
+        <div class="fleet-checklist">${rows}</div>
+        <div>
+          <label>선택 목록(드래그)</label>
+          <ul class="fleet-selected-list" data-fleet-selected="${slot}"></ul>
+        </div>
+        <div class="button-row">
+          <button type="button" data-save-fleet="${slot}" class="primary">함대 ${slot} 저장</button>
+        </div>
+      </div>
+    `;
+  }).join("");
+
+  for (let slot = 1; slot <= slotLimit; slot += 1) {
+    const group = bySlot.get(slot) || {};
+    const admiralSelect = elements.fleetGroupView.querySelector(`[data-fleet-admiral="${slot}"]`);
+    if (admiralSelect) admiralSelect.value = group.admiralId ? String(group.admiralId) : "";
+  }
+
+  const bindDrag = (slot) => {
+    const list = elements.fleetGroupView.querySelector(`[data-fleet-selected="${slot}"]`);
+    if (!list) return;
+    let dragging = null;
+    Array.from(list.querySelectorAll("[data-fleet-selected-item]")).forEach((item) => {
+      item.addEventListener("dragstart", () => {
+        dragging = item;
+        item.classList.add("dragging");
+      });
+      item.addEventListener("dragend", () => {
+        item.classList.remove("dragging");
+        dragging = null;
+      });
+      item.addEventListener("dragover", (event) => {
+        event.preventDefault();
+        if (!dragging || dragging === item) return;
+        const rect = item.getBoundingClientRect();
+        const shouldBefore = event.clientY < rect.top + rect.height / 2;
+        if (shouldBefore) list.insertBefore(dragging, item);
+        else list.insertBefore(dragging, item.nextSibling);
+      });
+    });
+  };
+
+  const refreshSelectedList = (slot) => {
+    const container = elements.fleetGroupView.querySelector(`[data-fleet-selected="${slot}"]`);
+    if (!container) return;
+    const existingOrder = Array.from(container.querySelectorAll("[data-fleet-selected-item]")).map((item) => Number(item.dataset.designId));
+    const checks = Array.from(elements.fleetGroupView.querySelectorAll(`[data-fleet-check="${slot}"]`));
+    const selectedIds = checks.filter((item) => item.checked).map((item) => Number(item.dataset.designId));
+    const orderedIds = [
+      ...existingOrder.filter((id) => selectedIds.includes(id)),
+      ...selectedIds.filter((id) => !existingOrder.includes(id))
+    ];
+    container.innerHTML = orderedIds.map((designId) => {
+      const ship = ownedShips.find((item) => Number(item.designId) === designId);
+      const qtyInput = elements.fleetGroupView.querySelector(`[data-fleet-qty="${slot}"][data-design-id="${designId}"]`);
+      const qty = Math.max(1, Number(qtyInput?.value || 1));
+      return ship
+        ? `<li class="fleet-drag-item" draggable="true" data-fleet-selected-item="${slot}" data-design-id="${designId}">
+            <span>::</span><span>${ship.designName || ship.name}</span><span>${qty}척</span>
+          </li>`
+        : "";
+    }).join("");
+    bindDrag(slot);
+  };
+
+  Array.from(elements.fleetGroupView.querySelectorAll("[data-fleet-check]")).forEach((input) => {
+    input.addEventListener("change", () => refreshSelectedList(Number(input.dataset.fleetCheck)));
+  });
+  Array.from(elements.fleetGroupView.querySelectorAll("[data-fleet-qty]")).forEach((input) => {
+    input.addEventListener("input", () => refreshSelectedList(Number(input.dataset.fleetQty)));
+  });
+  for (let slot = 1; slot <= slotLimit; slot += 1) refreshSelectedList(slot);
+
+  Array.from(elements.fleetGroupView.querySelectorAll("[data-save-fleet]")).forEach((button) => {
+    button.addEventListener("click", () => {
+      const slot = Number(button.dataset.saveFleet);
+      const name = String(elements.fleetGroupView.querySelector(`[data-fleet-name="${slot}"]`)?.value || `함대 ${slot}`).trim();
+      const admiralIdRaw = elements.fleetGroupView.querySelector(`[data-fleet-admiral="${slot}"]`)?.value || "";
+      const selected = Array.from(elements.fleetGroupView.querySelectorAll(`[data-fleet-selected="${slot}"] [data-fleet-selected-item]`));
+      const ships = selected.map((item) => {
+        const designId = Number(item.dataset.designId);
+        const qtyInput = elements.fleetGroupView.querySelector(`[data-fleet-qty="${slot}"][data-design-id="${designId}"]`);
+        const maxOwned = Number(ownedShips.find((ship) => Number(ship.designId) === designId)?.quantity || 0);
+        const qty = Math.max(1, Math.min(maxOwned, Number(qtyInput?.value || 1)));
+        return { designId, quantity: qty };
+      }).filter((item) => Number(item.designId) > 0 && Number(item.quantity) > 0);
+      saveFleetGroup(slot, name, ships, admiralIdRaw ? Number(admiralIdRaw) : null);
+    });
+  });
+}
+
+async function loadFleetGroups() {
+  const data = await api("/fleet-groups");
+  renderFleetGroupsV2(data);
+}
+
+async function saveFleetGroup(slot, name, ships, admiralId = null) {
+  clearMessages();
+  setBusy(true);
+  try {
+    const data = await api(`/fleet-groups/${slot}`, {
+      method: "PUT",
+      body: JSON.stringify({ name, ships, admiralId })
+    });
+    await loadFleetGroups();
+    setStatus(data.message);
+  } catch (err) {
+    handleAuthError(err);
+  } finally {
+    setBusy(false);
+  }
+}
+
+function renderCity(data) {
+  cityState = data || null;
+  if (!elements.cityView) return;
+  const buildings = Array.isArray(data?.buildings) ? data.buildings : [];
+  const bonuses = data?.bonuses || {};
+  elements.cityView.innerHTML = buildings.length
+    ? buildings.map((item) => `
+      <div class="growth-item">
+        <div>
+          <strong>${item.name} Lv.${item.level}</strong>
+          <span>${item.description}</span>
+          <span>다음 업그레이드: 금속 ${Number(item.nextCost?.metal || 0).toLocaleString()}, 연료 ${Number(item.nextCost?.fuel || 0).toLocaleString()}</span>
+        </div>
+        <button type="button" data-upgrade-city="${item.key}">업그레이드</button>
+      </div>
+    `).join("")
+    : `<div class="growth-item"><div>도시 데이터가 없습니다.</div></div>`;
+
+  elements.cityView.insertAdjacentHTML("beforeend", `
+    <div class="growth-item">
+      <div>
+        <strong>도시 보너스 요약</strong>
+        <span>기초 생산 +금속 ${Number(bonuses.baseMetalFlat || 0)} / +연료 ${Number(bonuses.baseFuelFlat || 0)}</span>
+        <span>전투력 +${Math.round(Number(bonuses.combatBonus || 0) * 100)}%, 이동 +${Math.round(Number(bonuses.movementBonus || 0) * 100)}%</span>
+        <span>식민지 상한 ${Number(bonuses.colonyCap || 0)} / 연구 상한 ${Number(bonuses.researchCap || 0)} / 함선 보유 상한 ${Number(bonuses.populationCap || 0)}</span>
+        <span>제작 라인 ${Number(bonuses.buildLines || 1)} / 제작 시간 배율 x${Number(bonuses.buildTimeMultiplier || 1).toFixed(2)}</span>
+      </div>
+    </div>
+  `);
+  Array.from(elements.cityView.querySelectorAll("[data-upgrade-city]")).forEach((button) => {
+    button.addEventListener("click", () => upgradeCityBuilding(button.dataset.upgradeCity));
+  });
+}
+
+async function loadCity() {
+  renderCity(await api("/city"));
+}
+
+async function upgradeCityBuilding(key) {
+  clearMessages();
+  setBusy(true);
+  try {
+    const data = await api(`/city/${key}/upgrade`, { method: "POST" });
+    if (data?.resources) {
+      renderResources({
+        metal: data.resources.metal,
+        fuel: data.resources.fuel,
+        production: {
+          metalPerSecond: currentRatesState.metalPerSecond,
+          fuelPerSecond: currentRatesState.fuelPerSecond,
+          base: currentRatesState.base,
+          zones: currentRatesState.zones,
+          multiplier: currentRatesState.multiplier
+        },
+        incomingAlerts
+      });
+    }
+    renderCity(data.city);
+    setStatus(data.message);
+  } catch (err) {
+    handleAuthError(err);
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function assignZoneGarrison(zoneId, fleetSlot) {
+  clearMessages();
+  setBusy(true);
+  try {
+    const data = await api(`/zones/${zoneId}/garrison`, {
+      method: "POST",
+      body: JSON.stringify({ fleetSlot })
+    });
+    setStatus(data.message);
+    await loadZones();
+  } catch (err) {
+    handleAuthError(err);
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function resetProductionLogs() {
+  clearMessages();
+  setBusy(true);
+  try {
+    const data = await api("/production/logs", { method: "DELETE" });
+    productionQueueState = Array.isArray(data?.queue) ? data.queue : [];
+    renderProductionQueueRealtime();
+    setStatus(data.message);
+  } catch (err) {
+    handleAuthError(err);
+  } finally {
+    setBusy(false);
+  }
+}
+
+function renderGarrisonOverview(data) {
+  garrisonOverviewState = data || null;
+  if (!elements.garrisonBattleView) return;
+  const zones = Array.isArray(data?.zones) ? data.zones : [];
+  const alerts = Array.isArray(data?.alerts) ? data.alerts : [];
+  const records = Array.isArray(data?.records) ? data.records : [];
+
+  const zoneHtml = zones.length
+    ? zones.map((zone) => `
+      <div class="growth-item">
+        <div>
+          <strong>Lv.${zone.level} ${zone.zoneName}</strong>
+          <span>주둔 전투력 ${Number(zone.assignedPower || 0).toLocaleString()}</span>
+          <span>${(zone.assignedShips || []).map((ship) => `${ship.designName} ${ship.quantity}척`).join(", ") || "주둔 편성 없음"}</span>
+        </div>
+      </div>
+    `).join("")
+    : `<div class="growth-item"><div>점령지가 없습니다.</div></div>`;
+
+  const alertHtml = alerts.length
+    ? alerts.map((item) => `
+      <div class="growth-item">
+        <div>
+          <strong>${item.targetKind === "outpost" ? `전초기지 ${item.targetName}` : "본진"} 공격 경보</strong>
+          <span>${item.attackerUsername} / 전투력 ${Number(item.attackPower || 0).toLocaleString()} / 함선 ${Number(item.shipCount || 0)}척</span>
+          <span>도착까지 ${formatSeconds(Math.max(0, Number(item.remainingSeconds || 0)))}</span>
+        </div>
+      </div>
+    `).join("")
+    : `<div class="growth-item"><div>현재 침공 경보가 없습니다.</div></div>`;
+
+  const recordHtml = records.length
+    ? records.slice(0, 20).map((item) => `
+      <div class="growth-item">
+        <div>
+          <strong>${item.title} / ${item.result}</strong>
+          <span>${new Date(item.createdAt).toLocaleString()}</span>
+          <span>${Array.isArray(item.log) ? item.log.slice(0, 2).join(" / ") : ""}</span>
+        </div>
+      </div>
+    `).join("")
+    : `<div class="growth-item"><div>주둔 전투 기록이 없습니다.</div></div>`;
+
+  elements.garrisonBattleView.innerHTML = `
+    <div class="growth-item"><div><strong>침공 경보</strong></div></div>
+    ${alertHtml}
+    <div class="growth-item"><div><strong>점령지 주둔 현황</strong></div></div>
+    ${zoneHtml}
+    <div class="growth-item"><div><strong>주둔 전투 기록</strong></div></div>
+    ${recordHtml}
+  `;
+}
+
+function renderGarrisonOverviewV2(data) {
+  garrisonOverviewState = data || null;
+  if (!elements.garrisonBattleView) return;
+  const zones = Array.isArray(data?.zones) ? data.zones : [];
+  const alerts = Array.isArray(data?.alerts) ? data.alerts : [];
+  const records = Array.isArray(data?.records) ? data.records : [];
+  if (!zones.some((zone) => Number(zone.zoneId) === Number(garrisonZoneFilterId))) {
+    garrisonZoneFilterId = null;
+  }
+  const activeZone = zones.find((zone) => Number(zone.zoneId) === Number(garrisonZoneFilterId)) || null;
+
+  const zoneFilterHtml = zones.length
+    ? zones.map((zone) => `
+      <button type="button" class="${Number(zone.zoneId) === Number(garrisonZoneFilterId) ? "active" : ""}" data-garrison-zone-filter="${zone.zoneId}">
+        Lv.${zone.level} ${zone.zoneName}
+      </button>
+    `).join("")
+    : `<span class="hint">점령지가 없습니다.</span>`;
+
+  const filteredRecords = activeZone
+    ? records.filter((item) => String(item.title || "").includes(activeZone.zoneName))
+    : records;
+
+  const zoneHtml = zones.length
+    ? zones.map((zone) => `
+      <div class="growth-item">
+        <div>
+          <strong>Lv.${zone.level} ${zone.zoneName}</strong>
+          <span>주둔 전투력 ${Number(zone.assignedPower || 0).toLocaleString()}</span>
+          <span>${(zone.assignedShips || []).map((ship) => `${ship.designName} ${ship.quantity}척`).join(", ") || "주둔 편성 없음"}</span>
+        </div>
+      </div>
+    `).join("")
+    : `<div class="growth-item"><div>점령지가 없습니다.</div></div>`;
+
+  const alertHtml = alerts.length
+    ? alerts.map((item) => `
+      <div class="growth-item">
+        <div>
+          <strong>${item.targetKind === "outpost" ? `전초기지 ${item.targetName}` : "본진"} 공격 경보</strong>
+          <span>${item.attackerUsername} / 전투력 ${Number(item.attackPower || 0).toLocaleString()} / 함선 ${Number(item.shipCount || 0)}척</span>
+          <span>도착까지 ${formatSeconds(Math.max(0, Number(item.remainingSeconds || 0)))}</span>
+        </div>
+      </div>
+    `).join("")
+    : `<div class="growth-item"><div>현재 침공 경보가 없습니다.</div></div>`;
+
+  const recordHtml = filteredRecords.length
+    ? filteredRecords.slice(0, 20).map((item) => `
+      <div class="growth-item">
+        <div>
+          <strong>${item.title} / ${item.result}</strong>
+          <span>${new Date(item.createdAt).toLocaleString()}</span>
+          <span>${Array.isArray(item.log) ? item.log.slice(0, 2).join(" / ") : ""}</span>
+        </div>
+      </div>
+    `).join("")
+    : `<div class="growth-item"><div>${activeZone ? `${activeZone.zoneName} 관련 전투 기록이 없습니다.` : "주둔 전투 기록이 없습니다."}</div></div>`;
+
+  elements.garrisonBattleView.innerHTML = `
+    <div class="growth-item">
+      <div>
+        <strong>전초기지 로그 필터</strong>
+        <div class="button-row">
+          <button type="button" ${activeZone ? "" : "class=\"active\""} data-garrison-zone-filter="all">전체</button>
+          ${zoneFilterHtml}
+        </div>
+      </div>
+    </div>
+    <div class="growth-item"><div><strong>침공 경보</strong></div></div>
+    ${alertHtml}
+    <div class="growth-item"><div><strong>점령지 주둔 현황</strong></div></div>
+    ${zoneHtml}
+    <div class="growth-item"><div><strong>주둔 전투 기록</strong></div></div>
+    ${recordHtml}
+  `;
+
+  Array.from(elements.garrisonBattleView.querySelectorAll("[data-garrison-zone-filter]")).forEach((button) => {
+    button.addEventListener("click", () => {
+      const value = String(button.dataset.garrisonZoneFilter || "");
+      garrisonZoneFilterId = value === "all" ? null : Number(value);
+      renderGarrisonOverviewV2(garrisonOverviewState);
+    });
+  });
+}
+
+async function loadGarrisonOverview() {
+  renderGarrisonOverviewV2(await api("/garrison/overview"));
+}
+
 async function loadGrowth() {
   const [research, admirals] = await Promise.all([
     api("/research"),
@@ -2151,13 +2727,13 @@ async function devDeleteUser(userId) {
   }
 }
 
-async function attackPlayer(targetUserId) {
+async function attackPlayer(targetUserId, fleetSlot = 1) {
   clearMessages();
   setBusy(true);
   try {
     const data = await api("/pvp/attack", {
       method: "POST",
-      body: JSON.stringify({ targetUserId: Number(targetUserId) })
+      body: JSON.stringify({ targetUserId: Number(targetUserId), fleetSlot: Number(fleetSlot || 1) })
     });
     if (data?.to) showRouteTo(data.to, data.travelTimeSeconds);
     await Promise.all([loadPlayers(), loadZones(), refreshMissionsAndRecords()]);
@@ -2206,6 +2782,69 @@ async function sendTrade(targetUserId) {
   }
 }
 
+async function sendResourceTradeFromTab() {
+  const targetUserId = Number(elements.tradeTargetUserIdInput?.value || 0);
+  const metal = Number(elements.tradeMetalAmountInput?.value || 0);
+  const fuel = Number(elements.tradeFuelAmountInput?.value || 0);
+  if (!targetUserId) {
+    setError("거래 대상 유저 ID를 입력하세요.");
+    return;
+  }
+  clearMessages();
+  setBusy(true);
+  try {
+    const data = await api("/trade/transfer", {
+      method: "POST",
+      body: JSON.stringify({ toUserId: targetUserId, metal, fuel })
+    });
+    setStatus(data.message);
+    await Promise.all([loadResources(), loadTradeLogs()]);
+  } catch (err) {
+    handleAuthError(err);
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function loadShipTradeLogs() {
+  const data = await api("/trade/ship-logs");
+  renderShipTradeLogs(data?.logs);
+}
+
+async function sendShipTrade() {
+  const targetUserId = Number(elements.tradeTargetUserIdInput?.value || 0);
+  const designId = Number(elements.tradeShipDesignSelect?.value || 0);
+  const quantity = Number(elements.tradeShipQtyInput?.value || 0);
+  if (!targetUserId || !designId || quantity < 1) {
+    setError("함선 거래 대상/설계안/수량을 확인하세요.");
+    return;
+  }
+  clearMessages();
+  setBusy(true);
+  try {
+    const data = await api("/trade/ships", {
+      method: "POST",
+      body: JSON.stringify({ toUserId: targetUserId, designId, quantity })
+    });
+    setStatus(data.message);
+    if (Array.isArray(data?.ownedShips)) {
+      elements.ownedShipsView.innerHTML = data.ownedShips.length
+        ? data.ownedShips.map((item) => `
+          <div class="growth-item">
+            <div><strong>${item.designName}</strong><span>${item.hullName}</span></div>
+            <span>${Number(item.quantity || 0)}척</span>
+          </div>
+        `).join("")
+        : `<div class="growth-item"><div>보유 함선이 없습니다.</div></div>`;
+    }
+    await Promise.all([loadFleet(), loadShipTradeLogs()]);
+  } catch (err) {
+    handleAuthError(err);
+  } finally {
+    setBusy(false);
+  }
+}
+
 async function startBattle() {
   clearMessages();
   loadBattleRecords().catch(() => {});
@@ -2213,11 +2852,14 @@ async function startBattle() {
   setStatus("\uc804\ud22c\uae30\ub85d\uc744 \uc5f4\uc5c8\uc2b5\ub2c8\ub2e4.");
 }
 
-async function captureZone(zoneId) {
+async function captureZone(zoneId, fleetSlot = 1) {
   clearMessages();
   setBusy(true);
   try {
-    const data = await api(`/zones/${zoneId}/capture`, { method: "POST" });
+    const data = await api(`/zones/${zoneId}/capture`, {
+      method: "POST",
+      body: JSON.stringify({ fleetSlot: Number(fleetSlot || 1) })
+    });
     if (data?.to) showRouteTo(data.to, data.travelTimeSeconds);
     await Promise.all([loadZones(), refreshMissionsAndRecords()]);
     showTab("battle");
@@ -2230,7 +2872,7 @@ async function captureZone(zoneId) {
 }
 
 async function refreshAll() {
-  const [resources, fleet, map, empire, research, admirals, players, options, designs, production, missions, records, trades] = await Promise.all([
+  const [resources, fleet, map, empire, research, admirals, players, options, designs, production, missions, records, trades, shipTrades, city, fleetGroups, garrison] = await Promise.all([
     api("/resources"),
     api("/fleet"),
     api("/map"),
@@ -2243,7 +2885,11 @@ async function refreshAll() {
     api("/production"),
     api("/missions"),
     api("/battle-records"),
-    api("/trade/logs")
+    api("/trade/logs"),
+    api("/trade/ship-logs"),
+    api("/city"),
+    api("/fleet-groups"),
+    api("/garrison/overview")
   ]);
 
   renderResources(resources);
@@ -2251,8 +2897,11 @@ async function refreshAll() {
   renderMap(map);
   renderEmpire(empire);
   renderResearch(research);
+  renderCity(city);
   renderAdmirals(admirals);
   renderPlayers(players);
+  renderFleetGroupsV2(fleetGroups);
+  renderGarrisonOverviewV2(garrison);
   shipyardOptions = options;
   renderShipyardOptions();
   renderDesigns(designs);
@@ -2266,6 +2915,7 @@ async function refreshAll() {
       ? logs.map((item) => `<div class="growth-item"><div><strong>${item.fromName} -> ${item.toName}</strong><span>금속 ${Number(item.metal || 0).toLocaleString()} / 연료 ${Number(item.fuel || 0).toLocaleString()}</span></div></div>`).join("")
       : `<div class="growth-item"><div>거래 기록이 없습니다.</div></div>`;
   }
+  renderShipTradeLogs(shipTrades?.logs);
   updateDebug({
     session: {
       username: localStorage.getItem(USERNAME_KEY) || "",
@@ -2317,6 +2967,7 @@ function bindEvents() {
   elements.startProductionButton.addEventListener("click", startDesignProduction);
   elements.speedupProductionButton.addEventListener("click", speedupProduction);
   elements.cancelProductionButton.addEventListener("click", cancelProduction);
+  elements.resetProductionLogsButton?.addEventListener("click", resetProductionLogs);
   elements.cancelMissionButton.addEventListener("click", cancelMission);
   elements.speedupMissionButton.addEventListener("click", speedupMission);
   elements.toggleDevButton.addEventListener("click", toggleDevPanel);
@@ -2324,6 +2975,7 @@ function bindEvents() {
   elements.refreshDevUsersButton.addEventListener("click", () => refreshDevUsers().catch(handleAuthError));
   elements.zoomInButton?.addEventListener("click", () => applyMapZoom(mapZoom + 0.1));
   elements.zoomOutButton?.addEventListener("click", () => applyMapZoom(mapZoom - 0.1));
+  elements.centerBaseButton?.addEventListener("click", centerOnBase);
   elements.uiScaleRange?.addEventListener("input", () => applyUiScale(Number(elements.uiScaleRange.value)));
   elements.toggleDetailButton?.addEventListener("click", () => setDetailPanelVisible(!detailPanelVisible));
   elements.toggleAlertButton?.addEventListener("click", () => setAlertPanelVisible(!alertPanelVisible));
@@ -2334,6 +2986,8 @@ function bindEvents() {
   elements.productionDesignSelect.addEventListener("change", renderSelectedProductionDesign);
   elements.resetBattleRecordsButton.addEventListener("click", resetBattleRecords);
   elements.saveAdmiralPolicyButton.addEventListener("click", saveAdmiralPolicy);
+  elements.tradeResourceButton?.addEventListener("click", sendResourceTradeFromTab);
+  elements.tradeShipButton?.addEventListener("click", sendShipTrade);
   elements.baseMoveX.addEventListener("input", renderMoveCost);
   elements.baseMoveY.addEventListener("input", renderMoveCost);
 

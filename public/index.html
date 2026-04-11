@@ -45,6 +45,7 @@
         <div id="hudResources">&#44552;&#49549; 0 / &#50672;&#47308; 0</div>
         <div id="hudPower">&#51204;&#53804;&#47141; 0</div>
         <div id="hudCommander">Lv.1</div>
+        <div id="hudCityBonus">&#46020;&#49884; &#48372;&#45320;&#49828;</div>
       </section>
 
       <section id="missionHud" class="mission-hud hidden draggable-window">
@@ -54,7 +55,7 @@
             <option value="fuel">&#50672;&#47308;</option>
             <option value="metal">&#44552;&#49549;</option>
           </select>
-          <input id="missionSpeedupAmount" type="number" min="1" value="600">
+          <input id="missionSpeedupAmount" type="number" min="1" value="5000">
         </div>
         <div class="button-row">
           <button id="cancelMissionButton" type="button">&#52636;&#44201; &#52712;&#49548;</button>
@@ -86,9 +87,12 @@
       <nav class="tab-nav" aria-label="game sections">
         <button type="button" class="tab-button" data-tab="main">&#47700;&#51064;</button>
         <button type="button" class="tab-button active" data-tab="map">&#51648;&#46020;</button>
+        <button type="button" class="tab-button" data-tab="city">&#46020;&#49884;</button>
         <button type="button" class="tab-button" data-tab="production">&#49373;&#49328;</button>
         <button type="button" class="tab-button" data-tab="growth">&#49457;&#51109;</button>
+        <button type="button" class="tab-button" data-tab="trade">&#44144;&#47000;</button>
         <button type="button" class="tab-button" data-tab="battle">&#51204;&#53804;&#44592;&#47197;</button>
+        <button type="button" class="tab-button" data-tab="garrison">&#51452;&#46164;&#51204;&#53804;</button>
       </nav>
 
       <section class="tab-panel" data-tab-panel="main">
@@ -106,6 +110,11 @@
         </div>
 
         <article class="card">
+          <h3>&#54632;&#45824; &#51648;&#55064; / &#51452;&#46164;</h3>
+          <div id="fleetGroupView" class="growth-list">&#48520;&#47084;&#50724;&#45716; &#51473;...</div>
+        </article>
+
+        <article class="card">
           <h3>&#51216;&#47161;&#51648;</h3>
           <div id="empireView" class="zone-list">&#50500;&#51649; &#51216;&#47161;&#51648;&#44032; &#50630;&#49845;&#45768;&#45796;.</div>
         </article>
@@ -121,6 +130,7 @@
           <span id="uiScaleLabel">100%</span>
           <button id="toggleDetailButton" type="button">&#49345;&#49464; &#52397;/&#50500;&#50724;</button>
           <button id="toggleAlertButton" type="button">&#44221;&#44256; &#52397;/&#50500;&#50724;</button>
+          <button id="centerBaseButton" type="button">&#45236; &#44592;&#51648; &#52286;&#44592;</button>
         </div>
         <article class="card map-base-overlay hidden draggable-window" id="mapBaseOverlay">
           <h3>&#45236; &#44592;&#51648; <button id="closeBaseOverlayButton" type="button">X</button></h3>
@@ -245,12 +255,13 @@
                 <option value="fuel">&#50672;&#47308;</option>
                 <option value="metal">&#44552;&#49549;</option>
               </select>
-              <input id="productionSpeedupAmount" type="number" min="1" value="500">
+              <input id="productionSpeedupAmount" type="number" min="1" value="5000">
             </div>
             <div class="button-row">
               <button id="startProductionButton" type="button" class="primary">&#49373;&#49328; &#49884;&#51089;</button>
               <button id="speedupProductionButton" type="button">&#44032;&#49549;</button>
               <button id="cancelProductionButton" type="button">&#49373;&#49328; &#52712;&#49548;</button>
+              <button id="resetProductionLogsButton" type="button">&#49373;&#49328; &#47196;&#44536; &#52488;&#44592;&#54868;</button>
             </div>
             <div id="productionQueueView" class="growth-list"></div>
             <div id="ownedShipsView" class="growth-list"></div>
@@ -284,6 +295,45 @@
         </div>
       </section>
 
+      <section class="tab-panel" data-tab-panel="city">
+        <article class="card">
+          <h3>&#46020;&#49884; &#44148;&#47932;</h3>
+          <div id="cityView" class="growth-list">&#48520;&#47084;&#50724;&#45716; &#51473;...</div>
+        </article>
+      </section>
+
+      <section class="tab-panel" data-tab-panel="trade">
+        <div class="grid">
+          <article class="card">
+            <h3>&#51088;&#50896; &#44144;&#47000;</h3>
+            <label for="tradeTargetUserIdInput">&#49345;&#45824; &#50976;&#51200; ID</label>
+            <input id="tradeTargetUserIdInput" type="number" min="1" value="2">
+            <div class="design-grid">
+              <div>
+                <label for="tradeMetalAmountInput">&#44552;&#49549;</label>
+                <input id="tradeMetalAmountInput" type="number" min="0" value="0">
+              </div>
+              <div>
+                <label for="tradeFuelAmountInput">&#50672;&#47308;</label>
+                <input id="tradeFuelAmountInput" type="number" min="0" value="0">
+              </div>
+            </div>
+            <button id="tradeResourceButton" type="button" class="primary">&#51088;&#50896; &#51204;&#49569;</button>
+            <div id="tradeLogView" class="growth-list"></div>
+          </article>
+
+          <article class="card">
+            <h3>&#54632;&#49440; &#44144;&#47000;</h3>
+            <label for="tradeShipDesignSelect">&#49444;&#44228;&#50504;</label>
+            <select id="tradeShipDesignSelect"></select>
+            <label for="tradeShipQtyInput">&#49688;&#47049;</label>
+            <input id="tradeShipQtyInput" type="number" min="1" value="1">
+            <button id="tradeShipButton" type="button" class="primary">&#54632;&#49440; &#51204;&#49569;</button>
+            <div id="shipTradeLogView" class="growth-list"></div>
+          </article>
+        </div>
+      </section>
+
       <section class="tab-panel" data-tab-panel="battle">
         <article class="card">
           <h3>&#51204;&#53804;&#44592;&#47197;</h3>
@@ -291,7 +341,13 @@
             <button id="resetBattleRecordsButton" type="button">&#44592;&#47197; &#52488;&#44592;&#54868;</button>
           </div>
           <pre id="battleLog">&#50500;&#51649; &#51204;&#53804; &#44592;&#47197;&#51060; &#50630;&#49845;&#45768;&#45796;.</pre>
-          <div id="tradeLogView" class="growth-list"></div>
+        </article>
+      </section>
+
+      <section class="tab-panel" data-tab-panel="garrison">
+        <article class="card">
+          <h3>&#51452;&#46164;&#44396; &#51204;&#53804;</h3>
+          <div id="garrisonBattleView" class="growth-list">&#48520;&#47084;&#50724;&#45716; &#51473;...</div>
         </article>
       </section>
     </section>
