@@ -150,6 +150,79 @@ body:has(#gamePanel:not(.hidden)) {
   backdrop-filter: blur(8px);
 }
 
+.floating-hud {
+  position: fixed;
+  top: 96px;
+  left: 14px;
+  z-index: 41;
+  display: grid;
+  gap: 6px;
+  min-width: 240px;
+  padding: 10px 12px;
+  color: #f5f7fb;
+  background: rgba(8, 13, 17, 0.8);
+  border: 1px solid rgba(155, 183, 201, 0.24);
+  border-radius: 8px;
+  backdrop-filter: blur(8px);
+}
+
+.floating-hud > div {
+  padding: 4px 6px;
+  background: rgba(17, 25, 34, 0.9);
+  border: 1px solid #3b5364;
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+.mission-hud {
+  position: fixed;
+  top: 96px;
+  right: 14px;
+  z-index: 45;
+  min-width: 250px;
+  max-width: min(360px, calc(100vw - 28px));
+  padding: 12px;
+  color: #f5f7fb;
+  background: rgba(8, 13, 17, 0.88);
+  border: 1px solid rgba(242, 211, 107, 0.45);
+  border-radius: 8px;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.34);
+  backdrop-filter: blur(8px);
+}
+
+.mission-hud .button-row {
+  margin-bottom: 0;
+}
+
+.dev-toggle {
+  position: fixed;
+  left: 14px;
+  top: 210px;
+  z-index: 45;
+  min-height: 34px;
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
+.dev-panel {
+  position: fixed;
+  left: 14px;
+  top: 250px;
+  z-index: 45;
+  width: min(420px, calc(100vw - 28px));
+  max-height: min(52vh, 420px);
+  overflow: auto;
+  padding: 8px;
+  background: rgba(8, 13, 17, 0.9);
+  border: 1px solid rgba(155, 183, 201, 0.28);
+  border-radius: 8px;
+}
+
+.dev-panel pre {
+  min-height: 0;
+  font-size: 12px;
+}
+
 .card {
   padding: 18px;
 }
@@ -222,6 +295,26 @@ body:has(#gamePanel:not(.hidden)) {
   margin-bottom: 14px;
 }
 
+.subtab-nav {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.subtab-nav button.active {
+  background: #0f766e;
+  border-color: #20a397;
+}
+
+.subtab-section {
+  display: none;
+}
+
+.subtab-section.active {
+  display: block;
+}
+
 #gamePanel .tab-panel:not(.map-panel) {
   position: fixed;
   left: 14px;
@@ -246,7 +339,7 @@ body:has(#gamePanel:not(.hidden)) {
   z-index: 20;
 }
 
-#gamePanel .map-panel > .card {
+#gamePanel .map-panel > .map-canvas-card {
   position: absolute;
   inset: 0;
   padding: 0;
@@ -257,7 +350,7 @@ body:has(#gamePanel:not(.hidden)) {
   box-shadow: none;
 }
 
-#gamePanel .map-panel > .card > h3 {
+#gamePanel .map-panel > .map-canvas-card > h3 {
   position: fixed;
   left: 14px;
   top: 112px;
@@ -268,6 +361,26 @@ body:has(#gamePanel:not(.hidden)) {
   border: 1px solid rgba(155, 183, 201, 0.22);
   border-radius: 8px;
   backdrop-filter: blur(8px);
+}
+
+#gamePanel .map-panel > .map-base-overlay {
+  position: fixed;
+  left: 14px;
+  top: 268px;
+  z-index: 36;
+  width: min(420px, calc(100vw - 28px));
+  max-height: min(46vh, 420px);
+  overflow: auto;
+  padding: 14px;
+  background: rgba(8, 13, 17, 0.86);
+  border: 1px solid rgba(155, 183, 201, 0.28);
+  border-radius: 8px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.34);
+  backdrop-filter: blur(8px);
+}
+
+#gamePanel .map-panel > .map-base-overlay h3 {
+  margin-bottom: 10px;
 }
 
 .ship-grid {
@@ -377,7 +490,7 @@ body:has(#gamePanel:not(.hidden)) {
   width: 100%;
   height: 100%;
   min-height: 100vh;
-  overflow: hidden;
+  overflow: auto;
   cursor: grab;
   user-select: none;
   touch-action: none;
@@ -494,9 +607,24 @@ body:has(#gamePanel:not(.hidden)) {
   display: grid;
   place-items: center;
   width: 100%;
-  height: 100%;
+  height: calc(100% - 12px);
   font-size: 13px;
   font-weight: 700;
+}
+
+.map-node small {
+  position: absolute;
+  left: 50%;
+  bottom: -14px;
+  transform: translateX(-50%);
+  min-width: 24px;
+  padding: 1px 5px;
+  color: #f5f7fb;
+  background: rgba(8, 13, 17, 0.88);
+  border: 1px solid #3b5364;
+  border-radius: 8px;
+  font-size: 10px;
+  line-height: 1.2;
 }
 
 .map-node.level-1 {
@@ -920,6 +1048,32 @@ pre {
     flex-wrap: nowrap;
   }
 
+  .floating-hud {
+    left: 10px;
+    top: 176px;
+    min-width: 210px;
+    padding: 8px;
+  }
+
+  .mission-hud {
+    top: 176px;
+    right: 10px;
+    min-width: 210px;
+    max-width: 220px;
+    padding: 10px;
+  }
+
+  .dev-toggle {
+    left: 10px;
+    top: 306px;
+  }
+
+  .dev-panel {
+    left: 10px;
+    top: 342px;
+    max-height: 36vh;
+  }
+
   #gamePanel .game-actions button {
     flex: 0 0 auto;
   }
@@ -936,9 +1090,18 @@ pre {
     right: 10px;
   }
 
-  #gamePanel .map-panel > .card > h3 {
+  #gamePanel .map-panel > .map-canvas-card > h3 {
     top: 178px;
     left: 10px;
+  }
+
+  #gamePanel .map-panel > .map-base-overlay {
+    top: auto;
+    bottom: 366px;
+    left: 10px;
+    right: 10px;
+    width: auto;
+    max-height: 170px;
   }
 
   .zone-detail {

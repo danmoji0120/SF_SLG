@@ -240,11 +240,11 @@ const RESEARCH = {
 };
 
 const ADMIRAL_POOL = [
-  { name: "\uc720\ub098 \ubc14\uc2a4", rarity: "R", combatBonus: 0.04, resourceBonus: 0.02, costBonus: 0 },
-  { name: "\uce74\uc774 \ubca0\ub974\ub2e8", rarity: "R", combatBonus: 0.02, resourceBonus: 0, costBonus: 0.02 },
-  { name: "\ub9ac\uc624 \uc0e4\ub974", rarity: "SR", combatBonus: 0.08, resourceBonus: 0.03, costBonus: 0.02 },
-  { name: "\uc138\ub77c \uc624\ub974\ud2f4", rarity: "SR", combatBonus: 0.04, resourceBonus: 0.08, costBonus: 0.01 },
-  { name: "\uc544\ub378 \ud06c\ub85c\uc2a4", rarity: "SSR", combatBonus: 0.14, resourceBonus: 0.08, costBonus: 0.05 }
+  { name: "\uc720\ub098 \ubc14\uc2a4", rarity: "R", combatBonus: 0.12, resourceBonus: 0.06, costBonus: 0.04 },
+  { name: "\uce74\uc774 \ubca0\ub974\ub2e8", rarity: "R", combatBonus: 0.1, resourceBonus: 0.04, costBonus: 0.06 },
+  { name: "\ub9ac\uc624 \uc0e4\ub974", rarity: "SR", combatBonus: 0.2, resourceBonus: 0.09, costBonus: 0.08 },
+  { name: "\uc138\ub77c \uc624\ub974\ud2f4", rarity: "SR", combatBonus: 0.16, resourceBonus: 0.18, costBonus: 0.06 },
+  { name: "\uc544\ub378 \ud06c\ub85c\uc2a4", rarity: "SSR", combatBonus: 0.34, resourceBonus: 0.2, costBonus: 0.14 }
 ];
 
 const DEFAULT_HULLS = [
@@ -772,6 +772,15 @@ async function initDb() {
   `);
 
   await run(`
+    CREATE TABLE IF NOT EXISTS commander_progress (
+      user_id INTEGER PRIMARY KEY,
+      level INTEGER NOT NULL DEFAULT 1,
+      xp INTEGER NOT NULL DEFAULT 0,
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    )
+  `);
+
+  await run(`
     CREATE TABLE IF NOT EXISTS admirals (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       user_id INTEGER NOT NULL,
@@ -902,22 +911,60 @@ async function getAssignedAdmiral(userId) {
   );
 }
 
+function commanderXpForNextLevel(level) {
+  return Math.floor(240 + level * 180 + level * level * 65);
+}
+
+async function getCommanderProgress(userId) {
+  let row = await get("SELECT level, xp FROM commander_progress WHERE user_id = ?", [userId]);
+  if (!row) {
+    await run("INSERT INTO commander_progress (user_id, level, xp) VALUES (?, 1, 0)", [userId]);
+    row = { level: 1, xp: 0 };
+  }
+  const level = Math.max(1, Number(row.level || 1));
+  const xp = Math.max(0, Number(row.xp || 0));
+  const nextXp = commanderXpForNextLevel(level);
+  return { level, xp, nextXp };
+}
+
+async function addCommanderXp(userId, amount) {
+  const gain = Math.max(0, Math.floor(Number(amount || 0)));
+  if (gain <= 0) return getCommanderProgress(userId);
+
+  const progress = await getCommanderProgress(userId);
+  let level = progress.level;
+  let xp = progress.xp + gain;
+  while (xp >= commanderXpForNextLevel(level)) {
+    xp -= commanderXpForNextLevel(level);
+    level += 1;
+  }
+  await run("UPDATE commander_progress SET level = ?, xp = ? WHERE user_id = ?", [level, xp, userId]);
+  return getCommanderProgress(userId);
+}
+
 async function getPlayerBonuses(userId) {
   const research = await getResearch(userId);
   const admiral = await getAssignedAdmiral(userId);
-  const resourceBonus = research.resource * RESEARCH.resource.effectPerLevel + Number(admiral?.resourceBonus || 0);
-  const costBonus = research.logistics * RESEARCH.logistics.effectPerLevel + Number(admiral?.costBonus || 0);
-  const combatBonus = research.tactics * RESEARCH.tactics.effectPerLevel + Number(admiral?.combatBonus || 0);
+  const commander = await getCommanderProgress(userId);
+  const commanderResource = commander.level * 0.03;
+  const commanderCost = commander.level * 0.015;
+  const commanderCombat = commander.level * 0.04;
+  const commanderMove = commander.level * 0.03;
+  const resourceBonus = research.resource * RESEARCH.resource.effectPerLevel + Number(admiral?.resourceBonus || 0) + commanderResource;
+  const costBonus = research.logistics * RESEARCH.logistics.effectPerLevel + Number(admiral?.costBonus || 0) + commanderCost;
+  const combatBonus = research.tactics * RESEARCH.tactics.effectPerLevel + Number(admiral?.combatBonus || 0) + commanderCombat;
   const movementBonus =
     research.logistics * 0.05 +
     Number(admiral?.combatBonus || 0) * 0.5 +
-    Number(admiral?.resourceBonus || 0) * 0.25;
+    Number(admiral?.resourceBonus || 0) * 0.25 +
+    commanderMove;
 
   return {
     resourceMultiplier: 1 + resourceBonus,
     buildCostMultiplier: Math.max(0.5, 1 - costBonus),
     combatMultiplier: 1 + combatBonus,
     movementMultiplier: 1 + movementBonus,
+    commander,
     research,
     admiral: admiral || null
   };
@@ -1151,6 +1198,25 @@ async function getProductionQueue(userId) {
     status: row.status,
     remainingSeconds: row.status === "building" ? Math.max(0, Math.ceil((row.end_time - now) / 1000)) : 0
   }));
+}
+
+function parseDesignComponentIds(design) {
+  const parseOrFallback = (jsonValue, fallback) => {
+    try {
+      const arr = JSON.parse(jsonValue || "[]");
+      if (Array.isArray(arr) && arr.length) return arr.map((id) => Number.parseInt(id, 10)).filter(Number.isInteger);
+    } catch (err) {
+      // ignore
+    }
+    return Number.isInteger(fallback) ? [fallback] : [];
+  };
+
+  return {
+    engines: parseOrFallback(design.engine_components_json, design.engine_component_id),
+    weapons: parseOrFallback(design.weapon_components_json, design.weapon_component_id),
+    defenses: parseOrFallback(design.defense_components_json, design.defense_component_id),
+    utilities: parseOrFallback(design.utility_components_json, design.utility_component_id)
+  };
 }
 
 async function getOwnedShips(userId) {
@@ -1554,6 +1620,8 @@ async function resolveMission(mission) {
       travelSeconds,
       log
     );
+    await addCommanderXp(mission.user_id, battle.result === "victory" ? 140 : 70);
+    await addCommanderXp(targetUser.id, battle.result === "victory" ? 65 : 120);
     await addBattleRecord(
       targetUser.id,
       `\ubc29\uc5b4: ${targetUser.username} \uae30\uc9c0`,
@@ -1635,7 +1703,9 @@ async function resolveMission(mission) {
       travelSeconds,
       log
     );
+    await addCommanderXp(mission.user_id, battle.result === "victory" ? 120 : 60);
     if (owner) {
+      await addCommanderXp(owner.user_id, battle.result === "victory" ? 60 : 100);
       await addBattleRecord(
         owner.user_id,
         `\ubc29\uc5b4: ${zone.name}`,
@@ -1855,6 +1925,7 @@ async function getPlayerTarget(userId, viewerId) {
     [userId]
   );
   const admiral = await getAssignedAdmiral(userId);
+  const commander = await getCommanderProgress(userId);
   const base = await ensureBase(userId);
 
   return {
@@ -1865,6 +1936,7 @@ async function getPlayerTarget(userId, viewerId) {
     occupiedZones: Number(zones?.count || 0),
     estimatedMetal: userId === viewerId ? resources?.resources?.metal || 0 : Math.floor((resources?.resources?.metal || 0) * 0.5),
     estimatedFuel: userId === viewerId ? resources?.resources?.fuel || 0 : Math.floor((resources?.resources?.fuel || 0) * 0.5),
+    commanderLevel: commander.level,
     assignedAdmiral: admiral ? { name: admiral.name, rarity: admiral.rarity } : null
   };
 }
@@ -1950,10 +2022,11 @@ app.post("/signup", async (req, res) => {
       [result.lastID, 6, 2, 0, 0, 0]
     );
 
-    await run(
+  await run(
       "INSERT INTO research (user_id, resource_level, logistics_level, tactics_level) VALUES (?, 0, 0, 0)",
       [result.lastID]
     );
+    await run("INSERT INTO commander_progress (user_id, level, xp) VALUES (?, 1, 0)", [result.lastID]);
     await run(
       "INSERT INTO bases (user_id, map_x, map_y, moved_at) VALUES (?, ?, ?, ?)",
       [result.lastID, randomBaseCoordinate(), randomBaseCoordinate(), Date.now()]
@@ -2005,6 +2078,7 @@ app.get("/resources", requireAuth, async (req, res) => {
   try {
     await processMissionQueueForUser(req.user.id);
     const state = await getUpdatedResources(req.user.id);
+    const bonuses = await getPlayerBonuses(req.user.id);
     if (!state) {
       return res.status(404).json({ error: "\uc790\uc6d0 \uc815\ubcf4\ub97c \ucc3e\uc744 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4." });
     }
@@ -2012,6 +2086,7 @@ app.get("/resources", requireAuth, async (req, res) => {
     return res.json({
       metal: state.resources.metal,
       fuel: state.resources.fuel,
+      commander: bonuses.commander,
       production: {
         metalPerSecond: state.rates.metal,
         fuelPerSecond: state.rates.fuel,
@@ -2165,6 +2240,87 @@ app.post("/designs", requireAuth, async (req, res) => {
   }
 });
 
+app.put("/designs/:id", requireAuth, async (req, res) => {
+  try {
+    const designId = Number.parseInt(req.params.id, 10);
+    const existing = await get("SELECT id FROM ship_designs WHERE id = ? AND user_id = ?", [designId, req.user.id]);
+    if (!existing) return res.status(404).json({ error: "\uc218\uc815\ud560 \uc124\uacc4\uc548\uc744 \ucc3e\uc744 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4." });
+
+    const name = String(req.body.name || "").trim();
+    if (name.length < 2 || name.length > 32) {
+      return res.status(400).json({ error: "\uc124\uacc4\uba85\uc740 2~32\uc790\ub85c \uc785\ub825\ud558\uc138\uc694." });
+    }
+
+    const calculated = await calculateDesign({
+      hullId: Number.parseInt(req.body.hullId, 10),
+      engines: req.body.engines,
+      weapons: req.body.weapons,
+      defenses: req.body.defenses,
+      utilities: req.body.utilities
+    });
+
+    await run(
+      `
+        UPDATE ship_designs
+        SET name = ?, hull_id = ?, engine_component_id = ?, weapon_component_id = ?, defense_component_id = ?, utility_component_id = ?,
+            engine_components_json = ?, weapon_components_json = ?, defense_components_json = ?, utility_components_json = ?,
+            final_hp = ?, final_attack = ?, final_defense = ?, final_speed = ?, total_power = ?, total_metal_cost = ?, total_fuel_cost = ?, total_build_time = ?
+        WHERE id = ? AND user_id = ?
+      `,
+      [
+        name,
+        calculated.hull.id,
+        calculated.componentIds.engines[0],
+        calculated.componentIds.weapons[0],
+        calculated.componentIds.defenses[0],
+        calculated.componentIds.utilities[0],
+        JSON.stringify(calculated.componentIds.engines),
+        JSON.stringify(calculated.componentIds.weapons),
+        JSON.stringify(calculated.componentIds.defenses),
+        JSON.stringify(calculated.componentIds.utilities),
+        calculated.finalHp,
+        calculated.finalAttack,
+        calculated.finalDefense,
+        calculated.finalSpeed,
+        calculated.totalPower,
+        calculated.totalMetalCost,
+        calculated.totalFuelCost,
+        calculated.totalBuildTime,
+        designId,
+        req.user.id
+      ]
+    );
+
+    return res.json({
+      message: `${name} \uc124\uacc4\uc548\uc744 \uc218\uc815\ud588\uc2b5\ub2c8\ub2e4.`,
+      designs: await getDesigns(req.user.id)
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(err.status || 500).json({ error: err.message || "\uc124\uacc4\uc548 \uc218\uc815 \uc911 \uc624\ub958\uac00 \ubc1c\uc0dd\ud588\uc2b5\ub2c8\ub2e4." });
+  }
+});
+
+app.delete("/designs/:id", requireAuth, async (req, res) => {
+  try {
+    const designId = Number.parseInt(req.params.id, 10);
+    const inQueue = await get("SELECT id FROM production_queue WHERE user_id = ? AND design_id = ? AND status = 'building' LIMIT 1", [req.user.id, designId]);
+    if (inQueue) {
+      return res.status(400).json({ error: "\uc0dd\uc0b0 \uc911\uc778 \uc124\uacc4\uc548\uc740 \uc0ad\uc81c\ud560 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4." });
+    }
+    await run("DELETE FROM owned_ships WHERE user_id = ? AND design_id = ?", [req.user.id, designId]);
+    const result = await run("DELETE FROM ship_designs WHERE id = ? AND user_id = ?", [designId, req.user.id]);
+    if (!result.changes) return res.status(404).json({ error: "\uc0ad\uc81c\ud560 \uc124\uacc4\uc548\uc744 \ucc3e\uc744 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4." });
+    return res.json({
+      message: "\uc124\uacc4\uc548\uc744 \uc0ad\uc81c\ud588\uc2b5\ub2c8\ub2e4.",
+      designs: await getDesigns(req.user.id)
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "\uc124\uacc4\uc548 \uc0ad\uc81c \uc911 \uc624\ub958\uac00 \ubc1c\uc0dd\ud588\uc2b5\ub2c8\ub2e4." });
+  }
+});
+
 app.get("/production", requireAuth, async (req, res) => {
   try {
     await processMissionQueueForUser(req.user.id);
@@ -2242,6 +2398,89 @@ app.post("/production", requireAuth, async (req, res) => {
   } catch (err) {
     console.error(err);
     return res.status(500).json({ error: "\uc124\uacc4\uc548 \uc0dd\uc0b0 \uc2dc\uc791 \uc911 \uc624\ub958\uac00 \ubc1c\uc0dd\ud588\uc2b5\ub2c8\ub2e4." });
+  }
+});
+
+app.post("/production/:id/cancel", requireAuth, async (req, res) => {
+  try {
+    const id = Number.parseInt(req.params.id, 10);
+    const queue = await get(
+      `
+        SELECT q.*, d.total_metal_cost, d.total_fuel_cost
+        FROM production_queue q
+        JOIN ship_designs d ON d.id = q.design_id
+        WHERE q.id = ? AND q.user_id = ? AND q.status = 'building'
+      `,
+      [id, req.user.id]
+    );
+    if (!queue) return res.status(404).json({ error: "\ucde8\uc18c\ud560 \uc0dd\uc0b0 \ud050\ub97c \ucc3e\uc744 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4." });
+    const bonuses = await getPlayerBonuses(req.user.id);
+    const spentMetal = Math.floor(queue.total_metal_cost * queue.quantity * bonuses.buildCostMultiplier);
+    const spentFuel = Math.floor(queue.total_fuel_cost * queue.quantity * bonuses.buildCostMultiplier);
+    const refundMetal = Math.floor(spentMetal * 0.8);
+    const refundFuel = Math.floor(spentFuel * 0.8);
+    await run("BEGIN TRANSACTION");
+    try {
+      await run("UPDATE resources SET metal = metal + ?, fuel = fuel + ? WHERE user_id = ?", [refundMetal, refundFuel, req.user.id]);
+      await run("UPDATE production_queue SET status = 'completed' WHERE id = ?", [id]);
+      await run("COMMIT");
+    } catch (err) {
+      await run("ROLLBACK");
+      throw err;
+    }
+    const state = await getUpdatedResources(req.user.id);
+    return res.json({
+      message: `\uc0dd\uc0b0 \ucde8\uc18c \uc644\ub8cc. \ud658\ubd88: \uae08\uc18d ${refundMetal}, \uc5f0\ub8cc ${refundFuel}`,
+      queue: await getProductionQueue(req.user.id),
+      ownedShips: await getOwnedShips(req.user.id),
+      resources: {
+        metal: state.resources.metal,
+        fuel: state.resources.fuel,
+        production: {
+          metalPerSecond: state.rates.metal,
+          fuelPerSecond: state.rates.fuel,
+          base: state.rates.base,
+          zones: state.rates.zones,
+          multiplier: state.rates.multiplier
+        }
+      }
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "\uc0dd\uc0b0 \ucde8\uc18c \uc911 \uc624\ub958\uac00 \ubc1c\uc0dd\ud588\uc2b5\ub2c8\ub2e4." });
+  }
+});
+
+app.post("/production/:id/speedup", requireAuth, async (req, res) => {
+  try {
+    const id = Number.parseInt(req.params.id, 10);
+    const minutes = Math.max(1, Math.min(240, Number.parseInt(req.body.minutes, 10) || 10));
+    const queue = await get("SELECT * FROM production_queue WHERE id = ? AND user_id = ? AND status = 'building'", [id, req.user.id]);
+    if (!queue) return res.status(404).json({ error: "\uac00\uc18d\ud560 \uc0dd\uc0b0 \ud050\ub97c \ucc3e\uc744 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4." });
+    const costFuel = minutes * 50;
+    const state = await getUpdatedResources(req.user.id);
+    if (state.resources.fuel < costFuel) {
+      return res.status(400).json({ error: `\uac00\uc18d\uc5d0 \ud544\uc694\ud55c \uc5f0\ub8cc\uac00 \ubd80\uc871\ud569\ub2c8\ub2e4. \ud544\uc694: ${costFuel}` });
+    }
+    const reducedMs = minutes * 60 * 1000;
+    const nextEnd = Math.max(Date.now() + 1000, Number(queue.end_time) - reducedMs);
+    await run("BEGIN TRANSACTION");
+    try {
+      await run("UPDATE resources SET fuel = fuel - ? WHERE user_id = ?", [costFuel, req.user.id]);
+      await run("UPDATE production_queue SET end_time = ? WHERE id = ?", [nextEnd, id]);
+      await run("COMMIT");
+    } catch (err) {
+      await run("ROLLBACK");
+      throw err;
+    }
+    return res.json({
+      message: `${minutes}\ubd84 \uac00\uc18d\uc744 \uc801\uc6a9\ud588\uc2b5\ub2c8\ub2e4.`,
+      queue: await getProductionQueue(req.user.id),
+      ownedShips: await getOwnedShips(req.user.id)
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "\uc0dd\uc0b0 \uac00\uc18d \uc911 \uc624\ub958\uac00 \ubc1c\uc0dd\ud588\uc2b5\ub2c8\ub2e4." });
   }
 });
 
@@ -2370,11 +2609,18 @@ app.get("/map", requireAuth, async (req, res) => {
     }
 
     const base = await ensureBase(req.user.id);
+    const myFleet = await getOwnedShipFleet(req.user.id);
+    const myBonuses = await getPlayerBonuses(req.user.id);
     return res.json({
       base,
       zones: rows.map(formatZone),
       players,
-      activeMissions: await getActiveMissions(req.user.id)
+      activeMissions: await getActiveMissions(req.user.id),
+      myBaseSpec: {
+        fleetPower: Math.floor(designFleetPower(myFleet) * myBonuses.combatMultiplier),
+        shipCount: myFleet.reduce((sum, ship) => sum + Number(ship.quantity || 0), 0),
+        commanderLevel: myBonuses.commander.level
+      }
     });
   } catch (err) {
     console.error(err);
@@ -2631,6 +2877,48 @@ app.get("/missions", requireAuth, async (req, res) => {
   } catch (err) {
     console.error(err);
     return res.status(500).json({ error: "\uc784\ubb34 \uc870\ud68c \uc911 \uc624\ub958\uac00 \ubc1c\uc0dd\ud588\uc2b5\ub2c8\ub2e4." });
+  }
+});
+
+app.post("/missions/:id/cancel", requireAuth, async (req, res) => {
+  try {
+    const id = Number.parseInt(req.params.id, 10);
+    const mission = await get("SELECT * FROM missions WHERE id = ? AND user_id = ? AND status = 'traveling'", [id, req.user.id]);
+    if (!mission) return res.status(404).json({ error: "\ucde8\uc18c\ud560 \uc784\ubb34\ub97c \ucc3e\uc744 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4." });
+    await run("UPDATE missions SET status = 'failed', result = 'cancelled', log_json = ? WHERE id = ?", [JSON.stringify(["[\uc784\ubb34 \ucde8\uc18c] \uc720\uc800\uac00 \ucd9c\uaca9\uc744 \ucde8\uc18c\ud588\uc2b5\ub2c8\ub2e4."]), id]);
+    return res.json({ message: "\ucd9c\uaca9 \uc784\ubb34\ub97c \ucde8\uc18c\ud588\uc2b5\ub2c8\ub2e4.", activeMissions: await getActiveMissions(req.user.id) });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "\uc784\ubb34 \ucde8\uc18c \uc911 \uc624\ub958\uac00 \ubc1c\uc0dd\ud588\uc2b5\ub2c8\ub2e4." });
+  }
+});
+
+app.post("/missions/:id/speedup", requireAuth, async (req, res) => {
+  try {
+    const id = Number.parseInt(req.params.id, 10);
+    const minutes = Math.max(1, Math.min(240, Number.parseInt(req.body.minutes, 10) || 10));
+    const mission = await get("SELECT * FROM missions WHERE id = ? AND user_id = ? AND status = 'traveling'", [id, req.user.id]);
+    if (!mission) return res.status(404).json({ error: "\uac00\uc18d\ud560 \uc784\ubb34\ub97c \ucc3e\uc744 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4." });
+    const costFuel = minutes * 60;
+    const state = await getUpdatedResources(req.user.id);
+    if (state.resources.fuel < costFuel) {
+      return res.status(400).json({ error: `\uac00\uc18d\uc5d0 \ud544\uc694\ud55c \uc5f0\ub8cc\uac00 \ubd80\uc871\ud569\ub2c8\ub2e4. \ud544\uc694: ${costFuel}` });
+    }
+    const reducedMs = minutes * 60 * 1000;
+    const nextArrive = Math.max(Date.now() + 1000, Number(mission.arrive_at) - reducedMs);
+    await run("BEGIN TRANSACTION");
+    try {
+      await run("UPDATE resources SET fuel = fuel - ? WHERE user_id = ?", [costFuel, req.user.id]);
+      await run("UPDATE missions SET arrive_at = ? WHERE id = ?", [nextArrive, id]);
+      await run("COMMIT");
+    } catch (err) {
+      await run("ROLLBACK");
+      throw err;
+    }
+    return res.json({ message: `${minutes}\ubd84 \ucd9c\uaca9 \uac00\uc18d\uc744 \uc801\uc6a9\ud588\uc2b5\ub2c8\ub2e4.`, activeMissions: await getActiveMissions(req.user.id) });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "\uc784\ubb34 \uac00\uc18d \uc911 \uc624\ub958\uac00 \ubc1c\uc0dd\ud588\uc2b5\ub2c8\ub2e4." });
   }
 });
 

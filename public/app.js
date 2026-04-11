@@ -23,6 +23,12 @@ let missionPoller = null;
 let productionQueueState = [];
 let productionTickTimer = null;
 let productionSyncTimer = null;
+let resourceTickTimer = null;
+let currentResourcesState = { metal: 0, fuel: 0 };
+let currentRatesState = { metalPerSecond: 0, fuelPerSecond: 0, base: { metal: 0, fuel: 0 }, zones: { metal: 0, fuel: 0 }, multiplier: 1 };
+let selectedProductionQueueId = null;
+let latestDebug = {};
+let devOpen = false;
 
 const elements = {
   authPanel: document.getElementById("authPanel"),
@@ -37,6 +43,17 @@ const elements = {
   refreshZonesButton: document.getElementById("refreshZonesButton"),
   refreshPlayersButton: document.getElementById("refreshPlayersButton"),
   battleButton: document.getElementById("battleButton"),
+  floatingHud: document.getElementById("floatingHud"),
+  hudResources: document.getElementById("hudResources"),
+  hudPower: document.getElementById("hudPower"),
+  hudCommander: document.getElementById("hudCommander"),
+  missionHud: document.getElementById("missionHud"),
+  missionHudText: document.getElementById("missionHudText"),
+  cancelMissionButton: document.getElementById("cancelMissionButton"),
+  speedupMissionButton: document.getElementById("speedupMissionButton"),
+  toggleDevButton: document.getElementById("toggleDevButton"),
+  devPanel: document.getElementById("devPanel"),
+  devView: document.getElementById("devView"),
   toggleZoneSearchButton: document.getElementById("toggleZoneSearchButton"),
   zoneSearchPanel: document.getElementById("zoneSearchPanel"),
   zoneSearchInput: document.getElementById("zoneSearchInput"),
@@ -45,7 +62,17 @@ const elements = {
   drawAdmiralButton: document.getElementById("drawAdmiralButton"),
   moveBaseButton: document.getElementById("moveBaseButton"),
   saveDesignButton: document.getElementById("saveDesignButton"),
+  deleteDesignButton: document.getElementById("deleteDesignButton"),
+  resetDesignButton: document.getElementById("resetDesignButton"),
   startProductionButton: document.getElementById("startProductionButton"),
+  speedupProductionButton: document.getElementById("speedupProductionButton"),
+  cancelProductionButton: document.getElementById("cancelProductionButton"),
+  designSubtabButton: document.getElementById("designSubtabButton"),
+  buildSubtabButton: document.getElementById("buildSubtabButton"),
+  designSection: document.getElementById("designSection"),
+  buildSection: document.getElementById("buildSection"),
+  editingDesignId: document.getElementById("editingDesignId"),
+  designListView: document.getElementById("designListView"),
   baseMoveX: document.getElementById("baseMoveX"),
   baseMoveY: document.getElementById("baseMoveY"),
   designNameInput: document.getElementById("designNameInput"),
@@ -56,6 +83,7 @@ const elements = {
   utilitySlots: document.getElementById("utilitySlots"),
   designPreview: document.getElementById("designPreview"),
   productionDesignSelect: document.getElementById("productionDesignSelect"),
+  productionDesignDetail: document.getElementById("productionDesignDetail"),
   productionQuantityInput: document.getElementById("productionQuantityInput"),
   productionQueueView: document.getElementById("productionQueueView"),
   ownedShipsView: document.getElementById("ownedShipsView"),
@@ -107,7 +135,16 @@ function setBusy(isBusy) {
     elements.drawAdmiralButton,
     elements.moveBaseButton,
     elements.saveDesignButton,
+    elements.deleteDesignButton,
+    elements.resetDesignButton,
     elements.startProductionButton,
+    elements.speedupProductionButton,
+    elements.cancelProductionButton,
+    elements.cancelMissionButton,
+    elements.speedupMissionButton,
+    elements.designSubtabButton,
+    elements.buildSubtabButton,
+    elements.toggleDevButton,
     elements.toggleZoneSearchButton,
     ...captureButtons,
     ...researchButtons,
@@ -182,10 +219,14 @@ function renderBase(data) {
   if (!data?.base) return;
   currentBase = data.base;
   moveFuelPerDistance = Number(data.moveFuelPerDistance || moveFuelPerDistance);
-  elements.baseView.innerHTML = `X ${currentBase.x}, Y ${currentBase.y}<br>\uc774\ub3d9 \ube44\uc6a9: \uac70\ub9ac 1\ub2f9 \uc5f0\ub8cc ${moveFuelPerDistance}`;
+  const spec = data.myBaseSpec
+    ? `<br>\uc804\ud22c\ub825 ${Number(data.myBaseSpec.fleetPower || 0).toLocaleString()} / \ubcf4\uc720 \ud568\uc120 ${Number(data.myBaseSpec.shipCount || 0)} / \uc0ac\ub839\uad00 Lv.${Number(data.myBaseSpec.commanderLevel || 1)}`
+    : "";
+  elements.baseView.innerHTML = `X ${currentBase.x}, Y ${currentBase.y}<br>\uc774\ub3d9 \ube44\uc6a9: \uac70\ub9ac 1\ub2f9 \uc5f0\ub8cc ${moveFuelPerDistance}${spec}`;
   elements.baseMoveX.value = currentBase.x;
   elements.baseMoveY.value = currentBase.y;
   renderMoveCost();
+  updateDebug({ base: currentBase, moveFuelPerDistance });
 }
 
 function renderMoveCost() {
@@ -204,6 +245,34 @@ function showTab(tabName) {
   tabPanels.forEach((panel) => {
     panel.classList.toggle("active", panel.dataset.tabPanel === tabName);
   });
+}
+
+function showProductionSubtab(name) {
+  const isDesign = name !== "build";
+  elements.designSubtabButton.classList.toggle("active", isDesign);
+  elements.buildSubtabButton.classList.toggle("active", !isDesign);
+  elements.designSection.classList.toggle("active", isDesign);
+  elements.buildSection.classList.toggle("active", !isDesign);
+}
+
+function renderDev() {
+  if (!elements.devView) return;
+  elements.devView.textContent = JSON.stringify(latestDebug, null, 2);
+}
+
+function updateDebug(patch) {
+  latestDebug = {
+    ...latestDebug,
+    ...patch,
+    updatedAt: new Date().toLocaleTimeString()
+  };
+  if (devOpen) renderDev();
+}
+
+function toggleDevPanel() {
+  devOpen = !devOpen;
+  elements.devPanel.classList.toggle("hidden", !devOpen);
+  if (devOpen) renderDev();
 }
 
 function setupMapDragging() {
@@ -274,6 +343,19 @@ function renderResources(resources) {
   const base = production.base || { metal: 2, fuel: 1 };
   const zones = production.zones || { metal: 0, fuel: 0 };
 
+  currentResourcesState = {
+    metal: Number(safeResources.metal || 0),
+    fuel: Number(safeResources.fuel || 0)
+  };
+  currentRatesState = {
+    metalPerSecond: Number(production.metalPerSecond || base.metal),
+    fuelPerSecond: Number(production.fuelPerSecond || base.fuel),
+    base,
+    zones,
+    multiplier: Number(production.multiplier || 1),
+    commander: safeResources.commander || null
+  };
+
   elements.resourcesView.innerHTML = `
     \uae08\uc18d ${Number(safeResources.metal || 0).toLocaleString()}<br>
     \uc5f0\ub8cc ${Number(safeResources.fuel || 0).toLocaleString()}
@@ -282,10 +364,41 @@ function renderResources(resources) {
   elements.productionView.textContent =
     `\ucd08\ub2f9 \uc0dd\uc0b0: \uae08\uc18d ${Number(production.metalPerSecond || base.metal)}, \uc5f0\ub8cc ${Number(production.fuelPerSecond || base.fuel)} ` +
     `(\uae30\uc9c0 ${base.metal}/${base.fuel}, \uc810\ub839\uc9c0 ${zones.metal}/${zones.fuel}, \ubc30\uc728 x${Number(production.multiplier || 1).toFixed(2)})`;
+  renderHud();
+  startResourceRealtimeTick();
+  updateDebug({
+    resources: {
+      metal: Math.floor(currentResourcesState.metal),
+      fuel: Math.floor(currentResourcesState.fuel),
+      metalPerSecond: currentRatesState.metalPerSecond,
+      fuelPerSecond: currentRatesState.fuelPerSecond
+    }
+  });
+}
+
+function renderHud() {
+  const commanderLevel = Number(currentRatesState?.commander?.level || 1);
+  const commanderXp = Number(currentRatesState?.commander?.xp || 0);
+  const nextXp = Number(currentRatesState?.commander?.nextXp || 0);
+  elements.hudResources.textContent = `\uae08\uc18d ${Math.floor(currentResourcesState.metal).toLocaleString()} / \uc5f0\ub8cc ${Math.floor(currentResourcesState.fuel).toLocaleString()}`;
+  elements.hudCommander.textContent = `\uc0ac\ub839\uad00 Lv.${commanderLevel} (${commanderXp}/${nextXp})`;
+}
+
+function startResourceRealtimeTick() {
+  if (resourceTickTimer) return;
+  resourceTickTimer = setInterval(() => {
+    currentResourcesState.metal += Number(currentRatesState.metalPerSecond || 0);
+    currentResourcesState.fuel += Number(currentRatesState.fuelPerSecond || 0);
+    renderHud();
+  }, 1000);
 }
 
 function renderFleet(fleet) {
   const ships = Array.isArray(fleet) ? fleet : [];
+  const power = Math.floor(ships.reduce((sum, ship) => {
+    return sum + Number(ship.quantity || 0) * (Number(ship.finalAttack || 0) + Number(ship.finalDefense || 0) * 0.45 + Number(ship.finalHp || 0) * 0.12);
+  }, 0));
+  elements.hudPower.textContent = `\ubcf8\uc778 \uc804\ud22c\ub825 ${power.toLocaleString()}`;
 
   elements.fleetView.innerHTML = ships.length
     ? ships
@@ -299,6 +412,7 @@ function renderFleet(fleet) {
         })
         .join("")
     : "\ubcf4\uc720\ud55c \uc124\uacc4 \ud568\uc120\uc774 \uc5c6\uc2b5\ub2c8\ub2e4.";
+  updateDebug({ fleetCount: ships.length, fleetPower: power });
 }
 
 function renderShipCosts() {
@@ -395,13 +509,16 @@ function renderDesignPreview() {
   const overPower = preview.totalPower > preview.hull.powerLimit;
   elements.designPreview.innerHTML = `
     <div class="stat-grid">
+      <span>\uc120\uccb4 \uae30\ubcf8 \uc804\ud22c\ub825 ${Math.floor((preview.hull.baseHp * 0.12) + (preview.hull.baseSpeed * 4))}</span>
       <span>HP ${preview.finalHp}</span>
       <span>\uacf5\uaca9 ${preview.finalAttack}</span>
       <span>\ubc29\uc5b4 ${preview.finalDefense}</span>
       <span>\uc18d\ub3c4 ${preview.finalSpeed}</span>
       <span class="${overPower ? "danger-text" : ""}">\uc804\ub825 ${preview.totalPower}/${preview.hull.powerLimit}</span>
       <span>\ube44\uc6a9 \uae08\uc18d ${preview.totalMetalCost}, \uc5f0\ub8cc ${preview.totalFuelCost}</span>
-      <span>\uc0dd\uc0b0 \uc2dc\uac04 ${formatSeconds(preview.totalBuildTime)}</span>
+      <span>\uc0dd\uc0b0 \uc2dc\uac04 ${formatBuildHours(preview.totalBuildTime)}</span>
+      <span>\ubb34\uae30 \ud569 +${preview.byCategory.weapons.reduce((sum, w) => sum + Number(w.attackBonus || 0), 0)}</span>
+      <span>\ubc29\uc5b4 \ud569 +${preview.byCategory.defenses.reduce((sum, w) => sum + Number(w.defenseBonus || 0), 0)}</span>
     </div>
   `;
 }
@@ -414,24 +531,94 @@ function renderShipyardOptions() {
 
 function renderDesigns(data) {
   shipDesigns = Array.isArray(data?.designs) ? data.designs : [];
+  const currentSelection = Number(elements.productionDesignSelect.value || 0);
   elements.productionDesignSelect.innerHTML = shipDesigns.length
     ? shipDesigns.map((design) => `<option value="${design.id}">${design.name} / ${design.hullName}</option>`).join("")
     : `<option value="">\uc800\uc7a5\ub41c \uc124\uacc4\uc548 \uc5c6\uc74c</option>`;
+  if (shipDesigns.some((design) => Number(design.id) === currentSelection)) {
+    elements.productionDesignSelect.value = String(currentSelection);
+  }
+
+  elements.designListView.innerHTML = shipDesigns.length
+    ? shipDesigns.map((design) => `
+      <div class="growth-item">
+        <div>
+          <strong>${design.name}</strong>
+          <span>${design.hullName} / \uc804\ub825 ${design.totalPower} / \uc0dd\uc0b0 ${formatBuildHours(design.totalBuildTime)}</span>
+        </div>
+        <button type="button" data-edit-design="${design.id}">\uc218\uc815</button>
+      </div>
+    `).join("")
+    : `<div class="growth-item"><div>\uc800\uc7a5\ub41c \uc124\uacc4\uc548\uc774 \uc5c6\uc2b5\ub2c8\ub2e4.</div></div>`;
+
+  Array.from(elements.designListView.querySelectorAll("[data-edit-design]")).forEach((button) => {
+    button.addEventListener("click", () => loadDesignForEdit(button.dataset.editDesign));
+  });
+
+  renderSelectedProductionDesign();
+  updateDebug({ designCount: shipDesigns.length });
+}
+
+function getDesignById(id) {
+  return shipDesigns.find((design) => Number(design.id) === Number(id));
+}
+
+function renderSelectedProductionDesign() {
+  const design = getDesignById(elements.productionDesignSelect.value);
+  if (!design) {
+    elements.productionDesignDetail.textContent = "\uc124\uacc4\uc548\uc744 \uc120\ud0dd\ud558\uc138\uc694.";
+    elements.startProductionButton.disabled = true;
+    return;
+  }
+  elements.startProductionButton.disabled = false;
+  elements.productionDesignDetail.innerHTML = `
+    <div class="stat-grid">
+      <span>\uc120\uccb4 ${design.hullName}</span>
+      <span>HP ${design.finalHp}</span>
+      <span>\uacf5\uaca9 ${design.finalAttack}</span>
+      <span>\ubc29\uc5b4 ${design.finalDefense}</span>
+      <span>\uc18d\ub3c4 ${design.finalSpeed}</span>
+      <span>\uc804\ub825 ${design.totalPower}/${design.powerLimit}</span>
+      <span>\uae08\uc18d ${design.totalMetalCost}</span>
+      <span>\uc5f0\ub8cc ${design.totalFuelCost}</span>
+      <span>\uc0dd\uc0b0\uc2dc\uac04 ${formatBuildHours(design.totalBuildTime)}</span>
+    </div>
+  `;
 }
 
 function formatSeconds(seconds) {
   const value = Number(seconds || 0);
   if (value < 60) return `${value}\ucd08`;
-  return `${Math.floor(value / 60)}\ubd84 ${value % 60}\ucd08`;
+  const hours = Math.floor(value / 3600);
+  const minutes = Math.floor((value % 3600) / 60);
+  const secs = value % 60;
+  if (hours > 0) return `${hours}\uc2dc\uac04 ${minutes}\ubd84 ${secs}\ucd08`;
+  return `${minutes}\ubd84 ${secs}\ucd08`;
+}
+
+function formatBuildHours(seconds) {
+  const hours = Number(seconds || 0) / 3600;
+  if (hours >= 24) return `${hours.toFixed(1)}\uc2dc\uac04`;
+  if (hours >= 1) return `${hours.toFixed(2)}\uc2dc\uac04`;
+  return `${(hours * 60).toFixed(1)}\ubd84`;
 }
 
 function renderProduction(data) {
   const queue = Array.isArray(data?.queue) ? data.queue : [];
   const owned = Array.isArray(data?.ownedShips) ? data.ownedShips : [];
   productionQueueState = queue;
+  if (queue.length && !queue.some((item) => Number(item.id) === Number(selectedProductionQueueId))) {
+    selectedProductionQueueId = queue[0].id;
+  } else if (!queue.length) {
+    selectedProductionQueueId = null;
+  }
+  if (!selectedProductionQueueId && queue.length) {
+    selectedProductionQueueId = queue[0].id;
+  }
 
   renderProductionQueueRealtime();
   setupProductionRealtimeSync();
+  renderSelectedProductionDesign();
 
   elements.ownedShipsView.innerHTML = owned.length
     ? owned.map((item) => `
@@ -443,14 +630,19 @@ function renderProduction(data) {
       </div>
     `).join("")
     : `<div class="growth-item"><div>\ubcf4\uc720\ud55c \uc124\uacc4\ubcc4 \ud568\uc120\uc774 \uc5c6\uc2b5\ub2c8\ub2e4.</div></div>`;
+  updateDebug({ productionQueueCount: queue.length, ownedDesignFleetCount: owned.length });
 }
 
 function renderProductionQueueRealtime() {
   const queue = productionQueueState;
   if (!queue.length) {
     elements.productionQueueView.innerHTML = `<div class="growth-item"><div>\uc0dd\uc0b0 \ud050\uac00 \ube44\uc5b4 \uc788\uc2b5\ub2c8\ub2e4.</div></div>`;
+    elements.cancelProductionButton.disabled = true;
+    elements.speedupProductionButton.disabled = true;
     return;
   }
+  elements.cancelProductionButton.disabled = false;
+  elements.speedupProductionButton.disabled = false;
 
   const now = Date.now();
   elements.productionQueueView.innerHTML = queue
@@ -460,15 +652,23 @@ function renderProductionQueueRealtime() {
         : 0;
       const text = item.status === "building" ? `\uc644\ub8cc\uae4c\uc9c0 ${formatSeconds(remainingSeconds)}` : "\uc644\ub8cc\ub428";
       return `
-        <div class="growth-item">
+        <div class="growth-item ${Number(item.id) === Number(selectedProductionQueueId) ? "assigned" : ""}">
           <div>
             <strong>${item.designName} ${item.quantity}\ucc99</strong>
             <span>${text}</span>
           </div>
+          <button type="button" data-select-queue="${item.id}">\uc120\ud0dd</button>
         </div>
       `;
     })
     .join("");
+
+  Array.from(elements.productionQueueView.querySelectorAll("[data-select-queue]")).forEach((button) => {
+    button.addEventListener("click", () => {
+      selectedProductionQueueId = Number(button.dataset.selectQueue);
+      renderProductionQueueRealtime();
+    });
+  });
 }
 
 function clearProductionTimers() {
@@ -480,6 +680,19 @@ function clearProductionTimers() {
     clearInterval(productionSyncTimer);
     productionSyncTimer = null;
   }
+}
+
+function clearRealtimeTimers() {
+  clearProductionTimers();
+  if (resourceTickTimer) {
+    clearInterval(resourceTickTimer);
+    resourceTickTimer = null;
+  }
+  if (missionPoller) {
+    clearInterval(missionPoller);
+    missionPoller = null;
+  }
+  clearRoute();
 }
 
 function setupProductionRealtimeSync() {
@@ -518,7 +731,7 @@ function setupProductionRealtimeSync() {
 }
 
 function percent(value) {
-  return `${Math.round(Number(value || 0) * 100)}%`;
+  return `+${Number(value || 0).toFixed(2)}`;
 }
 
 function renderResearch(data) {
@@ -572,7 +785,7 @@ function renderAdmirals(data) {
         <div class="growth-item ${assigned ? "assigned" : ""}">
           <div>
             <strong>[${admiral.rarity}] ${admiral.name}${assigned ? " / \ubc30\uce58 \uc911" : ""}</strong>
-            <span>\uc804\ud22c +${percent(admiral.combatBonus)}, \uc0dd\uc0b0 +${percent(admiral.resourceBonus)}, \ube44\uc6a9 -${percent(admiral.costBonus)}</span>
+            <span>\uc804\ud22c ${percent(admiral.combatBonus)}, \uc0dd\uc0b0 ${percent(admiral.resourceBonus)}, \ube44\uc6a9 -${Number(admiral.costBonus || 0).toFixed(2)}</span>
           </div>
           <button type="button" data-assign-admiral="${admiral.id}" ${assigned ? "disabled" : ""}>\ubc30\uce58</button>
         </div>
@@ -639,11 +852,18 @@ function fleetText(fleet) {
 }
 
 function renderMap(data) {
-  renderBase({ base: data?.base, moveFuelPerDistance });
+  renderBase({ base: data?.base, moveFuelPerDistance, myBaseSpec: data?.myBaseSpec });
   currentPlayers = Array.isArray(data?.players) ? data.players : [];
   activeMissions = Array.isArray(data?.activeMissions) ? data.activeMissions : [];
   renderZones(data?.zones);
   renderMissionRoute();
+  updateDebug({
+    map: {
+      zoneCount: Array.isArray(data?.zones) ? data.zones.length : 0,
+      playerCount: currentPlayers.length,
+      missionCount: activeMissions.length
+    }
+  });
 }
 
 function renderBattleRecords(records) {
@@ -664,10 +884,35 @@ function renderBattleRecords(records) {
 function renderMissionRoute() {
   if (!activeMissions.length) {
     clearRoute();
+    elements.missionHud.classList.add("hidden");
+    if (missionPoller) {
+      clearInterval(missionPoller);
+      missionPoller = null;
+    }
     return;
   }
   const mission = activeMissions[0];
   showRouteTo(mission.to, mission.remainingSeconds);
+  elements.missionHud.classList.remove("hidden");
+  elements.missionHudText.textContent = `${mission.targetName} / \ub0a8\uc740 \uc774\ub3d9 ${formatSeconds(mission.remainingSeconds)}`;
+  ensureMissionPolling();
+}
+
+function ensureMissionPolling() {
+  if (!activeMissions.length || missionPoller) return;
+  missionPoller = setInterval(async () => {
+    try {
+      const [missions, records] = await Promise.all([api("/missions"), api("/battle-records")]);
+      activeMissions = Array.isArray(missions?.activeMissions) ? missions.activeMissions : [];
+      renderMissionRoute();
+      renderBattleRecords(records?.records);
+      if (!activeMissions.length) {
+        await Promise.all([loadZones(), loadFleet()]);
+      }
+    } catch (err) {
+      // ignore intermittent polling errors
+    }
+  }, 2000);
 }
 
 async function refreshMissionsAndRecords() {
@@ -675,28 +920,7 @@ async function refreshMissionsAndRecords() {
   activeMissions = Array.isArray(missionData?.activeMissions) ? missionData.activeMissions : [];
   renderMissionRoute();
   renderBattleRecords(recordData?.records);
-  if (activeMissions.length) {
-    if (!missionPoller) {
-      missionPoller = setInterval(async () => {
-        try {
-          const [missions, records] = await Promise.all([api("/missions"), api("/battle-records")]);
-          activeMissions = Array.isArray(missions?.activeMissions) ? missions.activeMissions : [];
-          renderMissionRoute();
-          renderBattleRecords(records?.records);
-          if (!activeMissions.length && missionPoller) {
-            clearInterval(missionPoller);
-            missionPoller = null;
-            await Promise.all([loadZones(), loadFleet()]);
-          }
-        } catch (err) {
-          // ignore intermittent polling errors
-        }
-      }, 2000);
-    }
-  } else if (missionPoller) {
-    clearInterval(missionPoller);
-    missionPoller = null;
-  }
+  ensureMissionPolling();
 }
 
 function filteredZones() {
@@ -815,6 +1039,7 @@ function renderZones(zones) {
 
   const mapContent = safeZones
     .map((zone) => {
+      const garrisonTotal = Object.values(zone.garrison || {}).reduce((sum, value) => sum + Number(value || 0), 0);
       const classes = [
         "map-node",
         `level-${zone.level}`,
@@ -828,9 +1053,10 @@ function renderZones(zones) {
           class="${classes}"
           data-select-zone="${zone.id}"
           style="--x: ${Number(zone.x || 50) / 100}; --y: ${Number(zone.y || 50) / 100};"
-          title="${zone.name}"
+          title="${zone.name} / \uc794\uc874\ubcd1\ub825 ${garrisonTotal}"
         >
           <span>${zone.level}</span>
+          <small>${garrisonTotal}</small>
         </button>
       `;
     })
@@ -859,6 +1085,13 @@ function renderZones(zones) {
       </button>
     ` : "");
   elements.zoneMapView.innerHTML = `<div class="map-content">${mapContent}</div>`;
+  if (!elements.zoneMapView.dataset.centered) {
+    const centerX = Math.max(0, (Number(currentBase?.x || 50) / 100) * 1800 - (elements.zoneMapView.clientWidth / 2));
+    const centerY = Math.max(0, (Number(currentBase?.y || 50) / 100) * 1100 - (elements.zoneMapView.clientHeight / 2));
+    elements.zoneMapView.scrollLeft = centerX;
+    elements.zoneMapView.scrollTop = centerY;
+    elements.zoneMapView.dataset.centered = "1";
+  }
 
   if (currentBase) {
     const baseNode = elements.zoneMapView.querySelector(".base-node");
@@ -1113,8 +1346,9 @@ async function saveDesign() {
 
   setBusy(true);
   try {
-    const data = await api("/designs", {
-      method: "POST",
+    const editingId = Number(elements.editingDesignId.value || 0);
+    const data = await api(editingId ? `/designs/${editingId}` : "/designs", {
+      method: editingId ? "PUT" : "POST",
       body: JSON.stringify({
         name: elements.designNameInput.value,
         hullId: Number(elements.hullSelect.value),
@@ -1126,6 +1360,55 @@ async function saveDesign() {
     });
     renderDesigns(data);
     await loadShipyard();
+    resetDesignForm();
+    setStatus(data.message);
+  } catch (err) {
+    handleAuthError(err);
+  } finally {
+    setBusy(false);
+  }
+}
+
+function resetDesignForm() {
+  elements.editingDesignId.value = "";
+  elements.designNameInput.value = "";
+  createSlotSelects();
+  renderDesignPreview();
+}
+
+function loadDesignForEdit(designId) {
+  const design = getDesignById(designId);
+  if (!design) return;
+  elements.editingDesignId.value = String(design.id);
+  elements.designNameInput.value = design.name;
+  elements.hullSelect.value = String(design.hullId);
+  createSlotSelects();
+  const setValues = (container, values) => {
+    const selects = Array.from(container.querySelectorAll("select"));
+    selects.forEach((select, idx) => {
+      if (values[idx]) select.value = String(values[idx]);
+    });
+  };
+  setValues(elements.engineSlots, design.components.engines || []);
+  setValues(elements.weaponSlots, design.components.weapons || []);
+  setValues(elements.defenseSlots, design.components.defenses || []);
+  setValues(elements.utilitySlots, design.components.utilities || []);
+  renderDesignPreview();
+  setStatus(`${design.name} \uc124\uacc4\uc548 \uc218\uc815 \ubaa8\ub4dc`);
+}
+
+async function deleteDesign() {
+  const id = Number(elements.editingDesignId.value || 0);
+  if (!id) {
+    setError("\uc0ad\uc81c\ud560 \uc124\uacc4\uc548\uc744 \uba3c\uc800 \uc120\ud0dd\ud558\uc138\uc694.");
+    return;
+  }
+  clearMessages();
+  setBusy(true);
+  try {
+    const data = await api(`/designs/${id}`, { method: "DELETE" });
+    renderDesigns(data);
+    resetDesignForm();
     setStatus(data.message);
   } catch (err) {
     handleAuthError(err);
@@ -1147,6 +1430,83 @@ async function startDesignProduction() {
     });
     renderProduction(data);
     renderResources(data.resources);
+    setStatus(data.message);
+  } catch (err) {
+    handleAuthError(err);
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function cancelProduction() {
+  clearMessages();
+  if (!selectedProductionQueueId) {
+    setError("\ucde8\uc18c\ud560 \uc0dd\uc0b0 \ud050\ub97c \uc120\ud0dd\ud558\uc138\uc694.");
+    return;
+  }
+  setBusy(true);
+  try {
+    const data = await api(`/production/${selectedProductionQueueId}/cancel`, { method: "POST" });
+    renderProduction(data);
+    renderResources(data.resources);
+    setStatus(data.message);
+  } catch (err) {
+    handleAuthError(err);
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function speedupProduction() {
+  clearMessages();
+  if (!selectedProductionQueueId) {
+    setError("\uac00\uc18d\ud560 \uc0dd\uc0b0 \ud050\ub97c \uc120\ud0dd\ud558\uc138\uc694.");
+    return;
+  }
+  setBusy(true);
+  try {
+    const data = await api(`/production/${selectedProductionQueueId}/speedup`, {
+      method: "POST",
+      body: JSON.stringify({ minutes: 10 })
+    });
+    renderProduction(data);
+    setStatus(data.message);
+  } catch (err) {
+    handleAuthError(err);
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function cancelMission() {
+  clearMessages();
+  if (!activeMissions.length) return;
+  setBusy(true);
+  try {
+    const mission = activeMissions[0];
+    const data = await api(`/missions/${mission.id}/cancel`, { method: "POST" });
+    activeMissions = data.activeMissions || [];
+    renderMissionRoute();
+    setStatus(data.message);
+  } catch (err) {
+    handleAuthError(err);
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function speedupMission() {
+  clearMessages();
+  if (!activeMissions.length) return;
+  setBusy(true);
+  try {
+    const mission = activeMissions[0];
+    const data = await api(`/missions/${mission.id}/speedup`, {
+      method: "POST",
+      body: JSON.stringify({ minutes: 10 })
+    });
+    activeMissions = data.activeMissions || [];
+    renderMissionRoute();
     setStatus(data.message);
   } catch (err) {
     handleAuthError(err);
@@ -1300,10 +1660,17 @@ async function refreshAll() {
   activeMissions = Array.isArray(missions?.activeMissions) ? missions.activeMissions : [];
   renderMissionRoute();
   renderBattleRecords(records?.records);
+  updateDebug({
+    session: {
+      username: localStorage.getItem(USERNAME_KEY) || "",
+      activeTab
+    }
+  });
 }
 
 function handleAuthError(err) {
   if (err.message.includes("\ud1a0\ud070") || err.message.includes("\uc778\uc99d")) {
+    clearRealtimeTimers();
     clearSession();
     showAuth();
   }
@@ -1311,7 +1678,7 @@ function handleAuthError(err) {
 }
 
 function logout() {
-  clearProductionTimers();
+  clearRealtimeTimers();
   clearSession();
   showAuth();
   setStatus("\ub85c\uadf8\uc544\uc6c3\ud588\uc2b5\ub2c8\ub2e4.");
@@ -1333,7 +1700,17 @@ function bindEvents() {
   elements.drawAdmiralButton.addEventListener("click", drawAdmiral);
   elements.moveBaseButton.addEventListener("click", moveBase);
   elements.saveDesignButton.addEventListener("click", saveDesign);
+  elements.deleteDesignButton.addEventListener("click", deleteDesign);
+  elements.resetDesignButton.addEventListener("click", resetDesignForm);
   elements.startProductionButton.addEventListener("click", startDesignProduction);
+  elements.speedupProductionButton.addEventListener("click", speedupProduction);
+  elements.cancelProductionButton.addEventListener("click", cancelProduction);
+  elements.cancelMissionButton.addEventListener("click", cancelMission);
+  elements.speedupMissionButton.addEventListener("click", speedupMission);
+  elements.toggleDevButton.addEventListener("click", toggleDevPanel);
+  elements.designSubtabButton.addEventListener("click", () => showProductionSubtab("design"));
+  elements.buildSubtabButton.addEventListener("click", () => showProductionSubtab("build"));
+  elements.productionDesignSelect.addEventListener("change", renderSelectedProductionDesign);
   elements.baseMoveX.addEventListener("input", renderMoveCost);
   elements.baseMoveY.addEventListener("input", renderMoveCost);
 
@@ -1370,8 +1747,10 @@ async function restoreSession() {
   try {
     await refreshAll();
     showTab(activeTab);
+    showProductionSubtab("design");
     setStatus("\uc800\uc7a5\ub41c \ud1a0\ud070\uc73c\ub85c \uc811\uc18d\uc744 \ubcf5\uad6c\ud588\uc2b5\ub2c8\ub2e4.");
   } catch (err) {
+    clearRealtimeTimers();
     clearSession();
     showAuth();
     setError("\uc800\uc7a5\ub41c \ub85c\uadf8\uc778 \uc815\ubcf4\uac00 \ub9cc\ub8cc\ub418\uc5c8\uc2b5\ub2c8\ub2e4. \ub2e4\uc2dc \ub85c\uadf8\uc778\ud558\uc138\uc694.");
