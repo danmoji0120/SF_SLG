@@ -2669,10 +2669,16 @@ async function processMissionQueueForUser(userId) {
   );
 
   for (const mission of due) {
+    const claim = await run(
+      "UPDATE missions SET status = 'resolving' WHERE id = ? AND user_id = ? AND status = 'traveling'",
+      [mission.id, userId]
+    );
+    if (!claim.changes) continue;
+
     try {
       const resolved = await resolveMission(mission);
       await run(
-        "UPDATE missions SET status = 'completed', result = ?, log_json = ? WHERE id = ?",
+        "UPDATE missions SET status = 'completed', result = ?, log_json = ? WHERE id = ? AND status = 'resolving'",
         [resolved.result, JSON.stringify(resolved.log || []), mission.id]
       );
       if ((mission.mission_type === "pvp" || mission.mission_type === "zone") && mission.target_user_id) {
@@ -2680,7 +2686,7 @@ async function processMissionQueueForUser(userId) {
       }
     } catch (err) {
       await run(
-        "UPDATE missions SET status = 'failed', result = 'failed', log_json = ? WHERE id = ?",
+        "UPDATE missions SET status = 'failed', result = 'failed', log_json = ? WHERE id = ? AND status = 'resolving'",
         [JSON.stringify(["[\uc2dc\uc2a4\ud15c \uc624\ub958] \uc804\ud22c \ucc98\ub9ac\uc5d0 \uc2e4\ud328\ud588\uc2b5\ub2c8\ub2e4."]), mission.id]
       );
       if ((mission.mission_type === "pvp" || mission.mission_type === "zone") && mission.target_user_id) {
