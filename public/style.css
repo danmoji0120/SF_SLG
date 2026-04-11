@@ -541,6 +541,27 @@ body:has(#gamePanel:not(.hidden)) {
   display: block;
 }
 
+.map-tools {
+  position: fixed;
+  left: 14px;
+  top: 214px;
+  z-index: 38;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px;
+  background: rgba(8, 13, 17, 0.84);
+  border: 1px solid rgba(155, 183, 201, 0.28);
+  border-radius: 8px;
+}
+
+.map-tools span {
+  min-width: 54px;
+  text-align: center;
+  font-size: 12px;
+  color: #dce8ef;
+}
+
 .sector-map {
   position: relative;
   width: 100%;
@@ -568,8 +589,9 @@ body:has(#gamePanel:not(.hidden)) {
 
 .map-content {
   position: relative;
-  width: 1800px;
-  height: 1100px;
+  width: 12000px;
+  height: 8000px;
+  transform-origin: 0 0;
 }
 
 .map-content::before {
@@ -593,8 +615,8 @@ body:has(#gamePanel:not(.hidden)) {
   position: absolute;
   inset: 0;
   z-index: 3;
-  width: 1800px;
-  height: 1100px;
+  width: 12000px;
+  height: 8000px;
   pointer-events: none;
 }
 
@@ -633,8 +655,8 @@ body:has(#gamePanel:not(.hidden)) {
 }
 
 .sector-map {
-  --map-width: 1800px;
-  --map-height: 1100px;
+  --map-width: 12000px;
+  --map-height: 8000px;
 }
 
 .sector-map .map-node,
@@ -704,8 +726,8 @@ body:has(#gamePanel:not(.hidden)) {
 }
 
 .map-node.occupied {
-  background: #4ade80;
-  border-color: #bbf7d0;
+  background: var(--owner-color, #4ade80);
+  border-color: #ffffff;
 }
 
 .map-node.selected {
@@ -737,10 +759,10 @@ body:has(#gamePanel:not(.hidden)) {
   padding: 0;
   transform: translate(-50%, -50%);
   color: #fff;
-  background: #be3b3b;
-  border: 3px solid #ffb4b4;
+  background: var(--owner-color, #be3b3b);
+  border: 3px solid #ffffff;
   border-radius: 8px;
-  box-shadow: 0 0 0 10px rgba(190, 59, 59, 0.12), 0 0 28px rgba(190, 59, 59, 0.35);
+  box-shadow: 0 0 0 10px rgba(255, 255, 255, 0.08), 0 0 28px rgba(0, 0, 0, 0.35);
   font-weight: 700;
 }
 
@@ -763,6 +785,32 @@ body:has(#gamePanel:not(.hidden)) {
   border-radius: 8px;
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.34);
   backdrop-filter: blur(8px);
+}
+
+.panel-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.panel-head .eyebrow {
+  margin: 0;
+}
+
+.trade-box {
+  display: grid;
+  gap: 6px;
+  margin: 10px 0;
+  padding: 10px;
+  border: 1px solid #3b5364;
+  border-radius: 8px;
+  background: rgba(17, 25, 34, 0.75);
+}
+
+.trade-box input {
+  max-width: 100%;
+  margin: 0;
 }
 
 .zone-detail h4 {
@@ -1183,6 +1231,13 @@ pre {
   .zone-search-toggle {
     left: 10px;
     bottom: 132px;
+  }
+
+  .map-tools {
+    left: 10px;
+    top: 346px;
+    max-width: calc(100vw - 20px);
+    overflow: auto;
   }
 
   .zone-search-panel {

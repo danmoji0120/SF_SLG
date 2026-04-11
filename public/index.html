@@ -63,7 +63,7 @@
       </section>
 
       <section id="incomingAlertHud" class="incoming-alert-hud hidden">
-        <h4>&#52840;&#44277; &#44221;&#44256;</h4>
+        <h4>&#52840;&#44277; &#44221;&#44256; <button id="closeAlertHudButton" type="button">X</button></h4>
         <div id="incomingAlertList"></div>
       </section>
 
@@ -112,8 +112,15 @@
       </section>
 
       <section class="tab-panel active map-panel" data-tab-panel="map">
+        <div class="map-tools">
+          <button id="zoomOutButton" type="button">-</button>
+          <span id="mapZoomLabel">100%</span>
+          <button id="zoomInButton" type="button">+</button>
+          <button id="toggleDetailButton" type="button">&#49345;&#49464; &#52397;/&#50500;&#50724;</button>
+          <button id="toggleAlertButton" type="button">&#44221;&#44256; &#52397;/&#50500;&#50724;</button>
+        </div>
         <article class="card map-base-overlay hidden" id="mapBaseOverlay">
-          <h3>&#45236; &#44592;&#51648;</h3>
+          <h3>&#45236; &#44592;&#51648; <button id="closeBaseOverlayButton" type="button">X</button></h3>
           <div id="baseView" class="metric">&#44592;&#51648; &#50948;&#52824;&#47484; &#48520;&#47084;&#50724;&#45716; &#51473;...</div>
           <div class="move-controls">
             <label for="baseMoveX">X</label>
@@ -275,6 +282,7 @@
             <button id="resetBattleRecordsButton" type="button">&#44592;&#47197; &#52488;&#44592;&#54868;</button>
           </div>
           <pre id="battleLog">&#50500;&#51649; &#51204;&#53804; &#44592;&#47197;&#51060; &#50630;&#49845;&#45768;&#45796;.</pre>
+          <div id="tradeLogView" class="growth-list"></div>
         </article>
       </section>
     </section>

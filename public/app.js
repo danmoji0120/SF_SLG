@@ -15,6 +15,9 @@ let currentBase = null;
 let moveFuelPerDistance = 120;
 let mapDragState = null;
 let activeTab = "map";
+const MAP_WIDTH = 12000;
+const MAP_HEIGHT = 8000;
+let mapZoom = 0.7;
 let shipyardOptions = { hulls: [], components: [] };
 let shipDesigns = [];
 let zoneSearchOpen = false;
@@ -34,6 +37,8 @@ let devOpen = false;
 let adminToken = localStorage.getItem(ADMIN_TOKEN_KEY) || "";
 let incomingAlerts = [];
 let showBaseOverlay = false;
+let detailPanelVisible = true;
+let alertPanelVisible = true;
 
 const elements = {
   authPanel: document.getElementById("authPanel"),
@@ -60,6 +65,14 @@ const elements = {
   speedupMissionButton: document.getElementById("speedupMissionButton"),
   incomingAlertHud: document.getElementById("incomingAlertHud"),
   incomingAlertList: document.getElementById("incomingAlertList"),
+  closeAlertHudButton: document.getElementById("closeAlertHudButton"),
+  zoomInButton: document.getElementById("zoomInButton"),
+  zoomOutButton: document.getElementById("zoomOutButton"),
+  mapZoomLabel: document.getElementById("mapZoomLabel"),
+  toggleDetailButton: document.getElementById("toggleDetailButton"),
+  toggleAlertButton: document.getElementById("toggleAlertButton"),
+  closeBaseOverlayButton: document.getElementById("closeBaseOverlayButton"),
+  tradeLogView: document.getElementById("tradeLogView"),
   toggleDevButton: document.getElementById("toggleDevButton"),
   devPanel: document.getElementById("devPanel"),
   devView: document.getElementById("devView"),
@@ -277,6 +290,63 @@ function showTab(tabName) {
   });
 }
 
+function ownerColor(ownerId) {
+  if (!ownerId) return "#9de7d9";
+  const hue = (Number(ownerId) * 47) % 360;
+  return `hsl(${hue} 70% 62%)`;
+}
+
+function mapCoordX(percent) {
+  return (Number(percent || 50) / 100) * MAP_WIDTH;
+}
+
+function mapCoordY(percent) {
+  return (Number(percent || 50) / 100) * MAP_HEIGHT;
+}
+
+function applyMapZoom(zoom, originClientX = null, originClientY = null) {
+  const map = elements.zoneMapView;
+  const content = map?.querySelector(".map-content");
+  if (!map || !content) return;
+  const nextZoom = Math.max(0.25, Math.min(2.5, Number(zoom || 1)));
+  const prevZoom = mapZoom;
+  if (Math.abs(nextZoom - prevZoom) < 0.001) {
+    content.style.transform = `scale(${mapZoom})`;
+    if (elements.mapZoomLabel) {
+      elements.mapZoomLabel.textContent = `${Math.round(mapZoom * 100)}%`;
+    }
+    return;
+  }
+
+  const rect = map.getBoundingClientRect();
+  const ox = originClientX == null ? rect.left + rect.width / 2 : originClientX;
+  const oy = originClientY == null ? rect.top + rect.height / 2 : originClientY;
+  const worldX = (map.scrollLeft + (ox - rect.left)) / prevZoom;
+  const worldY = (map.scrollTop + (oy - rect.top)) / prevZoom;
+
+  mapZoom = nextZoom;
+  content.style.transform = `scale(${mapZoom})`;
+  map.scrollLeft = worldX * mapZoom - (ox - rect.left);
+  map.scrollTop = worldY * mapZoom - (oy - rect.top);
+  if (elements.mapZoomLabel) {
+    elements.mapZoomLabel.textContent = `${Math.round(mapZoom * 100)}%`;
+  }
+}
+
+function setDetailPanelVisible(visible) {
+  detailPanelVisible = Boolean(visible);
+  elements.zoneDetailView?.classList.toggle("hidden", !detailPanelVisible);
+}
+
+function setAlertPanelVisible(visible) {
+  alertPanelVisible = Boolean(visible);
+  if (!alertPanelVisible) {
+    elements.incomingAlertHud?.classList.add("hidden");
+    return;
+  }
+  renderIncomingAlerts(incomingAlerts);
+}
+
 function showProductionSubtab(name) {
   const isDesign = name !== "build";
   elements.designSubtabButton.classList.toggle("active", isDesign);
@@ -370,6 +440,14 @@ function setupMapDragging() {
     map.classList.remove("dragging");
     mapDragState = null;
   });
+
+  map.addEventListener("wheel", (event) => {
+    if (!event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey) {
+      event.preventDefault();
+      const direction = event.deltaY > 0 ? -0.08 : 0.08;
+      applyMapZoom(mapZoom + direction, event.clientX, event.clientY);
+    }
+  }, { passive: false });
 }
 
 function renderResources(resources) {
@@ -426,7 +504,7 @@ function renderHud() {
 function renderIncomingAlerts(alerts) {
   incomingAlerts = Array.isArray(alerts) ? alerts : [];
   if (!elements.incomingAlertHud || !elements.incomingAlertList) return;
-  if (!incomingAlerts.length) {
+  if (!incomingAlerts.length || !alertPanelVisible) {
     elements.incomingAlertHud.classList.add("hidden");
     elements.incomingAlertList.innerHTML = "";
     return;
@@ -1053,7 +1131,7 @@ function renderZoneSearchList() {
     ? zones
         .map((zone) => {
           return `
-            <button type="button" class="zone-row ${Number(zone.id) === Number(selectedZoneId) ? "selected" : ""}" data-select-zone="${zone.id}">
+            <button type="button" class="zone-row ${Number(zone.id) === Number(selectedZoneId) ? "selected" : ""}" data-select-zone="${zone.id}" style="${zone.occupied ? `border-left: 6px solid ${zone.ownerColor || ownerColor(zone.ownerId)};` : ""}">
               <div>
                 <strong>Lv.${zone.level} ${zone.name}</strong>
                 <span>${zone.ownerUsername ? `\uc18c\uc720: ${zone.ownerUsername}` : "\uc911\ub9bd"} / \uae08\uc18d +${zone.metalRate}/s, \uc5f0\ub8cc +${zone.fuelRate}/s</span>
@@ -1090,14 +1168,14 @@ function showRouteTo(target, seconds) {
   if (!content) return;
 
   clearRoute();
-  const startX = Number(currentBase.x || 50) * 18;
-  const startY = Number(currentBase.y || 50) * 11;
-  const endX = Number(target.x || 50) * 18;
-  const endY = Number(target.y || 50) * 11;
+  const startX = mapCoordX(currentBase.x || 50);
+  const startY = mapCoordY(currentBase.y || 50);
+  const endX = mapCoordX(target.x || 50);
+  const endY = mapCoordY(target.y || 50);
 
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   svg.setAttribute("class", "route-layer");
-  svg.setAttribute("viewBox", "0 0 1800 1100");
+  svg.setAttribute("viewBox", `0 0 ${MAP_WIDTH} ${MAP_HEIGHT}`);
   svg.innerHTML = `
     <defs>
       <marker id="routeArrow" markerWidth="12" markerHeight="12" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
@@ -1153,7 +1231,7 @@ function renderZones(zones) {
           type="button"
           class="${classes}"
           data-select-zone="${zone.id}"
-          style="--x: ${Number(zone.x || 50) / 100}; --y: ${Number(zone.y || 50) / 100};"
+          style="--x: ${Number(zone.x || 50) / 100}; --y: ${Number(zone.y || 50) / 100}; --owner-color: ${zone.ownerColor || ownerColor(zone.ownerId)};"
           title="${zone.name} / \uc794\uc874\ubcd1\ub825 ${garrisonTotal}"
         >
           <span>${zone.level}</span>
@@ -1168,7 +1246,7 @@ function renderZones(zones) {
           type="button"
           class="player-base-node ${Number(player.id) === Number(selectedPlayerId) ? "selected" : ""}"
           data-select-player="${player.id}"
-          style="--x: ${Number(player.base?.x || 50) / 100}; --y: ${Number(player.base?.y || 50) / 100};"
+          style="--x: ${Number(player.base?.x || 50) / 100}; --y: ${Number(player.base?.y || 50) / 100}; --owner-color: ${player.playerColor || ownerColor(player.id)};"
           title="${player.username}"
         >
           P
@@ -1185,10 +1263,11 @@ function renderZones(zones) {
         B
       </button>
     ` : "");
-  elements.zoneMapView.innerHTML = `<div class="map-content">${mapContent}</div>`;
+  elements.zoneMapView.innerHTML = `<div class="map-content" style="width:${MAP_WIDTH}px;height:${MAP_HEIGHT}px;">${mapContent}</div>`;
+  applyMapZoom(mapZoom);
   if (!elements.zoneMapView.dataset.centered) {
-    const centerX = Math.max(0, (Number(currentBase?.x || 50) / 100) * 1800 - (elements.zoneMapView.clientWidth / 2));
-    const centerY = Math.max(0, (Number(currentBase?.y || 50) / 100) * 1100 - (elements.zoneMapView.clientHeight / 2));
+    const centerX = Math.max(0, mapCoordX(currentBase?.x || 50) * mapZoom - (elements.zoneMapView.clientWidth / 2));
+    const centerY = Math.max(0, mapCoordY(currentBase?.y || 50) * mapZoom - (elements.zoneMapView.clientHeight / 2));
     elements.zoneMapView.scrollLeft = centerX;
     elements.zoneMapView.scrollTop = centerY;
     elements.zoneMapView.dataset.centered = "1";
@@ -1219,6 +1298,7 @@ function renderZones(zones) {
 function selectZone(zoneId) {
   selectedZoneId = Number(zoneId);
   selectedPlayerId = null;
+  setDetailPanelVisible(true);
   setBaseOverlayVisible(false);
   renderZones(currentZones);
 }
@@ -1226,6 +1306,7 @@ function selectZone(zoneId) {
 function selectPlayer(playerId) {
   selectedPlayerId = Number(playerId);
   selectedZoneId = null;
+  setDetailPanelVisible(true);
   setBaseOverlayVisible(false);
   renderZones(currentZones);
 }
@@ -1246,7 +1327,7 @@ function renderSelectedZone() {
     : `<button type="button" data-capture-zone="${zone.id}" class="primary">\uc810\ub839 \ucd9c\uaca9</button>`;
 
   elements.zoneDetailView.innerHTML = `
-    <p class="eyebrow">Level ${zone.level}</p>
+    <div class="panel-head"><p class="eyebrow">Level ${zone.level}</p><button type="button" data-close-detail="1">X</button></div>
     <h4>${zone.name}</h4>
     <p>${zone.description}</p>
     <div class="detail-stats">
@@ -1263,6 +1344,7 @@ function renderSelectedZone() {
   captureButtons.forEach((button) => {
     button.addEventListener("click", () => captureZone(button.dataset.captureZone));
   });
+  elements.zoneDetailView.querySelector("[data-close-detail]")?.addEventListener("click", () => setDetailPanelVisible(false));
 }
 
 function renderSelectedPlayer() {
@@ -1276,7 +1358,7 @@ function renderSelectedPlayer() {
 
   const admiral = player.assignedAdmiral ? `[${player.assignedAdmiral.rarity}] ${player.assignedAdmiral.name}` : "\uc5c6\uc74c";
   elements.zoneDetailView.innerHTML = `
-    <p class="eyebrow">Player Base</p>
+    <div class="panel-head"><p class="eyebrow">Player Base</p><button type="button" data-close-detail="1">X</button></div>
     <h4>${player.username}</h4>
     <div class="detail-stats">
       <span>\uae30\uc9c0 \uc88c\ud45c: X ${player.base?.x}, Y ${player.base?.y}</span>
@@ -1285,6 +1367,13 @@ function renderSelectedPlayer() {
       <span>\ucd94\uc815 \uc790\uc6d0: \uae08\uc18d ${Number(player.estimatedMetal || 0).toLocaleString()}, \uc5f0\ub8cc ${Number(player.estimatedFuel || 0).toLocaleString()}</span>
       <span>\ubc30\uce58 \uc81c\ub3c5: ${admiral}</span>
     </div>
+    <div class="trade-box">
+      <label for="tradeMetalInput">거래 금속</label>
+      <input id="tradeMetalInput" type="number" min="0" value="0">
+      <label for="tradeFuelInput">거래 연료</label>
+      <input id="tradeFuelInput" type="number" min="0" value="0">
+      <button type="button" data-trade-target="${player.id}">자원 보내기</button>
+    </div>
     <button type="button" data-pvp-target="${player.id}" class="primary">\uc0c1\ub300 \uae30\uc9c0 \uae30\uc2b5</button>
   `;
 
@@ -1292,6 +1381,8 @@ function renderSelectedPlayer() {
   pvpButtons.forEach((button) => {
     button.addEventListener("click", () => attackPlayer(button.dataset.pvpTarget));
   });
+  elements.zoneDetailView.querySelector("[data-trade-target]")?.addEventListener("click", () => sendTrade(player.id));
+  elements.zoneDetailView.querySelector("[data-close-detail]")?.addEventListener("click", () => setDetailPanelVisible(false));
 }
 
 function renderEmpire(data) {
@@ -1653,6 +1744,27 @@ async function speedupMission() {
 async function loadBattleRecords() {
   const data = await api("/battle-records");
   renderBattleRecords(data?.records);
+  await loadTradeLogs();
+}
+
+async function loadTradeLogs() {
+  if (!elements.tradeLogView) return;
+  const data = await api("/trade/logs");
+  const logs = Array.isArray(data?.logs) ? data.logs : [];
+  elements.tradeLogView.innerHTML = logs.length
+    ? logs.map((item) => {
+      const time = new Date(item.createdAt).toLocaleString();
+      return `
+        <div class="growth-item">
+          <div>
+            <strong>${item.fromName} -> ${item.toName}</strong>
+            <span>금속 ${item.metal.toLocaleString()} / 연료 ${item.fuel.toLocaleString()}</span>
+            <span>${time}</span>
+          </div>
+        </div>
+      `;
+    }).join("")
+    : `<div class="growth-item"><div>거래 기록이 없습니다.</div></div>`;
 }
 
 async function loadGrowth() {
@@ -1684,6 +1796,7 @@ async function upgradeResearch(type) {
     const data = await api(`/research/${type}/upgrade`, { method: "POST" });
     renderResearch(data);
     renderResources(data.resources);
+    await loadShipyard();
     setStatus(data.message);
   } catch (err) {
     handleAuthError(err);
@@ -1869,6 +1982,42 @@ async function attackPlayer(targetUserId) {
   }
 }
 
+async function sendTrade(targetUserId) {
+  clearMessages();
+  setBusy(true);
+  try {
+    const metal = Number(elements.zoneDetailView.querySelector("#tradeMetalInput")?.value || 0);
+    const fuel = Number(elements.zoneDetailView.querySelector("#tradeFuelInput")?.value || 0);
+    const data = await api("/trade/transfer", {
+      method: "POST",
+      body: JSON.stringify({ toUserId: Number(targetUserId), metal, fuel })
+    });
+    if (data?.resources?.resources) {
+      const state = data.resources;
+      renderResources({
+        metal: state.resources.metal,
+        fuel: state.resources.fuel,
+        production: {
+          metalPerSecond: state.rates.metal,
+          fuelPerSecond: state.rates.fuel,
+          base: state.rates.base,
+          zones: state.rates.zones,
+          multiplier: state.rates.multiplier
+        },
+        incomingAlerts
+      });
+    } else {
+      await loadResources();
+    }
+    await loadTradeLogs();
+    setStatus(data.message);
+  } catch (err) {
+    handleAuthError(err);
+  } finally {
+    setBusy(false);
+  }
+}
+
 async function startBattle() {
   clearMessages();
   loadBattleRecords().catch(() => {});
@@ -1893,7 +2042,7 @@ async function captureZone(zoneId) {
 }
 
 async function refreshAll() {
-  const [resources, fleet, map, empire, research, admirals, players, options, designs, production, missions, records] = await Promise.all([
+  const [resources, fleet, map, empire, research, admirals, players, options, designs, production, missions, records, trades] = await Promise.all([
     api("/resources"),
     api("/fleet"),
     api("/map"),
@@ -1905,7 +2054,8 @@ async function refreshAll() {
     api("/designs"),
     api("/production"),
     api("/missions"),
-    api("/battle-records")
+    api("/battle-records"),
+    api("/trade/logs")
   ]);
 
   renderResources(resources);
@@ -1922,6 +2072,12 @@ async function refreshAll() {
   activeMissions = Array.isArray(missions?.activeMissions) ? missions.activeMissions : [];
   renderMissionRoute();
   renderBattleRecords(records?.records);
+  if (elements.tradeLogView) {
+    const logs = Array.isArray(trades?.logs) ? trades.logs : [];
+    elements.tradeLogView.innerHTML = logs.length
+      ? logs.map((item) => `<div class="growth-item"><div><strong>${item.fromName} -> ${item.toName}</strong><span>금속 ${Number(item.metal || 0).toLocaleString()} / 연료 ${Number(item.fuel || 0).toLocaleString()}</span></div></div>`).join("")
+      : `<div class="growth-item"><div>거래 기록이 없습니다.</div></div>`;
+  }
   updateDebug({
     session: {
       username: localStorage.getItem(USERNAME_KEY) || "",
@@ -1977,6 +2133,12 @@ function bindEvents() {
   elements.toggleDevButton.addEventListener("click", toggleDevPanel);
   elements.devLoginButton.addEventListener("click", devLogin);
   elements.refreshDevUsersButton.addEventListener("click", () => refreshDevUsers().catch(handleAuthError));
+  elements.zoomInButton?.addEventListener("click", () => applyMapZoom(mapZoom + 0.1));
+  elements.zoomOutButton?.addEventListener("click", () => applyMapZoom(mapZoom - 0.1));
+  elements.toggleDetailButton?.addEventListener("click", () => setDetailPanelVisible(!detailPanelVisible));
+  elements.toggleAlertButton?.addEventListener("click", () => setAlertPanelVisible(!alertPanelVisible));
+  elements.closeAlertHudButton?.addEventListener("click", () => setAlertPanelVisible(false));
+  elements.closeBaseOverlayButton?.addEventListener("click", () => setBaseOverlayVisible(false));
   elements.designSubtabButton.addEventListener("click", () => showProductionSubtab("design"));
   elements.buildSubtabButton.addEventListener("click", () => showProductionSubtab("build"));
   elements.productionDesignSelect.addEventListener("change", renderSelectedProductionDesign);
@@ -1998,6 +2160,9 @@ function bindEvents() {
   });
 
   setupMapDragging();
+  if (elements.mapZoomLabel) {
+    elements.mapZoomLabel.textContent = `${Math.round(mapZoom * 100)}%`;
+  }
 
   elements.passwordInput.addEventListener("keydown", (event) => {
     if (event.key === "Enter") login();

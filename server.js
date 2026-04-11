@@ -826,6 +826,19 @@ async function initDb() {
     )
   `);
 
+  await run(`
+    CREATE TABLE IF NOT EXISTS trade_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      from_user_id INTEGER NOT NULL,
+      to_user_id INTEGER NOT NULL,
+      metal INTEGER NOT NULL DEFAULT 0,
+      fuel INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      FOREIGN KEY (from_user_id) REFERENCES users(id),
+      FOREIGN KEY (to_user_id) REFERENCES users(id)
+    )
+  `);
+
   const userColumns = await all("PRAGMA table_info(users)");
   const userColumnNames = userColumns.map((column) => column.name);
   if (!userColumnNames.includes("created_at")) {
@@ -916,6 +929,51 @@ async function getUserSettings(userId) {
     ? String(row.admiral_policy)
     : "capture";
   return { admiralPolicy: policy };
+}
+
+function ownerColorHex(ownerId) {
+  if (!ownerId) return "#9de7d9";
+  const hue = (Number(ownerId) * 47) % 360;
+  return `hsl(${hue} 70% 62%)`;
+}
+
+function hullUnlockRequirement(hullKey) {
+  const map = {
+    corvette: { type: "resource", level: 0 },
+    destroyer: { type: "resource", level: 0 },
+    cruiser: { type: "resource", level: 0 },
+    battleship: { type: "logistics", level: 2 },
+    carrier: { type: "tactics", level: 3 },
+    dreadnought: { type: "resource", level: 4 },
+    titan: { type: "tactics", level: 5 }
+  };
+  return map[hullKey] || { type: "resource", level: 0 };
+}
+
+function componentTierByPower(powerCost) {
+  const power = Number(powerCost || 0);
+  if (power <= 30) return 1;
+  if (power <= 60) return 2;
+  if (power <= 90) return 3;
+  return 4;
+}
+
+function componentUnlockRequirement(component) {
+  const category = String(component.category || "");
+  const tier = componentTierByPower(component.power_cost);
+  if (tier <= 1) return { type: "resource", level: 0 };
+  if (tier === 2) {
+    return { type: category === "weapon" || category === "defense" ? "tactics" : "logistics", level: 2 };
+  }
+  if (tier === 3) {
+    return { type: category === "weapon" || category === "defense" ? "tactics" : "logistics", level: 4 };
+  }
+  return { type: "resource", level: 6 };
+}
+
+function isUnlockedByResearch(requirement, research) {
+  const level = Number(research?.[requirement.type] || 0);
+  return level >= Number(requirement.level || 0);
 }
 
 async function getIncomingAlerts(userId) {
@@ -1108,6 +1166,15 @@ async function calculateDesign(input) {
     error.status = 400;
     throw error;
   }
+  if (input.userId) {
+    const research = await getResearch(input.userId);
+    const hullReq = hullUnlockRequirement(hull.key);
+    if (!isUnlockedByResearch(hullReq, research)) {
+      const error = new Error(`해당 선체는 연구 ${hullReq.type} Lv.${hullReq.level} 이후 해금됩니다.`);
+      error.status = 400;
+      throw error;
+    }
+  }
 
   const engines = parseComponentList(input.engines, input.engineId);
   const weapons = parseComponentList(input.weapons, input.weaponId);
@@ -1136,6 +1203,16 @@ async function calculateDesign(input) {
       const error = new Error("\ubd80\ud488\uc744 \ucc3e\uc744 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4.");
       error.status = 400;
       throw error;
+    }
+    if (input.userId) {
+      const research = input._research || await getResearch(input.userId);
+      input._research = research;
+      const requirement = componentUnlockRequirement(component);
+      if (!isUnlockedByResearch(requirement, research)) {
+        const error = new Error(`${component.name} 모듈은 연구 ${requirement.type} Lv.${requirement.level} 이후 해금됩니다.`);
+        error.status = 400;
+        throw error;
+      }
     }
     components.push(component);
   }
@@ -2080,6 +2157,7 @@ async function getPlayerTarget(userId, viewerId) {
     estimatedMetal: userId === viewerId ? resources?.resources?.metal || 0 : Math.floor((resources?.resources?.metal || 0) * 0.5),
     estimatedFuel: userId === viewerId ? resources?.resources?.fuel || 0 : Math.floor((resources?.resources?.fuel || 0) * 0.5),
     commanderLevel: commander.level,
+    playerColor: ownerColorHex(user.id),
     assignedAdmiral: admiral ? { name: admiral.name, rarity: admiral.rarity } : null
   };
 }
@@ -2121,6 +2199,7 @@ function formatZone(row) {
     garrison,
     ownerId: row.owner_id || null,
     ownerUsername: row.owner_username || null,
+    ownerColor: row.owner_id ? ownerColorHex(row.owner_id) : null,
     occupied: Boolean(row.owner_id),
     ownedByMe: Boolean(row.owned_by_me)
   };
@@ -2272,11 +2351,20 @@ app.get("/ships", (req, res) => {
 
 app.get("/shipyard/options", requireAuth, async (req, res) => {
   try {
+    const research = await getResearch(req.user.id);
     const hulls = await all("SELECT * FROM hulls ORDER BY id");
     const components = await all("SELECT * FROM components ORDER BY category, id");
+    const unlockedHulls = hulls.filter((hull) => {
+      const requirement = hullUnlockRequirement(hull.key);
+      return isUnlockedByResearch(requirement, research);
+    });
+    const unlockedComponents = components.filter((component) => {
+      const requirement = componentUnlockRequirement(component);
+      return isUnlockedByResearch(requirement, research);
+    });
 
     return res.json({
-      hulls: hulls.map((hull) => ({
+      hulls: unlockedHulls.map((hull) => ({
         id: hull.id,
         key: hull.key,
         name: hull.name,
@@ -2294,7 +2382,7 @@ app.get("/shipyard/options", requireAuth, async (req, res) => {
           utility: Number(hull.slot_utility || 1)
         }
       })),
-      components: components.map((component) => ({
+      components: unlockedComponents.map((component) => ({
         id: component.id,
         key: component.key,
         name: component.name,
@@ -2332,6 +2420,7 @@ app.post("/designs", requireAuth, async (req, res) => {
     }
 
     const calculated = await calculateDesign({
+      userId: req.user.id,
       hullId: Number.parseInt(req.body.hullId, 10),
       engines: req.body.engines,
       weapons: req.body.weapons,
@@ -2399,6 +2488,7 @@ app.put("/designs/:id", requireAuth, async (req, res) => {
     }
 
     const calculated = await calculateDesign({
+      userId: req.user.id,
       hullId: Number.parseInt(req.body.hullId, 10),
       engines: req.body.engines,
       weapons: req.body.weapons,
@@ -2455,7 +2545,11 @@ app.delete("/designs/:id", requireAuth, async (req, res) => {
     if (inQueue) {
       return res.status(400).json({ error: "\uc0dd\uc0b0 \uc911\uc778 \uc124\uacc4\uc548\uc740 \uc0ad\uc81c\ud560 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4." });
     }
-    await run("DELETE FROM owned_ships WHERE user_id = ? AND design_id = ?", [req.user.id, designId]);
+    const owned = await get("SELECT quantity FROM owned_ships WHERE user_id = ? AND design_id = ?", [req.user.id, designId]);
+    if (Number(owned?.quantity || 0) > 0) {
+      return res.status(400).json({ error: "보유 함선이 있는 설계안은 삭제할 수 없습니다. 함선을 먼저 소모하거나 다른 설계로 전환하세요." });
+    }
+    await run("DELETE FROM owned_ships WHERE user_id = ? AND design_id = ? AND quantity <= 0", [req.user.id, designId]);
     const result = await run("DELETE FROM ship_designs WHERE id = ? AND user_id = ?", [designId, req.user.id]);
     if (!result.changes) return res.status(404).json({ error: "\uc0ad\uc81c\ud560 \uc124\uacc4\uc548\uc744 \ucc3e\uc744 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4." });
     return res.json({
@@ -3080,6 +3174,88 @@ app.get("/players", requireAuth, async (req, res) => {
   } catch (err) {
     console.error(err);
     return res.status(500).json({ error: "\ud50c\ub808\uc774\uc5b4 \ubaa9\ub85d \uc870\ud68c \uc911 \uc624\ub958\uac00 \ubc1c\uc0dd\ud588\uc2b5\ub2c8\ub2e4." });
+  }
+});
+
+app.post("/trade/transfer", requireAuth, async (req, res) => {
+  try {
+    const toUserId = Number.parseInt(req.body.toUserId, 10);
+    const metal = Math.max(0, Number.parseInt(req.body.metal, 10) || 0);
+    const fuel = Math.max(0, Number.parseInt(req.body.fuel, 10) || 0);
+    if (!Number.isInteger(toUserId) || toUserId === req.user.id) {
+      return res.status(400).json({ error: "거래 대상이 올바르지 않습니다." });
+    }
+    if (metal <= 0 && fuel <= 0) {
+      return res.status(400).json({ error: "거래 자원을 입력하세요." });
+    }
+    if (metal > 200000 || fuel > 200000) {
+      return res.status(400).json({ error: "한 번에 전송 가능한 자원 한도를 초과했습니다." });
+    }
+
+    const target = await get("SELECT id, username FROM users WHERE id = ?", [toUserId]);
+    if (!target) {
+      return res.status(404).json({ error: "거래 대상을 찾을 수 없습니다." });
+    }
+
+    const senderState = await getUpdatedResources(req.user.id);
+    if (Number(senderState?.resources?.metal || 0) < metal || Number(senderState?.resources?.fuel || 0) < fuel) {
+      return res.status(400).json({ error: "보유 자원이 부족합니다." });
+    }
+
+    await run("BEGIN TRANSACTION");
+    try {
+      await run("UPDATE resources SET metal = metal - ?, fuel = fuel - ? WHERE user_id = ?", [metal, fuel, req.user.id]);
+      await run("UPDATE resources SET metal = metal + ?, fuel = fuel + ? WHERE user_id = ?", [metal, fuel, toUserId]);
+      await run(
+        "INSERT INTO trade_logs (from_user_id, to_user_id, metal, fuel, created_at) VALUES (?, ?, ?, ?, ?)",
+        [req.user.id, toUserId, metal, fuel, Date.now()]
+      );
+      await run("COMMIT");
+    } catch (err) {
+      await run("ROLLBACK");
+      throw err;
+    }
+
+    return res.json({
+      message: `${target.username}에게 금속 ${metal.toLocaleString()}, 연료 ${fuel.toLocaleString()}를 보냈습니다.`,
+      resources: await getUpdatedResources(req.user.id)
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "거래 처리 중 오류가 발생했습니다." });
+  }
+});
+
+app.get("/trade/logs", requireAuth, async (req, res) => {
+  try {
+    const rows = await all(
+      `
+        SELECT t.id, t.from_user_id, t.to_user_id, t.metal, t.fuel, t.created_at,
+               fu.username AS from_name, tu.username AS to_name
+        FROM trade_logs t
+        JOIN users fu ON fu.id = t.from_user_id
+        JOIN users tu ON tu.id = t.to_user_id
+        WHERE t.from_user_id = ? OR t.to_user_id = ?
+        ORDER BY t.id DESC
+        LIMIT 40
+      `,
+      [req.user.id, req.user.id]
+    );
+    return res.json({
+      logs: rows.map((row) => ({
+        id: row.id,
+        fromUserId: row.from_user_id,
+        toUserId: row.to_user_id,
+        fromName: row.from_name,
+        toName: row.to_name,
+        metal: Number(row.metal || 0),
+        fuel: Number(row.fuel || 0),
+        createdAt: Number(row.created_at || 0)
+      }))
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "거래 기록 조회 중 오류가 발생했습니다." });
   }
 });
 
