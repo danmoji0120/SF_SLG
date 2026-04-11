@@ -1,5 +1,6 @@
 const TOKEN_KEY = "sf_slg_token";
 const USERNAME_KEY = "sf_slg_username";
+const ADMIN_TOKEN_KEY = "sf_slg_admin_token";
 
 let authToken = localStorage.getItem(TOKEN_KEY) || "";
 let captureButtons = [];
@@ -24,11 +25,15 @@ let productionQueueState = [];
 let productionTickTimer = null;
 let productionSyncTimer = null;
 let resourceTickTimer = null;
+let alertPoller = null;
 let currentResourcesState = { metal: 0, fuel: 0 };
 let currentRatesState = { metalPerSecond: 0, fuelPerSecond: 0, base: { metal: 0, fuel: 0 }, zones: { metal: 0, fuel: 0 }, multiplier: 1 };
 let selectedProductionQueueId = null;
 let latestDebug = {};
 let devOpen = false;
+let adminToken = localStorage.getItem(ADMIN_TOKEN_KEY) || "";
+let incomingAlerts = [];
+let showBaseOverlay = false;
 
 const elements = {
   authPanel: document.getElementById("authPanel"),
@@ -49,11 +54,20 @@ const elements = {
   hudCommander: document.getElementById("hudCommander"),
   missionHud: document.getElementById("missionHud"),
   missionHudText: document.getElementById("missionHudText"),
+  missionSpeedupResource: document.getElementById("missionSpeedupResource"),
+  missionSpeedupAmount: document.getElementById("missionSpeedupAmount"),
   cancelMissionButton: document.getElementById("cancelMissionButton"),
   speedupMissionButton: document.getElementById("speedupMissionButton"),
+  incomingAlertHud: document.getElementById("incomingAlertHud"),
+  incomingAlertList: document.getElementById("incomingAlertList"),
   toggleDevButton: document.getElementById("toggleDevButton"),
   devPanel: document.getElementById("devPanel"),
   devView: document.getElementById("devView"),
+  devPasscodeInput: document.getElementById("devPasscodeInput"),
+  devLoginButton: document.getElementById("devLoginButton"),
+  devManager: document.getElementById("devManager"),
+  refreshDevUsersButton: document.getElementById("refreshDevUsersButton"),
+  devUsersView: document.getElementById("devUsersView"),
   toggleZoneSearchButton: document.getElementById("toggleZoneSearchButton"),
   zoneSearchPanel: document.getElementById("zoneSearchPanel"),
   zoneSearchInput: document.getElementById("zoneSearchInput"),
@@ -67,6 +81,11 @@ const elements = {
   startProductionButton: document.getElementById("startProductionButton"),
   speedupProductionButton: document.getElementById("speedupProductionButton"),
   cancelProductionButton: document.getElementById("cancelProductionButton"),
+  productionSpeedupResource: document.getElementById("productionSpeedupResource"),
+  productionSpeedupAmount: document.getElementById("productionSpeedupAmount"),
+  resetBattleRecordsButton: document.getElementById("resetBattleRecordsButton"),
+  saveAdmiralPolicyButton: document.getElementById("saveAdmiralPolicyButton"),
+  admiralPolicySelect: document.getElementById("admiralPolicySelect"),
   designSubtabButton: document.getElementById("designSubtabButton"),
   buildSubtabButton: document.getElementById("buildSubtabButton"),
   designSection: document.getElementById("designSection"),
@@ -88,6 +107,7 @@ const elements = {
   productionQueueView: document.getElementById("productionQueueView"),
   ownedShipsView: document.getElementById("ownedShipsView"),
   baseView: document.getElementById("baseView"),
+  mapBaseOverlay: document.getElementById("mapBaseOverlay"),
   baseMoveCostView: document.getElementById("baseMoveCostView"),
   commanderName: document.getElementById("commanderName"),
   resourcesView: document.getElementById("resourcesView"),
@@ -145,6 +165,10 @@ function setBusy(isBusy) {
     elements.designSubtabButton,
     elements.buildSubtabButton,
     elements.toggleDevButton,
+    elements.devLoginButton,
+    elements.refreshDevUsersButton,
+    elements.resetBattleRecordsButton,
+    elements.saveAdmiralPolicyButton,
     elements.toggleZoneSearchButton,
     ...captureButtons,
     ...researchButtons,
@@ -163,6 +187,9 @@ async function api(path, options = {}) {
 
   if (authToken) {
     headers.Authorization = `Bearer ${authToken}`;
+  }
+  if (path.startsWith("/admin/") && adminToken) {
+    headers["X-Admin-Token"] = adminToken;
   }
 
   const response = await fetch(path, { ...options, headers });
@@ -204,8 +231,10 @@ function saveSession(token, username) {
 
 function clearSession() {
   authToken = "";
+  adminToken = "";
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(USERNAME_KEY);
+  localStorage.removeItem(ADMIN_TOKEN_KEY);
 }
 
 function estimateMoveCost(toX, toY) {
@@ -226,6 +255,7 @@ function renderBase(data) {
   elements.baseMoveX.value = currentBase.x;
   elements.baseMoveY.value = currentBase.y;
   renderMoveCost();
+  setBaseOverlayVisible(showBaseOverlay);
   updateDebug({ base: currentBase, moveFuelPerDistance });
 }
 
@@ -272,7 +302,11 @@ function updateDebug(patch) {
 function toggleDevPanel() {
   devOpen = !devOpen;
   elements.devPanel.classList.toggle("hidden", !devOpen);
-  if (devOpen) renderDev();
+  if (devOpen) {
+    elements.devManager.classList.toggle("hidden", !adminToken);
+    if (adminToken) refreshDevUsers().catch(() => {});
+    renderDev();
+  }
 }
 
 function setupMapDragging() {
@@ -282,6 +316,7 @@ function setupMapDragging() {
     if (event.pointerType !== "touch" && event.button !== 0) return;
     const hitButton = event.target.closest(".map-node, .player-base-node, .base-node, [data-select-zone], [data-select-player], [data-capture-zone], [data-pvp-target]");
     if (hitButton) return;
+    setBaseOverlayVisible(false);
 
     mapDragState = {
       pointerId: event.pointerId,
@@ -366,6 +401,10 @@ function renderResources(resources) {
     `(\uae30\uc9c0 ${base.metal}/${base.fuel}, \uc810\ub839\uc9c0 ${zones.metal}/${zones.fuel}, \ubc30\uc728 x${Number(production.multiplier || 1).toFixed(2)})`;
   renderHud();
   startResourceRealtimeTick();
+  renderIncomingAlerts(safeResources.incomingAlerts);
+  if (safeResources.settings?.admiralPolicy && elements.admiralPolicySelect) {
+    elements.admiralPolicySelect.value = safeResources.settings.admiralPolicy;
+  }
   updateDebug({
     resources: {
       metal: Math.floor(currentResourcesState.metal),
@@ -384,12 +423,45 @@ function renderHud() {
   elements.hudCommander.textContent = `\uc0ac\ub839\uad00 Lv.${commanderLevel} (${commanderXp}/${nextXp})`;
 }
 
+function renderIncomingAlerts(alerts) {
+  incomingAlerts = Array.isArray(alerts) ? alerts : [];
+  if (!elements.incomingAlertHud || !elements.incomingAlertList) return;
+  if (!incomingAlerts.length) {
+    elements.incomingAlertHud.classList.add("hidden");
+    elements.incomingAlertList.innerHTML = "";
+    return;
+  }
+  elements.incomingAlertHud.classList.remove("hidden");
+  elements.incomingAlertList.innerHTML = incomingAlerts
+    .map((alert) => {
+      return `
+        <div class="alert-item">
+          <strong>${alert.attackerUsername}</strong>
+          <span>\uc804\ud22c\ub825 ${Number(alert.attackPower || 0).toLocaleString()} / \ud568\uc120 ${Number(alert.shipCount || 0)}\ucc99</span>
+          <span>\ub3c4\ucc29 \uc608\uc815 ${formatSeconds(Math.max(0, Number(alert.remainingSeconds || 0)))}</span>
+        </div>
+      `;
+    })
+    .join("");
+}
+
+function setBaseOverlayVisible(visible) {
+  showBaseOverlay = Boolean(visible);
+  elements.mapBaseOverlay?.classList.toggle("hidden", !showBaseOverlay);
+}
+
 function startResourceRealtimeTick() {
   if (resourceTickTimer) return;
   resourceTickTimer = setInterval(() => {
     currentResourcesState.metal += Number(currentRatesState.metalPerSecond || 0);
     currentResourcesState.fuel += Number(currentRatesState.fuelPerSecond || 0);
     renderHud();
+    if (incomingAlerts.length) {
+      incomingAlerts = incomingAlerts
+        .map((item) => ({ ...item, remainingSeconds: Math.max(0, Number(item.remainingSeconds || 0) - 1) }))
+        .filter((item) => Number(item.remainingSeconds || 0) > 0);
+      renderIncomingAlerts(incomingAlerts);
+    }
   }, 1000);
 }
 
@@ -420,7 +492,7 @@ function renderShipCosts() {
 }
 
 function optionLabel(component) {
-  return `${component.name} / \uc804\ub825 ${component.powerCost}, \uae08\uc18d ${component.metalCost}, \uc5f0\ub8cc ${component.fuelCost}`;
+  return `${component.name} / +\uacf5 ${component.attackBonus}, +\ubc29 ${component.defenseBonus}, +HP ${component.hpBonus}, +\uc18d ${component.speedBonus} / \uc804\ub825 ${component.powerCost}, \uae08\uc18d ${component.metalCost}, \uc5f0\ub8cc ${component.fuelCost}`;
 }
 
 function fillSelect(select, items, labelFn) {
@@ -517,8 +589,8 @@ function renderDesignPreview() {
       <span class="${overPower ? "danger-text" : ""}">\uc804\ub825 ${preview.totalPower}/${preview.hull.powerLimit}</span>
       <span>\ube44\uc6a9 \uae08\uc18d ${preview.totalMetalCost}, \uc5f0\ub8cc ${preview.totalFuelCost}</span>
       <span>\uc0dd\uc0b0 \uc2dc\uac04 ${formatBuildHours(preview.totalBuildTime)}</span>
-      <span>\ubb34\uae30 \ud569 +${preview.byCategory.weapons.reduce((sum, w) => sum + Number(w.attackBonus || 0), 0)}</span>
-      <span>\ubc29\uc5b4 \ud569 +${preview.byCategory.defenses.reduce((sum, w) => sum + Number(w.defenseBonus || 0), 0)}</span>
+      <span>\uacf5\uaca9 \ubaa8\ub4c8 \ud569 +${preview.byCategory.weapons.reduce((sum, w) => sum + Number(w.attackBonus || 0), 0)}</span>
+      <span>\ubc29\uc5b4 \ubaa8\ub4c8 \ud569 +${preview.byCategory.defenses.reduce((sum, w) => sum + Number(w.defenseBonus || 0), 0)}</span>
     </div>
   `;
 }
@@ -692,7 +764,23 @@ function clearRealtimeTimers() {
     clearInterval(missionPoller);
     missionPoller = null;
   }
+  if (alertPoller) {
+    clearInterval(alertPoller);
+    alertPoller = null;
+  }
   clearRoute();
+}
+
+function ensureAlertPolling() {
+  if (alertPoller || !authToken) return;
+  alertPoller = setInterval(async () => {
+    try {
+      const data = await api("/alerts/incoming");
+      renderIncomingAlerts(data?.alerts);
+    } catch (err) {
+      // ignore transient alert polling failures
+    }
+  }, 5000);
 }
 
 function setupProductionRealtimeSync() {
@@ -771,6 +859,9 @@ function renderResearch(data) {
 
 function renderAdmirals(data) {
   const admirals = Array.isArray(data?.admirals) ? data.admirals : [];
+  if (data?.settings?.admiralPolicy && elements.admiralPolicySelect) {
+    elements.admiralPolicySelect.value = data.settings.admiralPolicy;
+  }
 
   if (!admirals.length) {
     elements.admiralView.textContent = "\ubcf4\uc720 \uc81c\ub3c5\uc774 \uc5c6\uc2b5\ub2c8\ub2e4.";
@@ -781,13 +872,17 @@ function renderAdmirals(data) {
   elements.admiralView.innerHTML = admirals
     .map((admiral) => {
       const assigned = Number(admiral.assigned) === 1;
+      const isDead = String(admiral.status || "active") === "dead";
       return `
         <div class="growth-item ${assigned ? "assigned" : ""}">
           <div>
-            <strong>[${admiral.rarity}] ${admiral.name}${assigned ? " / \ubc30\uce58 \uc911" : ""}</strong>
+            <strong>[${admiral.rarity}] ${admiral.name}${assigned ? " / \ubc30\uce58 \uc911" : ""}${isDead ? " / \uc0ac\ub9dd" : ""}</strong>
             <span>\uc804\ud22c ${percent(admiral.combatBonus)}, \uc0dd\uc0b0 ${percent(admiral.resourceBonus)}, \ube44\uc6a9 -${Number(admiral.costBonus || 0).toFixed(2)}</span>
           </div>
-          <button type="button" data-assign-admiral="${admiral.id}" ${assigned ? "disabled" : ""}>\ubc30\uce58</button>
+          <div class="button-row">
+            <button type="button" data-assign-admiral="${admiral.id}" ${assigned || isDead ? "disabled" : ""}>\ubc30\uce58</button>
+            <button type="button" data-revive-admiral="${admiral.id}" ${isDead ? "" : "disabled"}>\ubd80\ud65c</button>
+          </div>
         </div>
       `;
     })
@@ -796,6 +891,9 @@ function renderAdmirals(data) {
   admiralButtons = Array.from(document.querySelectorAll("[data-assign-admiral]"));
   admiralButtons.forEach((button) => {
     button.addEventListener("click", () => assignAdmiral(button.dataset.assignAdmiral));
+  });
+  Array.from(document.querySelectorAll("[data-revive-admiral]")).forEach((button) => {
+    button.addEventListener("click", () => reviveAdmiral(button.dataset.reviveAdmiral));
   });
 }
 
@@ -855,6 +953,7 @@ function renderMap(data) {
   renderBase({ base: data?.base, moveFuelPerDistance, myBaseSpec: data?.myBaseSpec });
   currentPlayers = Array.isArray(data?.players) ? data.players : [];
   activeMissions = Array.isArray(data?.activeMissions) ? data.activeMissions : [];
+  renderIncomingAlerts(data?.incomingAlerts);
   renderZones(data?.zones);
   renderMissionRoute();
   updateDebug({
@@ -902,10 +1001,11 @@ function ensureMissionPolling() {
   if (!activeMissions.length || missionPoller) return;
   missionPoller = setInterval(async () => {
     try {
-      const [missions, records] = await Promise.all([api("/missions"), api("/battle-records")]);
+      const [missions, records, alerts] = await Promise.all([api("/missions"), api("/battle-records"), api("/alerts/incoming")]);
       activeMissions = Array.isArray(missions?.activeMissions) ? missions.activeMissions : [];
       renderMissionRoute();
       renderBattleRecords(records?.records);
+      renderIncomingAlerts(alerts?.alerts);
       if (!activeMissions.length) {
         await Promise.all([loadZones(), loadFleet()]);
       }
@@ -916,10 +1016,11 @@ function ensureMissionPolling() {
 }
 
 async function refreshMissionsAndRecords() {
-  const [missionData, recordData] = await Promise.all([api("/missions"), api("/battle-records")]);
+  const [missionData, recordData, alertData] = await Promise.all([api("/missions"), api("/battle-records"), api("/alerts/incoming")]);
   activeMissions = Array.isArray(missionData?.activeMissions) ? missionData.activeMissions : [];
   renderMissionRoute();
   renderBattleRecords(recordData?.records);
+  renderIncomingAlerts(alertData?.alerts);
   ensureMissionPolling();
 }
 
@@ -1099,6 +1200,7 @@ function renderZones(zones) {
       elements.baseMoveX.value = currentBase.x;
       elements.baseMoveY.value = currentBase.y;
       renderMoveCost();
+      setBaseOverlayVisible(true);
     });
   }
 
@@ -1117,12 +1219,14 @@ function renderZones(zones) {
 function selectZone(zoneId) {
   selectedZoneId = Number(zoneId);
   selectedPlayerId = null;
+  setBaseOverlayVisible(false);
   renderZones(currentZones);
 }
 
 function selectPlayer(playerId) {
   selectedPlayerId = Number(playerId);
   selectedZoneId = null;
+  setBaseOverlayVisible(false);
   renderZones(currentZones);
 }
 
@@ -1247,6 +1351,7 @@ async function login() {
     showGame(data.username);
     setStatus("\ub85c\uadf8\uc778\ud588\uc2b5\ub2c8\ub2e4.");
     await refreshAll();
+    ensureAlertPolling();
   } catch (err) {
     setError(err.message);
   } finally {
@@ -1465,11 +1570,26 @@ async function speedupProduction() {
   }
   setBusy(true);
   try {
+    const resourceType = elements.productionSpeedupResource.value || "fuel";
+    const amount = Number(elements.productionSpeedupAmount.value || 0);
     const data = await api(`/production/${selectedProductionQueueId}/speedup`, {
       method: "POST",
-      body: JSON.stringify({ minutes: 10 })
+      body: JSON.stringify({ resourceType, amount })
     });
     renderProduction(data);
+    if (data.resources) {
+      renderResources({
+        ...data.resources,
+        production: {
+          metalPerSecond: currentRatesState.metalPerSecond,
+          fuelPerSecond: currentRatesState.fuelPerSecond,
+          base: currentRatesState.base,
+          zones: currentRatesState.zones,
+          multiplier: currentRatesState.multiplier
+        },
+        incomingAlerts
+      });
+    }
     setStatus(data.message);
   } catch (err) {
     handleAuthError(err);
@@ -1501,11 +1621,26 @@ async function speedupMission() {
   setBusy(true);
   try {
     const mission = activeMissions[0];
+    const resourceType = elements.missionSpeedupResource.value || "fuel";
+    const amount = Number(elements.missionSpeedupAmount.value || 0);
     const data = await api(`/missions/${mission.id}/speedup`, {
       method: "POST",
-      body: JSON.stringify({ minutes: 10 })
+      body: JSON.stringify({ resourceType, amount })
     });
     activeMissions = data.activeMissions || [];
+    if (data.resources) {
+      renderResources({
+        ...data.resources,
+        production: {
+          metalPerSecond: currentRatesState.metalPerSecond,
+          fuelPerSecond: currentRatesState.fuelPerSecond,
+          base: currentRatesState.base,
+          zones: currentRatesState.zones,
+          multiplier: currentRatesState.multiplier
+        },
+        incomingAlerts
+      });
+    }
     renderMissionRoute();
     setStatus(data.message);
   } catch (err) {
@@ -1581,6 +1716,133 @@ async function assignAdmiral(id) {
     renderAdmirals(data);
     await Promise.all([loadResources(), loadGrowth()]);
     setStatus(data.message);
+  } catch (err) {
+    handleAuthError(err);
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function reviveAdmiral(id) {
+  clearMessages();
+  setBusy(true);
+  try {
+    const data = await api(`/admirals/${id}/revive`, { method: "POST" });
+    renderAdmirals(data);
+    await loadResources();
+    setStatus(data.message);
+  } catch (err) {
+    handleAuthError(err);
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function saveAdmiralPolicy() {
+  clearMessages();
+  setBusy(true);
+  try {
+    const policy = elements.admiralPolicySelect.value;
+    const data = await api("/admiral-policy", {
+      method: "POST",
+      body: JSON.stringify({ policy })
+    });
+    setStatus(data.message);
+  } catch (err) {
+    handleAuthError(err);
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function resetBattleRecords() {
+  clearMessages();
+  setBusy(true);
+  try {
+    const data = await api("/battle-records", { method: "DELETE" });
+    renderBattleRecords(data.records);
+    setStatus(data.message);
+  } catch (err) {
+    handleAuthError(err);
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function devLogin() {
+  clearMessages();
+  const passcode = String(elements.devPasscodeInput.value || "");
+  if (!passcode) {
+    setError("개발자 비밀번호를 입력하세요.");
+    return;
+  }
+  setBusy(true);
+  try {
+    const data = await api("/admin/login", {
+      method: "POST",
+      body: JSON.stringify({ passcode })
+    });
+    adminToken = data.adminToken;
+    localStorage.setItem(ADMIN_TOKEN_KEY, adminToken);
+    elements.devManager.classList.remove("hidden");
+    await refreshDevUsers();
+    setStatus(data.message);
+  } catch (err) {
+    handleAuthError(err);
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function refreshDevUsers() {
+  if (!adminToken) return;
+  const data = await api("/admin/users");
+  const users = Array.isArray(data?.users) ? data.users : [];
+  elements.devUsersView.innerHTML = users.length
+    ? users.map((user) => `
+      <div class="growth-item">
+        <div>
+          <strong>#${user.id} ${user.username}</strong>
+          <span>\uc790\uc6d0: \uae08\uc18d ${Number(user.resources?.metal || 0).toLocaleString()}, \uc5f0\ub8cc ${Number(user.resources?.fuel || 0).toLocaleString()}</span>
+          <span>\uae30\uc9c0: X ${user.base?.x}, Y ${user.base?.y} / \uc0ac\ub839\uad00 Lv.${user.commanderLevel} / \uc804\ud22c\ub825 ${Number(user.fleetPower || 0).toLocaleString()}</span>
+        </div>
+        <div class="button-row">
+          <button type="button" data-dev-reset="${user.id}">\ucd08\uae30\ud654</button>
+          <button type="button" data-dev-delete="${user.id}">\uc0ad\uc81c</button>
+        </div>
+      </div>
+    `).join("")
+    : `<div class="growth-item"><div>\uacc4\uc815 \uc815\ubcf4\uac00 \uc5c6\uc2b5\ub2c8\ub2e4.</div></div>`;
+
+  Array.from(elements.devUsersView.querySelectorAll("[data-dev-reset]")).forEach((button) => {
+    button.addEventListener("click", () => devResetUser(button.dataset.devReset));
+  });
+  Array.from(elements.devUsersView.querySelectorAll("[data-dev-delete]")).forEach((button) => {
+    button.addEventListener("click", () => devDeleteUser(button.dataset.devDelete));
+  });
+}
+
+async function devResetUser(userId) {
+  clearMessages();
+  setBusy(true);
+  try {
+    const data = await api(`/admin/users/${Number(userId)}/reset`, { method: "POST" });
+    setStatus(data.message);
+    await refreshDevUsers();
+  } catch (err) {
+    handleAuthError(err);
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function devDeleteUser(userId) {
+  clearMessages();
+  setBusy(true);
+  try {
+    const data = await api(`/admin/users/${Number(userId)}`, { method: "DELETE" });
+    setStatus(data.message);
+    await refreshDevUsers();
   } catch (err) {
     handleAuthError(err);
   } finally {
@@ -1669,7 +1931,12 @@ async function refreshAll() {
 }
 
 function handleAuthError(err) {
-  if (err.message.includes("\ud1a0\ud070") || err.message.includes("\uc778\uc99d")) {
+  const isDeveloperAuth = err.message.includes("\uac1c\ubc1c\uc790");
+  if (isDeveloperAuth) {
+    adminToken = "";
+    localStorage.removeItem(ADMIN_TOKEN_KEY);
+    elements.devManager?.classList.add("hidden");
+  } else if (err.message.includes("\ud1a0\ud070") || err.message.includes("\uc778\uc99d")) {
     clearRealtimeTimers();
     clearSession();
     showAuth();
@@ -1708,9 +1975,13 @@ function bindEvents() {
   elements.cancelMissionButton.addEventListener("click", cancelMission);
   elements.speedupMissionButton.addEventListener("click", speedupMission);
   elements.toggleDevButton.addEventListener("click", toggleDevPanel);
+  elements.devLoginButton.addEventListener("click", devLogin);
+  elements.refreshDevUsersButton.addEventListener("click", () => refreshDevUsers().catch(handleAuthError));
   elements.designSubtabButton.addEventListener("click", () => showProductionSubtab("design"));
   elements.buildSubtabButton.addEventListener("click", () => showProductionSubtab("build"));
   elements.productionDesignSelect.addEventListener("change", renderSelectedProductionDesign);
+  elements.resetBattleRecordsButton.addEventListener("click", resetBattleRecords);
+  elements.saveAdmiralPolicyButton.addEventListener("click", saveAdmiralPolicy);
   elements.baseMoveX.addEventListener("input", renderMoveCost);
   elements.baseMoveY.addEventListener("input", renderMoveCost);
 
@@ -1731,6 +2002,9 @@ function bindEvents() {
   elements.passwordInput.addEventListener("keydown", (event) => {
     if (event.key === "Enter") login();
   });
+  elements.devPasscodeInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") devLogin();
+  });
 }
 
 async function restoreSession() {
@@ -1748,6 +2022,7 @@ async function restoreSession() {
     await refreshAll();
     showTab(activeTab);
     showProductionSubtab("design");
+    ensureAlertPolling();
     setStatus("\uc800\uc7a5\ub41c \ud1a0\ud070\uc73c\ub85c \uc811\uc18d\uc744 \ubcf5\uad6c\ud588\uc2b5\ub2c8\ub2e4.");
   } catch (err) {
     clearRealtimeTimers();

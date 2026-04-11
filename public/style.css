@@ -194,6 +194,56 @@ body:has(#gamePanel:not(.hidden)) {
   margin-bottom: 0;
 }
 
+.speedup-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.speedup-controls select,
+.speedup-controls input {
+  margin: 0;
+}
+
+.speedup-controls input {
+  max-width: 120px;
+}
+
+.incoming-alert-hud {
+  position: fixed;
+  top: 252px;
+  right: 14px;
+  z-index: 44;
+  width: min(360px, calc(100vw - 28px));
+  max-height: 240px;
+  overflow: auto;
+  padding: 10px 12px;
+  background: rgba(122, 34, 34, 0.9);
+  border: 1px solid rgba(255, 180, 180, 0.7);
+  border-radius: 8px;
+}
+
+.incoming-alert-hud h4 {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+
+.alert-item {
+  display: grid;
+  gap: 3px;
+  margin-bottom: 8px;
+  padding: 8px;
+  background: rgba(8, 13, 17, 0.7);
+  border: 1px solid rgba(255, 180, 180, 0.45);
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+.alert-item:last-child {
+  margin-bottom: 0;
+}
+
 .dev-toggle {
   position: fixed;
   left: 14px;
@@ -221,6 +271,12 @@ body:has(#gamePanel:not(.hidden)) {
 .dev-panel pre {
   min-height: 0;
   font-size: 12px;
+}
+
+.dev-login {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 10px;
 }
 
 .card {
@@ -695,9 +751,9 @@ body:has(#gamePanel:not(.hidden)) {
 .zone-detail {
   position: fixed;
   right: 14px;
-  top: 112px;
+  top: 170px;
   z-index: 36;
-  width: min(360px, calc(100vw - 28px));
+  width: min(320px, calc(100vw - 28px));
   max-height: calc(100vh - 210px);
   overflow: auto;
   min-height: 0;
@@ -1063,6 +1119,13 @@ pre {
     padding: 10px;
   }
 
+  .incoming-alert-hud {
+    top: 236px;
+    right: 10px;
+    width: min(230px, calc(100vw - 20px));
+    max-height: 180px;
+  }
+
   .dev-toggle {
     left: 10px;
     top: 306px;
@@ -1108,7 +1171,7 @@ pre {
     left: 10px;
     right: 10px;
     top: auto;
-    bottom: 202px;
+    bottom: 208px;
     width: auto;
     max-height: 210px;
   }

@@ -49,14 +49,37 @@
 
       <section id="missionHud" class="mission-hud hidden">
         <div id="missionHudText">&#51060;&#46041; &#51473;</div>
+        <div class="speedup-controls">
+          <select id="missionSpeedupResource">
+            <option value="fuel">&#50672;&#47308;</option>
+            <option value="metal">&#44552;&#49549;</option>
+          </select>
+          <input id="missionSpeedupAmount" type="number" min="1" value="600">
+        </div>
         <div class="button-row">
           <button id="cancelMissionButton" type="button">&#52636;&#44201; &#52712;&#49548;</button>
-          <button id="speedupMissionButton" type="button" class="primary">+10&#48516;</button>
+          <button id="speedupMissionButton" type="button" class="primary">&#44032;&#49549;</button>
         </div>
+      </section>
+
+      <section id="incomingAlertHud" class="incoming-alert-hud hidden">
+        <h4>&#52840;&#44277; &#44221;&#44256;</h4>
+        <div id="incomingAlertList"></div>
       </section>
 
       <button id="toggleDevButton" type="button" class="dev-toggle">DEV</button>
       <section id="devPanel" class="dev-panel hidden">
+        <div class="dev-login">
+          <label for="devPasscodeInput">DEV PASS</label>
+          <input id="devPasscodeInput" type="password" placeholder="0305">
+          <button id="devLoginButton" type="button" class="primary">&#51077;&#51109;</button>
+        </div>
+        <div id="devManager" class="hidden">
+          <div class="button-row">
+            <button id="refreshDevUsersButton" type="button">&#44228;&#51221; &#49352;&#47196;&#44256;&#52840;</button>
+          </div>
+          <div id="devUsersView" class="growth-list"></div>
+        </div>
         <pre id="devView"></pre>
       </section>
 
@@ -89,7 +112,7 @@
       </section>
 
       <section class="tab-panel active map-panel" data-tab-panel="map">
-        <article class="card map-base-overlay">
+        <article class="card map-base-overlay hidden" id="mapBaseOverlay">
           <h3>&#45236; &#44592;&#51648;</h3>
           <div id="baseView" class="metric">&#44592;&#51648; &#50948;&#52824;&#47484; &#48520;&#47084;&#50724;&#45716; &#51473;...</div>
           <div class="move-controls">
@@ -201,9 +224,16 @@
               </div>
             </div>
             <div id="productionDesignDetail" class="design-preview"></div>
+            <div class="speedup-controls">
+              <select id="productionSpeedupResource">
+                <option value="fuel">&#50672;&#47308;</option>
+                <option value="metal">&#44552;&#49549;</option>
+              </select>
+              <input id="productionSpeedupAmount" type="number" min="1" value="500">
+            </div>
             <div class="button-row">
               <button id="startProductionButton" type="button" class="primary">&#49373;&#49328; &#49884;&#51089;</button>
-              <button id="speedupProductionButton" type="button">+10&#48516; &#44032;&#49549;</button>
+              <button id="speedupProductionButton" type="button">&#44032;&#49549;</button>
               <button id="cancelProductionButton" type="button">&#49373;&#49328; &#52712;&#49548;</button>
             </div>
             <div id="productionQueueView" class="growth-list"></div>
@@ -224,6 +254,14 @@
           <article class="card">
             <h3>&#51228;&#46021;</h3>
             <p class="hint">&#51228;&#46021; &#50689;&#51077; &#48708;&#50857;: &#44552;&#49549; 600, &#50672;&#47308; 300</p>
+            <div class="speedup-controls">
+              <select id="admiralPolicySelect">
+                <option value="capture">&#49373;&#54252; &#50976;&#51648;</option>
+                <option value="kill">&#49324;&#49345; &#52376;&#47532;</option>
+                <option value="release">&#49332;&#47140;&#46160;&#44592;</option>
+              </select>
+              <button id="saveAdmiralPolicyButton" type="button">&#51221;&#52293; &#51200;&#51109;</button>
+            </div>
             <button id="drawAdmiralButton" type="button" class="primary">&#51228;&#46021; &#50689;&#51077;</button>
             <div id="admiralView" class="growth-list">&#48372;&#50976; &#51228;&#46021;&#51060; &#50630;&#49845;&#45768;&#45796;.</div>
           </article>
@@ -233,6 +271,9 @@
       <section class="tab-panel" data-tab-panel="battle">
         <article class="card">
           <h3>&#51204;&#53804;&#44592;&#47197;</h3>
+          <div class="button-row">
+            <button id="resetBattleRecordsButton" type="button">&#44592;&#47197; &#52488;&#44592;&#54868;</button>
+          </div>
           <pre id="battleLog">&#50500;&#51649; &#51204;&#53804; &#44592;&#47197;&#51060; &#50630;&#49845;&#45768;&#45796;.</pre>
         </article>
       </section>

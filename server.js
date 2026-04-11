@@ -9,6 +9,7 @@ const cors = require("cors");
 const app = express();
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || "dev-secret-change-me";
+const ADMIN_PANEL_PASS = process.env.ADMIN_PANEL_PASS || "0305";
 const CORS_ORIGIN = process.env.CORS_ORIGIN || "*";
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, "game.db");
 
@@ -747,6 +748,8 @@ async function initDb() {
       FOREIGN KEY (user_id) REFERENCES users(id)
     )
   `);
+  await ensureColumn("missions", "attacker_power", "INTEGER NOT NULL DEFAULT 0");
+  await ensureColumn("missions", "attacker_ship_count", "INTEGER NOT NULL DEFAULT 0");
 
   await run(`
     CREATE TABLE IF NOT EXISTS battle_records (
@@ -796,6 +799,32 @@ async function initDb() {
   `);
   await ensureColumn("admirals", "captured_from", "INTEGER");
   await ensureColumn("admirals", "captured_at", "INTEGER");
+  await ensureColumn("admirals", "status", "TEXT NOT NULL DEFAULT 'active'");
+  await ensureColumn("admirals", "dead_at", "INTEGER");
+
+  await run(`
+    CREATE TABLE IF NOT EXISTS user_settings (
+      user_id INTEGER PRIMARY KEY,
+      admiral_policy TEXT NOT NULL DEFAULT 'capture',
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    )
+  `);
+
+  await run(`
+    CREATE TABLE IF NOT EXISTS incoming_alerts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      target_user_id INTEGER NOT NULL,
+      mission_id INTEGER,
+      attacker_user_id INTEGER NOT NULL,
+      attacker_username TEXT NOT NULL,
+      attack_power INTEGER NOT NULL DEFAULT 0,
+      ship_count INTEGER NOT NULL DEFAULT 0,
+      arrive_at INTEGER NOT NULL,
+      status TEXT NOT NULL DEFAULT 'active',
+      created_at INTEGER NOT NULL,
+      FOREIGN KEY (target_user_id) REFERENCES users(id)
+    )
+  `);
 
   const userColumns = await all("PRAGMA table_info(users)");
   const userColumnNames = userColumns.map((column) => column.name);
@@ -819,6 +848,7 @@ async function initDb() {
   for (const user of users) {
     await ensureBase(user.id);
     await ensureStarterDesign(user.id);
+    await run("INSERT OR IGNORE INTO user_settings (user_id, admiral_policy) VALUES (?, 'capture')", [user.id]);
   }
 }
 
@@ -827,6 +857,14 @@ function signToken(user) {
     { id: user.id, username: user.username },
     JWT_SECRET,
     { expiresIn: "7d" }
+  );
+}
+
+function signAdminToken(userId) {
+  return jwt.sign(
+    { admin: true, issuedBy: userId },
+    JWT_SECRET,
+    { expiresIn: "8h" }
   );
 }
 
@@ -849,6 +887,60 @@ function requireAuth(req, res, next) {
   } catch (err) {
     return res.status(401).json({ error: "\ud1a0\ud070\uc774 \ub9cc\ub8cc\ub418\uc5c8\uac70\ub098 \uc62c\ubc14\ub974\uc9c0 \uc54a\uc2b5\ub2c8\ub2e4." });
   }
+}
+
+function requireAdmin(req, res, next) {
+  const token = String(req.headers["x-admin-token"] || "");
+  if (!token) {
+    return res.status(401).json({ error: "개발자 인증이 필요합니다." });
+  }
+  try {
+    const payload = jwt.verify(token, JWT_SECRET);
+    if (!payload?.admin) {
+      return res.status(401).json({ error: "개발자 인증이 유효하지 않습니다." });
+    }
+    req.admin = payload;
+    return next();
+  } catch (err) {
+    return res.status(401).json({ error: "개발자 인증이 만료되었거나 유효하지 않습니다." });
+  }
+}
+
+async function getUserSettings(userId) {
+  let row = await get("SELECT admiral_policy FROM user_settings WHERE user_id = ?", [userId]);
+  if (!row) {
+    await run("INSERT INTO user_settings (user_id, admiral_policy) VALUES (?, 'capture')", [userId]);
+    row = { admiral_policy: "capture" };
+  }
+  const policy = ["capture", "kill", "release"].includes(String(row.admiral_policy || "capture"))
+    ? String(row.admiral_policy)
+    : "capture";
+  return { admiralPolicy: policy };
+}
+
+async function getIncomingAlerts(userId) {
+  const rows = await all(
+    `
+      SELECT id, mission_id, attacker_user_id, attacker_username, attack_power, ship_count, arrive_at, status, created_at
+      FROM incoming_alerts
+      WHERE target_user_id = ? AND status = 'active'
+      ORDER BY arrive_at ASC, id ASC
+      LIMIT 20
+    `,
+    [userId]
+  );
+
+  return rows.map((row) => ({
+    id: row.id,
+    missionId: row.mission_id,
+    attackerUserId: row.attacker_user_id,
+    attackerUsername: row.attacker_username,
+    attackPower: Number(row.attack_power || 0),
+    shipCount: Number(row.ship_count || 0),
+    arriveAt: Number(row.arrive_at || 0),
+    remainingSeconds: Math.max(0, Math.ceil((Number(row.arrive_at || 0) - Date.now()) / 1000)),
+    createdAt: Number(row.created_at || 0)
+  }));
 }
 
 async function getProductionRates(userId) {
@@ -901,9 +993,9 @@ async function getAssignedAdmiral(userId) {
   return get(
     `
       SELECT id, name, rarity, combat_bonus AS combatBonus,
-             resource_bonus AS resourceBonus, cost_bonus AS costBonus, assigned
+             resource_bonus AS resourceBonus, cost_bonus AS costBonus, assigned, status
       FROM admirals
-      WHERE user_id = ? AND assigned = 1
+      WHERE user_id = ? AND assigned = 1 AND status = 'active'
       ORDER BY id DESC
       LIMIT 1
     `,
@@ -1474,6 +1566,8 @@ function formatMission(row) {
     to: { x: row.to_x, y: row.to_y },
     startedAt: row.started_at,
     arriveAt: row.arrive_at,
+    attackerPower: Number(row.attacker_power || 0),
+    attackerShipCount: Number(row.attacker_ship_count || 0),
     status: row.status,
     result: row.result || null,
     remainingSeconds: row.status === "traveling" ? Math.max(0, Math.ceil((row.arrive_at - now) / 1000)) : 0
@@ -1515,6 +1609,31 @@ async function getBattleRecords(userId) {
       }
     })()
   }));
+}
+
+async function deleteUserCompletely(userId) {
+  await run("BEGIN TRANSACTION");
+  try {
+    await run("DELETE FROM incoming_alerts WHERE target_user_id = ? OR attacker_user_id = ?", [userId, userId]);
+    await run("DELETE FROM missions WHERE user_id = ? OR target_user_id = ?", [userId, userId]);
+    await run("DELETE FROM battle_records WHERE user_id = ?", [userId]);
+    await run("DELETE FROM production_queue WHERE user_id = ?", [userId]);
+    await run("DELETE FROM owned_ships WHERE user_id = ?", [userId]);
+    await run("DELETE FROM ship_designs WHERE user_id = ?", [userId]);
+    await run("DELETE FROM occupied_zones WHERE user_id = ?", [userId]);
+    await run("DELETE FROM admirals WHERE user_id = ?", [userId]);
+    await run("DELETE FROM commander_progress WHERE user_id = ?", [userId]);
+    await run("DELETE FROM research WHERE user_id = ?", [userId]);
+    await run("DELETE FROM user_settings WHERE user_id = ?", [userId]);
+    await run("DELETE FROM bases WHERE user_id = ?", [userId]);
+    await run("DELETE FROM fleets WHERE user_id = ?", [userId]);
+    await run("DELETE FROM resources WHERE user_id = ?", [userId]);
+    await run("DELETE FROM users WHERE id = ?", [userId]);
+    await run("COMMIT");
+  } catch (err) {
+    await run("ROLLBACK");
+    throw err;
+  }
 }
 
 async function getActiveMissions(userId) {
@@ -1575,13 +1694,21 @@ async function resolveMission(mission) {
 
     const attackerState = await getUpdatedResources(mission.user_id);
     const defenderState = await getUpdatedResources(targetUser.id);
+    const attackerSettings = await getUserSettings(mission.user_id);
     const loot = { metal: 0, fuel: 0 };
     let capturedAdmiral = null;
+    let killedAdmiral = null;
     if (battle.result === "victory") {
       loot.metal = Math.min(Math.floor(defenderState.resources.metal * 0.2), 2000);
       loot.fuel = Math.min(Math.floor(defenderState.resources.fuel * 0.2), 1200);
       const defenderAdmiral = await getAssignedAdmiral(targetUser.id);
-      if (defenderAdmiral && Math.random() < 0.25) capturedAdmiral = defenderAdmiral;
+      if (defenderAdmiral) {
+        if (attackerSettings.admiralPolicy === "kill") {
+          killedAdmiral = defenderAdmiral;
+        } else if (attackerSettings.admiralPolicy === "capture" && Math.random() < 0.65) {
+          capturedAdmiral = defenderAdmiral;
+        }
+      }
     }
 
     await run("BEGIN TRANSACTION");
@@ -1595,8 +1722,14 @@ async function resolveMission(mission) {
       }
       if (capturedAdmiral) {
         await run(
-          "UPDATE admirals SET user_id = ?, assigned = 0, captured_from = ?, captured_at = ? WHERE id = ?",
+          "UPDATE admirals SET user_id = ?, assigned = 0, status = 'active', dead_at = NULL, captured_from = ?, captured_at = ? WHERE id = ?",
           [mission.user_id, targetUser.id, Date.now(), capturedAdmiral.id]
+        );
+      }
+      if (killedAdmiral) {
+        await run(
+          "UPDATE admirals SET assigned = 0, status = 'dead', dead_at = ? WHERE id = ? AND user_id = ?",
+          [Date.now(), killedAdmiral.id, targetUser.id]
         );
       }
       await run("COMMIT");
@@ -1609,6 +1742,10 @@ async function resolveMission(mission) {
     if (battle.result === "victory") {
       log.push(`\uc57d\ud0c8 \uc131\uacf5: \uae08\uc18d ${loot.metal}, \uc5f0\ub8cc ${loot.fuel}`);
       if (capturedAdmiral) log.push(`\uc81c\ub3c5 \uc0dd\ud3ec: [${capturedAdmiral.rarity}] ${capturedAdmiral.name}`);
+      if (killedAdmiral) log.push(`\uc81c\ub3c5 \uc0ac\ub9dd: [${killedAdmiral.rarity}] ${killedAdmiral.name}`);
+      if (!capturedAdmiral && !killedAdmiral && attackerSettings.admiralPolicy === "release") {
+        log.push("\uc81c\ub3c5 \ucc98\ubd84 \uc815\ucc45: \uc0dd\ud3ec \uc5c6\uc774 \uc0b4\ub824\ub454 \ud6c4 \ud6c4\ud1f4.");
+      }
     } else {
       log.push("\uacf5\uaca9 \uc2e4\ud328: \uc57d\ud0c8\uc5d0 \uc2e4\ud328\ud588\uc2b5\ub2c8\ub2e4.");
     }
@@ -1743,11 +1880,17 @@ async function processMissionQueueForUser(userId) {
         "UPDATE missions SET status = 'completed', result = ?, log_json = ? WHERE id = ?",
         [resolved.result, JSON.stringify(resolved.log || []), mission.id]
       );
+      if (mission.mission_type === "pvp" && mission.target_user_id) {
+        await run("UPDATE incoming_alerts SET status = 'resolved' WHERE mission_id = ?", [mission.id]);
+      }
     } catch (err) {
       await run(
         "UPDATE missions SET status = 'failed', result = 'failed', log_json = ? WHERE id = ?",
         [JSON.stringify(["[\uc2dc\uc2a4\ud15c \uc624\ub958] \uc804\ud22c \ucc98\ub9ac\uc5d0 \uc2e4\ud328\ud588\uc2b5\ub2c8\ub2e4."]), mission.id]
       );
+      if (mission.mission_type === "pvp" && mission.target_user_id) {
+        await run("UPDATE incoming_alerts SET status = 'failed' WHERE mission_id = ?", [mission.id]);
+      }
       console.error(err);
     }
   }
@@ -2027,6 +2170,7 @@ app.post("/signup", async (req, res) => {
       [result.lastID]
     );
     await run("INSERT INTO commander_progress (user_id, level, xp) VALUES (?, 1, 0)", [result.lastID]);
+    await run("INSERT INTO user_settings (user_id, admiral_policy) VALUES (?, 'capture')", [result.lastID]);
     await run(
       "INSERT INTO bases (user_id, map_x, map_y, moved_at) VALUES (?, ?, ?, ?)",
       [result.lastID, randomBaseCoordinate(), randomBaseCoordinate(), Date.now()]
@@ -2079,6 +2223,7 @@ app.get("/resources", requireAuth, async (req, res) => {
     await processMissionQueueForUser(req.user.id);
     const state = await getUpdatedResources(req.user.id);
     const bonuses = await getPlayerBonuses(req.user.id);
+    const settings = await getUserSettings(req.user.id);
     if (!state) {
       return res.status(404).json({ error: "\uc790\uc6d0 \uc815\ubcf4\ub97c \ucc3e\uc744 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4." });
     }
@@ -2087,6 +2232,8 @@ app.get("/resources", requireAuth, async (req, res) => {
       metal: state.resources.metal,
       fuel: state.resources.fuel,
       commander: bonuses.commander,
+      settings,
+      incomingAlerts: await getIncomingAlerts(req.user.id),
       production: {
         metalPerSecond: state.rates.metal,
         fuelPerSecond: state.rates.fuel,
@@ -2454,19 +2601,19 @@ app.post("/production/:id/cancel", requireAuth, async (req, res) => {
 app.post("/production/:id/speedup", requireAuth, async (req, res) => {
   try {
     const id = Number.parseInt(req.params.id, 10);
-    const minutes = Math.max(1, Math.min(240, Number.parseInt(req.body.minutes, 10) || 10));
+    const resourceType = String(req.body.resourceType || "fuel").toLowerCase() === "metal" ? "metal" : "fuel";
+    const amount = Math.max(1, Math.min(20000, Number.parseInt(req.body.amount, 10) || 500));
     const queue = await get("SELECT * FROM production_queue WHERE id = ? AND user_id = ? AND status = 'building'", [id, req.user.id]);
     if (!queue) return res.status(404).json({ error: "\uac00\uc18d\ud560 \uc0dd\uc0b0 \ud050\ub97c \ucc3e\uc744 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4." });
-    const costFuel = minutes * 50;
     const state = await getUpdatedResources(req.user.id);
-    if (state.resources.fuel < costFuel) {
-      return res.status(400).json({ error: `\uac00\uc18d\uc5d0 \ud544\uc694\ud55c \uc5f0\ub8cc\uac00 \ubd80\uc871\ud569\ub2c8\ub2e4. \ud544\uc694: ${costFuel}` });
+    if (Number(state.resources[resourceType] || 0) < amount) {
+      return res.status(400).json({ error: `가속에 필요한 ${resourceType} 자원이 부족합니다. 필요: ${amount}` });
     }
-    const reducedMs = minutes * 60 * 1000;
+    const reducedMs = Math.floor(amount * (resourceType === "fuel" ? 1800 : 1100));
     const nextEnd = Math.max(Date.now() + 1000, Number(queue.end_time) - reducedMs);
     await run("BEGIN TRANSACTION");
     try {
-      await run("UPDATE resources SET fuel = fuel - ? WHERE user_id = ?", [costFuel, req.user.id]);
+      await run(`UPDATE resources SET ${resourceType} = ${resourceType} - ? WHERE user_id = ?`, [amount, req.user.id]);
       await run("UPDATE production_queue SET end_time = ? WHERE id = ?", [nextEnd, id]);
       await run("COMMIT");
     } catch (err) {
@@ -2474,9 +2621,10 @@ app.post("/production/:id/speedup", requireAuth, async (req, res) => {
       throw err;
     }
     return res.json({
-      message: `${minutes}\ubd84 \uac00\uc18d\uc744 \uc801\uc6a9\ud588\uc2b5\ub2c8\ub2e4.`,
+      message: `${resourceType} ${amount}을 사용해 생산 시간을 단축했습니다.`,
       queue: await getProductionQueue(req.user.id),
-      ownedShips: await getOwnedShips(req.user.id)
+      ownedShips: await getOwnedShips(req.user.id),
+      resources: (await getUpdatedResources(req.user.id))?.resources || null
     });
   } catch (err) {
     console.error(err);
@@ -2616,6 +2764,7 @@ app.get("/map", requireAuth, async (req, res) => {
       zones: rows.map(formatZone),
       players,
       activeMissions: await getActiveMissions(req.user.id),
+      incomingAlerts: await getIncomingAlerts(req.user.id),
       myBaseSpec: {
         fleetPower: Math.floor(designFleetPower(myFleet) * myBonuses.combatMultiplier),
         shipCount: myFleet.reduce((sum, ship) => sum + Number(ship.quantity || 0), 0),
@@ -2734,15 +2883,15 @@ app.get("/admirals", requireAuth, async (req, res) => {
     const rows = await all(
       `
         SELECT id, name, rarity, combat_bonus AS combatBonus,
-               resource_bonus AS resourceBonus, cost_bonus AS costBonus, assigned
+               resource_bonus AS resourceBonus, cost_bonus AS costBonus, assigned, status, dead_at AS deadAt
         FROM admirals
         WHERE user_id = ?
-        ORDER BY assigned DESC, id DESC
+        ORDER BY assigned DESC, status ASC, id DESC
       `,
       [req.user.id]
     );
-
-    return res.json({ admirals: rows });
+    const settings = await getUserSettings(req.user.id);
+    return res.json({ admirals: rows, settings });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ error: "\uc81c\ub3c5 \uc870\ud68c \uc911 \uc624\ub958\uac00 \ubc1c\uc0dd\ud588\uc2b5\ub2c8\ub2e4." });
@@ -2793,7 +2942,7 @@ app.post("/admirals/draw", requireAuth, async (req, res) => {
     }
 
     const rows = await all(
-      "SELECT id, name, rarity, combat_bonus AS combatBonus, resource_bonus AS resourceBonus, cost_bonus AS costBonus, assigned FROM admirals WHERE user_id = ? ORDER BY assigned DESC, id DESC",
+      "SELECT id, name, rarity, combat_bonus AS combatBonus, resource_bonus AS resourceBonus, cost_bonus AS costBonus, assigned, status, dead_at AS deadAt FROM admirals WHERE user_id = ? ORDER BY assigned DESC, status ASC, id DESC",
       [req.user.id]
     );
     const nextState = await getUpdatedResources(req.user.id);
@@ -2822,7 +2971,7 @@ app.post("/admirals/draw", requireAuth, async (req, res) => {
 app.post("/admirals/:id/assign", requireAuth, async (req, res) => {
   try {
     const admiralId = Number.parseInt(req.params.id, 10);
-    const admiral = await get("SELECT id FROM admirals WHERE id = ? AND user_id = ?", [admiralId, req.user.id]);
+    const admiral = await get("SELECT id FROM admirals WHERE id = ? AND user_id = ? AND status = 'active'", [admiralId, req.user.id]);
     if (!admiral) {
       return res.status(404).json({ error: "\uc81c\ub3c5\uc744 \ucc3e\uc744 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4." });
     }
@@ -2838,7 +2987,7 @@ app.post("/admirals/:id/assign", requireAuth, async (req, res) => {
     }
 
     const rows = await all(
-      "SELECT id, name, rarity, combat_bonus AS combatBonus, resource_bonus AS resourceBonus, cost_bonus AS costBonus, assigned FROM admirals WHERE user_id = ? ORDER BY assigned DESC, id DESC",
+      "SELECT id, name, rarity, combat_bonus AS combatBonus, resource_bonus AS resourceBonus, cost_bonus AS costBonus, assigned, status, dead_at AS deadAt FROM admirals WHERE user_id = ? ORDER BY assigned DESC, status ASC, id DESC",
       [req.user.id]
     );
 
@@ -2846,6 +2995,70 @@ app.post("/admirals/:id/assign", requireAuth, async (req, res) => {
   } catch (err) {
     console.error(err);
     return res.status(500).json({ error: "\uc81c\ub3c5 \ubc30\uce58 \uc911 \uc624\ub958\uac00 \ubc1c\uc0dd\ud588\uc2b5\ub2c8\ub2e4." });
+  }
+});
+
+app.post("/admirals/:id/revive", requireAuth, async (req, res) => {
+  try {
+    const admiralId = Number.parseInt(req.params.id, 10);
+    const admiral = await get("SELECT id, status FROM admirals WHERE id = ? AND user_id = ?", [admiralId, req.user.id]);
+    if (!admiral) {
+      return res.status(404).json({ error: "제독을 찾을 수 없습니다." });
+    }
+    if (admiral.status !== "dead") {
+      return res.status(400).json({ error: "부활 가능한 상태의 제독이 아닙니다." });
+    }
+
+    const reviveCost = { metal: 1200, fuel: 700 };
+    const state = await getUpdatedResources(req.user.id);
+    if (state.resources.metal < reviveCost.metal || state.resources.fuel < reviveCost.fuel) {
+      return res.status(400).json({ error: `부활 자원이 부족합니다. 필요: 금속 ${reviveCost.metal}, 연료 ${reviveCost.fuel}` });
+    }
+
+    await run("BEGIN TRANSACTION");
+    try {
+      await run("UPDATE resources SET metal = metal - ?, fuel = fuel - ? WHERE user_id = ?", [reviveCost.metal, reviveCost.fuel, req.user.id]);
+      await run("UPDATE admirals SET status = 'active', dead_at = NULL WHERE id = ? AND user_id = ?", [admiralId, req.user.id]);
+      await run("COMMIT");
+    } catch (err) {
+      await run("ROLLBACK");
+      throw err;
+    }
+
+    const admirals = await all(
+      "SELECT id, name, rarity, combat_bonus AS combatBonus, resource_bonus AS resourceBonus, cost_bonus AS costBonus, assigned, status, dead_at AS deadAt FROM admirals WHERE user_id = ? ORDER BY assigned DESC, status ASC, id DESC",
+      [req.user.id]
+    );
+    return res.json({ message: "제독을 부활시켰습니다.", admirals });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "제독 부활 중 오류가 발생했습니다." });
+  }
+});
+
+app.get("/admiral-policy", requireAuth, async (req, res) => {
+  try {
+    return res.json(await getUserSettings(req.user.id));
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "제독 정책 조회 중 오류가 발생했습니다." });
+  }
+});
+
+app.post("/admiral-policy", requireAuth, async (req, res) => {
+  try {
+    const policy = String(req.body.policy || "").trim().toLowerCase();
+    if (!["capture", "kill", "release"].includes(policy)) {
+      return res.status(400).json({ error: "정책은 capture / kill / release 중 하나여야 합니다." });
+    }
+    await run(
+      "INSERT INTO user_settings (user_id, admiral_policy) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET admiral_policy = excluded.admiral_policy",
+      [req.user.id, policy]
+    );
+    return res.json({ message: "제독 전투 정책을 변경했습니다.", settings: await getUserSettings(req.user.id) });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "제독 정책 저장 중 오류가 발생했습니다." });
   }
 });
 
@@ -2880,12 +3093,25 @@ app.get("/missions", requireAuth, async (req, res) => {
   }
 });
 
+app.get("/alerts/incoming", requireAuth, async (req, res) => {
+  try {
+    await processMissionQueueForUser(req.user.id);
+    return res.json({ alerts: await getIncomingAlerts(req.user.id) });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "침공 알림 조회 중 오류가 발생했습니다." });
+  }
+});
+
 app.post("/missions/:id/cancel", requireAuth, async (req, res) => {
   try {
     const id = Number.parseInt(req.params.id, 10);
     const mission = await get("SELECT * FROM missions WHERE id = ? AND user_id = ? AND status = 'traveling'", [id, req.user.id]);
     if (!mission) return res.status(404).json({ error: "\ucde8\uc18c\ud560 \uc784\ubb34\ub97c \ucc3e\uc744 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4." });
     await run("UPDATE missions SET status = 'failed', result = 'cancelled', log_json = ? WHERE id = ?", [JSON.stringify(["[\uc784\ubb34 \ucde8\uc18c] \uc720\uc800\uac00 \ucd9c\uaca9\uc744 \ucde8\uc18c\ud588\uc2b5\ub2c8\ub2e4."]), id]);
+    if (mission.mission_type === "pvp" && mission.target_user_id) {
+      await run("UPDATE incoming_alerts SET status = 'cancelled' WHERE mission_id = ?", [id]);
+    }
     return res.json({ message: "\ucd9c\uaca9 \uc784\ubb34\ub97c \ucde8\uc18c\ud588\uc2b5\ub2c8\ub2e4.", activeMissions: await getActiveMissions(req.user.id) });
   } catch (err) {
     console.error(err);
@@ -2896,26 +3122,33 @@ app.post("/missions/:id/cancel", requireAuth, async (req, res) => {
 app.post("/missions/:id/speedup", requireAuth, async (req, res) => {
   try {
     const id = Number.parseInt(req.params.id, 10);
-    const minutes = Math.max(1, Math.min(240, Number.parseInt(req.body.minutes, 10) || 10));
+    const resourceType = String(req.body.resourceType || "fuel").toLowerCase() === "metal" ? "metal" : "fuel";
+    const amount = Math.max(1, Math.min(20000, Number.parseInt(req.body.amount, 10) || 600));
     const mission = await get("SELECT * FROM missions WHERE id = ? AND user_id = ? AND status = 'traveling'", [id, req.user.id]);
     if (!mission) return res.status(404).json({ error: "\uac00\uc18d\ud560 \uc784\ubb34\ub97c \ucc3e\uc744 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4." });
-    const costFuel = minutes * 60;
     const state = await getUpdatedResources(req.user.id);
-    if (state.resources.fuel < costFuel) {
-      return res.status(400).json({ error: `\uac00\uc18d\uc5d0 \ud544\uc694\ud55c \uc5f0\ub8cc\uac00 \ubd80\uc871\ud569\ub2c8\ub2e4. \ud544\uc694: ${costFuel}` });
+    if (Number(state.resources[resourceType] || 0) < amount) {
+      return res.status(400).json({ error: `가속에 필요한 ${resourceType} 자원이 부족합니다. 필요: ${amount}` });
     }
-    const reducedMs = minutes * 60 * 1000;
+    const reducedMs = Math.floor(amount * (resourceType === "fuel" ? 1500 : 900));
     const nextArrive = Math.max(Date.now() + 1000, Number(mission.arrive_at) - reducedMs);
     await run("BEGIN TRANSACTION");
     try {
-      await run("UPDATE resources SET fuel = fuel - ? WHERE user_id = ?", [costFuel, req.user.id]);
+      await run(`UPDATE resources SET ${resourceType} = ${resourceType} - ? WHERE user_id = ?`, [amount, req.user.id]);
       await run("UPDATE missions SET arrive_at = ? WHERE id = ?", [nextArrive, id]);
+      if (mission.mission_type === "pvp" && mission.target_user_id) {
+        await run("UPDATE incoming_alerts SET arrive_at = ? WHERE mission_id = ? AND status = 'active'", [nextArrive, id]);
+      }
       await run("COMMIT");
     } catch (err) {
       await run("ROLLBACK");
       throw err;
     }
-    return res.json({ message: `${minutes}\ubd84 \ucd9c\uaca9 \uac00\uc18d\uc744 \uc801\uc6a9\ud588\uc2b5\ub2c8\ub2e4.`, activeMissions: await getActiveMissions(req.user.id) });
+    return res.json({
+      message: `${resourceType} ${amount}을 사용해 출격 시간을 단축했습니다.`,
+      activeMissions: await getActiveMissions(req.user.id),
+      resources: (await getUpdatedResources(req.user.id))?.resources || null
+    });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ error: "\uc784\ubb34 \uac00\uc18d \uc911 \uc624\ub958\uac00 \ubc1c\uc0dd\ud588\uc2b5\ub2c8\ub2e4." });
@@ -2929,6 +3162,16 @@ app.get("/battle-records", requireAuth, async (req, res) => {
   } catch (err) {
     console.error(err);
     return res.status(500).json({ error: "\uc804\ud22c\uae30\ub85d \uc870\ud68c \uc911 \uc624\ub958\uac00 \ubc1c\uc0dd\ud588\uc2b5\ub2c8\ub2e4." });
+  }
+});
+
+app.delete("/battle-records", requireAuth, async (req, res) => {
+  try {
+    await run("DELETE FROM battle_records WHERE user_id = ?", [req.user.id]);
+    return res.json({ message: "전투기록을 초기화했습니다.", records: [] });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "전투기록 초기화 중 오류가 발생했습니다." });
   }
 });
 
@@ -2958,6 +3201,8 @@ app.post("/pvp/attack", requireAuth, async (req, res) => {
     const attackerBonuses = await getPlayerBonuses(req.user.id);
     const attackerBase = await ensureBase(req.user.id);
     const defenderBase = await ensureBase(targetUserId);
+    const attackerPower = Math.floor(designFleetPower(attackerFleet) * attackerBonuses.combatMultiplier);
+    const attackerShipCount = attackerFleet.reduce((sum, ship) => sum + Number(ship.quantity || 0), 0);
     const travelSeconds = travelTimeSecondsForDesignFleet(attackerBase, defenderBase, attackerFleet, attackerBonuses);
     const now = Date.now();
     const arriveAt = now + travelSeconds * 1000;
@@ -2965,10 +3210,18 @@ app.post("/pvp/attack", requireAuth, async (req, res) => {
     const result = await run(
       `
         INSERT INTO missions
-          (user_id, mission_type, target_user_id, target_name, from_x, from_y, to_x, to_y, started_at, arrive_at, status)
-        VALUES (?, 'pvp', ?, ?, ?, ?, ?, ?, ?, ?, 'traveling')
+          (user_id, mission_type, target_user_id, target_name, from_x, from_y, to_x, to_y, started_at, arrive_at, status, attacker_power, attacker_ship_count)
+        VALUES (?, 'pvp', ?, ?, ?, ?, ?, ?, ?, ?, 'traveling', ?, ?)
       `,
-      [req.user.id, targetUserId, targetUser.username, attackerBase.x, attackerBase.y, defenderBase.x, defenderBase.y, now, arriveAt]
+      [req.user.id, targetUserId, targetUser.username, attackerBase.x, attackerBase.y, defenderBase.x, defenderBase.y, now, arriveAt, attackerPower, attackerShipCount]
+    );
+    await run(
+      `
+        INSERT INTO incoming_alerts
+          (target_user_id, mission_id, attacker_user_id, attacker_username, attack_power, ship_count, arrive_at, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?)
+      `,
+      [targetUserId, result.lastID, req.user.id, req.user.username, attackerPower, attackerShipCount, arriveAt, now]
     );
 
     return res.json({
@@ -3082,6 +3335,98 @@ app.post("/zones/:id/capture", requireAuth, async (req, res) => {
   } catch (err) {
     console.error(err);
     return res.status(500).json({ error: "\uc911\ub9bd \uad6c\uc5ed \uc810\ub839 \uc911 \uc624\ub958\uac00 \ubc1c\uc0dd\ud588\uc2b5\ub2c8\ub2e4." });
+  }
+});
+
+app.post("/admin/login", requireAuth, async (req, res) => {
+  try {
+    const passcode = String(req.body.passcode || "");
+    if (passcode !== ADMIN_PANEL_PASS) {
+      return res.status(401).json({ error: "개발자 창 비밀번호가 올바르지 않습니다." });
+    }
+    return res.json({
+      message: "개발자 모드 인증 성공",
+      adminToken: signAdminToken(req.user.id)
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "개발자 인증 중 오류가 발생했습니다." });
+  }
+});
+
+app.get("/admin/users", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const users = await all("SELECT id, username, created_at FROM users ORDER BY id ASC");
+    const result = [];
+    for (const user of users) {
+      const resources = await get("SELECT metal, fuel FROM resources WHERE user_id = ?", [user.id]);
+      const fleet = await getOwnedShipFleet(user.id);
+      const base = await ensureBase(user.id);
+      const progress = await getCommanderProgress(user.id);
+      result.push({
+        id: user.id,
+        username: user.username,
+        createdAt: user.created_at,
+        resources: {
+          metal: Number(resources?.metal || 0),
+          fuel: Number(resources?.fuel || 0)
+        },
+        base,
+        commanderLevel: progress.level,
+        fleetPower: Math.floor(designFleetPower(fleet))
+      });
+    }
+    return res.json({ users: result });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "계정 목록 조회 중 오류가 발생했습니다." });
+  }
+});
+
+app.post("/admin/users/:id/reset", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const userId = Number.parseInt(req.params.id, 10);
+    const exists = await get("SELECT id FROM users WHERE id = ?", [userId]);
+    if (!exists) return res.status(404).json({ error: "대상 계정을 찾을 수 없습니다." });
+    await run("BEGIN TRANSACTION");
+    try {
+      await run("UPDATE resources SET metal = 1000, fuel = 500, last_update = ? WHERE user_id = ?", [Date.now(), userId]);
+      await run("UPDATE commander_progress SET level = 1, xp = 0 WHERE user_id = ?", [userId]);
+      await run("UPDATE research SET resource_level = 0, logistics_level = 0, tactics_level = 0 WHERE user_id = ?", [userId]);
+      await run("DELETE FROM production_queue WHERE user_id = ?", [userId]);
+      await run("DELETE FROM owned_ships WHERE user_id = ?", [userId]);
+      await run("DELETE FROM ship_designs WHERE user_id = ?", [userId]);
+      await run("DELETE FROM battle_records WHERE user_id = ?", [userId]);
+      await run("DELETE FROM missions WHERE user_id = ? OR target_user_id = ?", [userId, userId]);
+      await run("DELETE FROM incoming_alerts WHERE target_user_id = ? OR attacker_user_id = ?", [userId, userId]);
+      await run("DELETE FROM occupied_zones WHERE user_id = ?", [userId]);
+      await run("DELETE FROM admirals WHERE user_id = ?", [userId]);
+      await ensureStarterDesign(userId);
+      await run("COMMIT");
+    } catch (err) {
+      await run("ROLLBACK");
+      throw err;
+    }
+    return res.json({ message: "계정 데이터를 초기화했습니다." });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "계정 초기화 중 오류가 발생했습니다." });
+  }
+});
+
+app.delete("/admin/users/:id", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const userId = Number.parseInt(req.params.id, 10);
+    if (userId === req.user.id) {
+      return res.status(400).json({ error: "현재 로그인한 계정은 개발자 창에서 삭제할 수 없습니다." });
+    }
+    const exists = await get("SELECT id FROM users WHERE id = ?", [userId]);
+    if (!exists) return res.status(404).json({ error: "대상 계정을 찾을 수 없습니다." });
+    await deleteUserCompletely(userId);
+    return res.json({ message: "계정을 삭제했습니다." });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "계정 삭제 중 오류가 발생했습니다." });
   }
 });
 
