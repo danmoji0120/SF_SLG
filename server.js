@@ -84,8 +84,8 @@ const DEFAULT_ZONES = [
     name: "\uc678\uacfd \uc18c\ud589\uc131 \uad11\uc0b0",
     description: "\uae08\uc18d \uc0dd\uc0b0\uc5d0 \uac15\uc810\uc774 \uc788\ub294 \uc911\ub9bd \ucc44\uad74\uc9c0",
     level: 1,
-    x: 16,
-    y: 58,
+    x: 320,
+    y: 1160,
     metalRate: 5,
     fuelRate: 1,
     recommendedPower: 80,
@@ -96,8 +96,8 @@ const DEFAULT_ZONES = [
     name: "\uc5f0\ub8cc \uc131\uc6b4 \ucd94\ucd9c\uc18c",
     description: "\uc5f0\ub8cc \uc0dd\uc0b0\uc744 \ub298\ub9ac\ub294 \uc131\uc6b4 \uac70\uc810",
     level: 1,
-    x: 28,
-    y: 31,
+    x: 560,
+    y: 620,
     metalRate: 1,
     fuelRate: 4,
     recommendedPower: 100,
@@ -108,8 +108,8 @@ const DEFAULT_ZONES = [
     name: "\ud3d0\ud5c8\ud654\ub41c \uae30\uc9c0 \ud3ec\ud2b8",
     description: "\uae08\uc18d\uacfc \uc5f0\ub8cc\ub97c \uade0\ud615 \uc788\uac8c \uc0dd\uc0b0\ud558\ub294 \uc804\ucd08 \uae30\uc9c0",
     level: 2,
-    x: 43,
-    y: 64,
+    x: 860,
+    y: 1280,
     metalRate: 3,
     fuelRate: 3,
     recommendedPower: 180,
@@ -120,8 +120,8 @@ const DEFAULT_ZONES = [
     name: "\uc774\uc628 \ud30c\ud3b8\ub300",
     description: "\ub0ae\uc740 \uc704\ud5d8\ub3c4\uc758 \uae08\uc18d \uc794\ud574 \uc9c0\ub300",
     level: 2,
-    x: 55,
-    y: 24,
+    x: 1100,
+    y: 480,
     metalRate: 6,
     fuelRate: 2,
     recommendedPower: 240,
@@ -132,8 +132,8 @@ const DEFAULT_ZONES = [
     name: "\uc544\ub974\uace4 \ub9ac\ud504\ud2b8",
     description: "\uc5f0\ub8cc \uc0dd\uc0b0\uc774 \ub192\uc740 \uc131\uac04 \uae30\ub958 \uad6c\uc5ed",
     level: 3,
-    x: 62,
-    y: 73,
+    x: 1240,
+    y: 1460,
     metalRate: 2,
     fuelRate: 8,
     recommendedPower: 360,
@@ -144,8 +144,8 @@ const DEFAULT_ZONES = [
     name: "\ud669\ud3d0\ud55c \uae30\uacc4 \uc870\uc120\uc18c",
     description: "\uace0\uae09 \ud568\uc120 \uc0dd\uc0b0\uc758 \ubc1c\ud310\uc774 \ub418\ub294 \uc911\uc559 \uacf5\uc5c5 \uac70\uc810",
     level: 3,
-    x: 74,
-    y: 42,
+    x: 1480,
+    y: 840,
     metalRate: 7,
     fuelRate: 5,
     recommendedPower: 460,
@@ -156,8 +156,8 @@ const DEFAULT_ZONES = [
     name: "\uac80\uc740 \ub9ac\uc544 \uad00\ubb38",
     description: "\uace0\uc704\ud5d8 \uacf5\uac04 \uad00\ubb38. \ubc29\uc5b4 \ud568\ub300\uac00 \ub450\ud130\uc6b4 \uad6c\uc5ed",
     level: 4,
-    x: 84,
-    y: 18,
+    x: 1680,
+    y: 360,
     metalRate: 10,
     fuelRate: 6,
     recommendedPower: 720,
@@ -168,8 +168,8 @@ const DEFAULT_ZONES = [
     name: "\uc720\ub839 \uc131\ucc44",
     description: "\ubc84\ub824\uc9c4 \ud558\uc774\ube0c \ubc29\uc5b4\uc120. \ub300\ud615 \ubcf4\uc0c1\uc744 \uc81c\uacf5",
     level: 4,
-    x: 88,
-    y: 67,
+    x: 1760,
+    y: 1340,
     metalRate: 8,
     fuelRate: 9,
     recommendedPower: 860,
@@ -180,8 +180,8 @@ const DEFAULT_ZONES = [
     name: "\uc624\ub9ac\uc628 \uc911\ucd94 \uc2a4\ud14c\uc774\uc158",
     description: "\uc131\uacc4 \ud655\uc7a5\uc758 \ud575\uc2ec \ucd95. \ub9e4\uc6b0 \uac15\ub825\ud55c \uc8fc\ub454\uad70\uc774 \uc788\uc74c",
     level: 5,
-    x: 95,
-    y: 46,
+    x: 1900,
+    y: 920,
     metalRate: 14,
     fuelRate: 12,
     recommendedPower: 1250,
@@ -189,10 +189,15 @@ const DEFAULT_ZONES = [
   }
 ];
 
+function pseudoRandomUnit(seed, salt) {
+  const x = Math.sin((seed + 1) * 12.9898 + salt * 78.233) * 43758.5453123;
+  return x - Math.floor(x);
+}
+
 for (let id = 10; id <= 620; id += 1) {
   const level = Math.min(5, Math.floor((id - 10) / 122) + 1);
-  const x = 25 + ((id * 73) % (MAP_MAX_X - 50));
-  const y = 25 + ((id * 97) % (MAP_MAX_Y - 50));
+  const x = 20 + Math.floor(pseudoRandomUnit(id, 11) * (MAP_MAX_X - 40));
+  const y = 20 + Math.floor(pseudoRandomUnit(id, 29) * (MAP_MAX_Y - 40));
   DEFAULT_ZONES.push({
     id,
     name: `\uc12d\ud130 ${id} \uc804\ucd08 \uac70\uc810`,
@@ -944,12 +949,12 @@ function ownerColorHex(ownerId) {
 function hullUnlockRequirement(hullKey) {
   const map = {
     corvette: { type: "resource", level: 0 },
-    destroyer: { type: "resource", level: 0 },
-    cruiser: { type: "resource", level: 0 },
-    battleship: { type: "logistics", level: 2 },
-    carrier: { type: "tactics", level: 3 },
-    dreadnought: { type: "resource", level: 4 },
-    titan: { type: "tactics", level: 5 }
+    destroyer: { type: "resource", level: 2 },
+    cruiser: { type: "resource", level: 3 },
+    battleship: { type: "logistics", level: 4 },
+    carrier: { type: "tactics", level: 4 },
+    dreadnought: { type: "resource", level: 6 },
+    titan: { type: "tactics", level: 7 }
   };
   return map[hullKey] || { type: "resource", level: 0 };
 }
@@ -963,16 +968,20 @@ function componentTierByPower(powerCost) {
 }
 
 function componentUnlockRequirement(component) {
+  const basicKeys = new Set(["standard_engine", "light_railgun", "reinforced_armor", "cargo_module"]);
+  if (basicKeys.has(String(component.key || ""))) {
+    return { type: "resource", level: 0 };
+  }
   const category = String(component.category || "");
   const tier = componentTierByPower(component.power_cost);
-  if (tier <= 1) return { type: "resource", level: 0 };
+  if (tier <= 1) return { type: "resource", level: 1 };
   if (tier === 2) {
-    return { type: category === "weapon" || category === "defense" ? "tactics" : "logistics", level: 2 };
+    return { type: category === "weapon" || category === "defense" ? "tactics" : "logistics", level: 3 };
   }
   if (tier === 3) {
-    return { type: category === "weapon" || category === "defense" ? "tactics" : "logistics", level: 4 };
+    return { type: category === "weapon" || category === "defense" ? "tactics" : "logistics", level: 5 };
   }
-  return { type: "resource", level: 6 };
+  return { type: "resource", level: 7 };
 }
 
 function isUnlockedByResearch(requirement, research) {

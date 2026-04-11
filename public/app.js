@@ -91,6 +91,8 @@ const elements = {
   zoneSearchInput: document.getElementById("zoneSearchInput"),
   zoneLevelFilter: document.getElementById("zoneLevelFilter"),
   zoneOwnerFilter: document.getElementById("zoneOwnerFilter"),
+  playerSearchInput: document.getElementById("playerSearchInput"),
+  playerSearchView: document.getElementById("playerSearchView"),
   drawAdmiralButton: document.getElementById("drawAdmiralButton"),
   moveBaseButton: document.getElementById("moveBaseButton"),
   saveDesignButton: document.getElementById("saveDesignButton"),
@@ -470,6 +472,73 @@ function setupMapDragging() {
       applyMapZoom(mapZoom + direction, event.clientX, event.clientY);
     }
   }, { passive: false });
+}
+
+function makeWindowDraggable(element) {
+  if (!element || element.dataset.draggableBound) return;
+  const storageKey = element.id ? `sf_slg_win_${element.id}` : "";
+  if (storageKey) {
+    try {
+      const saved = JSON.parse(localStorage.getItem(storageKey) || "null");
+      if (saved && Number.isFinite(saved.left) && Number.isFinite(saved.top)) {
+        element.style.left = `${saved.left}px`;
+        element.style.top = `${saved.top}px`;
+        element.style.right = "auto";
+        element.style.bottom = "auto";
+      }
+    } catch (err) {
+      // ignore invalid persisted position
+    }
+  }
+
+  let dragState = null;
+  element.addEventListener("pointerdown", (event) => {
+    const interactive = event.target.closest("button, input, select, textarea, a, label");
+    if (interactive) return;
+    if (event.button !== 0) return;
+
+    const rect = element.getBoundingClientRect();
+    dragState = {
+      pointerId: event.pointerId,
+      offsetX: event.clientX - rect.left,
+      offsetY: event.clientY - rect.top
+    };
+    element.classList.add("dragging-window");
+    element.style.right = "auto";
+    element.style.bottom = "auto";
+    try {
+      element.setPointerCapture(event.pointerId);
+    } catch (err) {
+      // ignore
+    }
+  });
+
+  element.addEventListener("pointermove", (event) => {
+    if (!dragState || dragState.pointerId !== event.pointerId) return;
+    const maxLeft = Math.max(0, window.innerWidth - element.offsetWidth);
+    const maxTop = Math.max(0, window.innerHeight - element.offsetHeight);
+    const left = Math.min(maxLeft, Math.max(0, event.clientX - dragState.offsetX));
+    const top = Math.min(maxTop, Math.max(0, event.clientY - dragState.offsetY));
+    element.style.left = `${left}px`;
+    element.style.top = `${top}px`;
+  });
+
+  const endDrag = (event) => {
+    if (!dragState || dragState.pointerId !== event.pointerId) return;
+    element.classList.remove("dragging-window");
+    if (storageKey) {
+      const rect = element.getBoundingClientRect();
+      localStorage.setItem(storageKey, JSON.stringify({ left: rect.left, top: rect.top }));
+    }
+    dragState = null;
+  };
+  element.addEventListener("pointerup", endDrag);
+  element.addEventListener("pointercancel", endDrag);
+  element.dataset.draggableBound = "1";
+}
+
+function setupDraggableWindows() {
+  Array.from(document.querySelectorAll(".draggable-window")).forEach((item) => makeWindowDraggable(item));
 }
 
 function renderResources(resources) {
@@ -1181,6 +1250,53 @@ function filteredZones() {
   });
 }
 
+function filteredPlayers() {
+  const query = (elements.playerSearchInput?.value || "").trim().toLowerCase();
+  const baseX = Number(currentBase?.x || 0);
+  const baseY = Number(currentBase?.y || 0);
+  return currentPlayers
+    .filter((player) => !query || String(player.username || "").toLowerCase().includes(query))
+    .map((player) => {
+      const dx = Number(player.base?.x || 0) - baseX;
+      const dy = Number(player.base?.y || 0) - baseY;
+      return {
+        ...player,
+        distance: Math.round(Math.sqrt(dx * dx + dy * dy))
+      };
+    })
+    .sort((a, b) => a.distance - b.distance);
+}
+
+function focusPlayerOnMap(playerId) {
+  const player = currentPlayers.find((item) => Number(item.id) === Number(playerId));
+  if (!player || !elements.zoneMapView) return;
+  const targetX = mapCoordX(player.base?.x || 0) * mapZoom;
+  const targetY = mapCoordY(player.base?.y || 0) * mapZoom;
+  elements.zoneMapView.scrollLeft = Math.max(0, targetX - elements.zoneMapView.clientWidth / 2);
+  elements.zoneMapView.scrollTop = Math.max(0, targetY - elements.zoneMapView.clientHeight / 2);
+  selectPlayer(playerId);
+}
+
+function renderPlayerSearchList() {
+  if (!elements.playerSearchView) return;
+  const players = filteredPlayers();
+  elements.playerSearchView.innerHTML = players.length
+    ? players.map((player) => `
+      <div class="zone-item compact">
+        <div>
+          <strong>${player.username}</strong>
+          <span>X ${player.base?.x}, Y ${player.base?.y} / 거리 ${player.distance}</span>
+        </div>
+        <button type="button" data-focus-player="${player.id}">찾기</button>
+      </div>
+    `).join("")
+    : `<div class="zone-item compact"><div>조건에 맞는 플레이어가 없습니다.</div></div>`;
+
+  Array.from(elements.playerSearchView.querySelectorAll("[data-focus-player]")).forEach((button) => {
+    button.addEventListener("click", () => focusPlayerOnMap(button.dataset.focusPlayer));
+  });
+}
+
 function renderZoneSearchList() {
   if (!elements.zoneSearchPanel || !elements.zoneView) return;
   elements.zoneSearchPanel.classList.toggle("hidden", !zoneSearchOpen);
@@ -1206,6 +1322,7 @@ function renderZoneSearchList() {
   Array.from(elements.zoneView.querySelectorAll("[data-select-zone]")).forEach((button) => {
     button.addEventListener("click", () => selectZone(button.dataset.selectZone));
   });
+  renderPlayerSearchList();
 }
 
 function toggleZoneSearch() {
@@ -1353,6 +1470,7 @@ function renderZones(zones) {
   if (selectedPlayerId) renderSelectedPlayer();
   else renderSelectedZone();
   renderZoneSearchList();
+  renderPlayerSearchList();
 }
 
 function selectZone(zoneId) {
@@ -2180,6 +2298,7 @@ function bindEvents() {
   elements.zoneSearchInput.addEventListener("input", renderZoneSearchList);
   elements.zoneLevelFilter.addEventListener("change", renderZoneSearchList);
   elements.zoneOwnerFilter.addEventListener("change", renderZoneSearchList);
+  elements.playerSearchInput?.addEventListener("input", renderPlayerSearchList);
   elements.drawAdmiralButton.addEventListener("click", drawAdmiral);
   elements.moveBaseButton.addEventListener("click", moveBase);
   elements.saveDesignButton.addEventListener("click", saveDesign);
@@ -2221,6 +2340,7 @@ function bindEvents() {
   });
 
   setupMapDragging();
+  setupDraggableWindows();
   if (elements.mapZoomLabel) {
     elements.mapZoomLabel.textContent = `${Math.round(mapZoom * 100)}%`;
   }

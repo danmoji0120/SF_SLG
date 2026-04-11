@@ -26,7 +26,7 @@
     </section>
 
     <section class="panel hidden" id="gamePanel">
-      <div class="topbar">
+      <div class="topbar draggable-window" id="topbarWindow">
         <div>
           <p class="eyebrow">Command Center</p>
           <h2 id="commanderName">&#49324;&#47161;&#44288; &#44592;&#51648;</h2>
@@ -34,20 +34,20 @@
         <button id="logoutButton" type="button">&#47196;&#44536;&#50500;&#50883;</button>
       </div>
 
-      <div class="button-row game-actions">
+      <div class="button-row game-actions draggable-window" id="actionsWindow">
         <button id="refreshResourcesButton" type="button">&#51088;&#50896; &#51312;&#54924;</button>
         <button id="refreshFleetButton" type="button">&#54632;&#45824; &#51312;&#54924;</button>
         <button id="refreshZonesButton" type="button">&#51473;&#47549; &#44396;&#50669;</button>
         <button id="battleButton" type="button" class="primary">&#51204;&#53804;&#44592;&#47197;</button>
       </div>
 
-      <section id="floatingHud" class="floating-hud">
+      <section id="floatingHud" class="floating-hud draggable-window">
         <div id="hudResources">&#44552;&#49549; 0 / &#50672;&#47308; 0</div>
         <div id="hudPower">&#51204;&#53804;&#47141; 0</div>
         <div id="hudCommander">Lv.1</div>
       </section>
 
-      <section id="missionHud" class="mission-hud hidden">
+      <section id="missionHud" class="mission-hud hidden draggable-window">
         <div id="missionHudText">&#51060;&#46041; &#51473;</div>
         <div class="speedup-controls">
           <select id="missionSpeedupResource">
@@ -62,13 +62,13 @@
         </div>
       </section>
 
-      <section id="incomingAlertHud" class="incoming-alert-hud hidden">
+      <section id="incomingAlertHud" class="incoming-alert-hud hidden draggable-window">
         <h4>&#52840;&#44277; &#44221;&#44256; <button id="closeAlertHudButton" type="button">X</button></h4>
         <div id="incomingAlertList"></div>
       </section>
 
       <button id="toggleDevButton" type="button" class="dev-toggle">DEV</button>
-      <section id="devPanel" class="dev-panel hidden">
+      <section id="devPanel" class="dev-panel hidden draggable-window">
         <div class="dev-login">
           <label for="devPasscodeInput">DEV PASS</label>
           <input id="devPasscodeInput" type="password" placeholder="0305">
@@ -112,7 +112,7 @@
       </section>
 
       <section class="tab-panel active map-panel" data-tab-panel="map">
-        <div class="map-tools">
+        <div class="map-tools draggable-window" id="mapToolsWindow">
           <button id="zoomOutButton" type="button">-</button>
           <span id="mapZoomLabel">100%</span>
           <button id="zoomInButton" type="button">+</button>
@@ -122,7 +122,7 @@
           <button id="toggleDetailButton" type="button">&#49345;&#49464; &#52397;/&#50500;&#50724;</button>
           <button id="toggleAlertButton" type="button">&#44221;&#44256; &#52397;/&#50500;&#50724;</button>
         </div>
-        <article class="card map-base-overlay hidden" id="mapBaseOverlay">
+        <article class="card map-base-overlay hidden draggable-window" id="mapBaseOverlay">
           <h3>&#45236; &#44592;&#51648; <button id="closeBaseOverlayButton" type="button">X</button></h3>
           <div id="baseView" class="metric">&#44592;&#51648; &#50948;&#52824;&#47484; &#48520;&#47084;&#50724;&#45716; &#51473;...</div>
           <div class="move-controls">
@@ -139,10 +139,10 @@
           <h3>&#51473;&#47549; &#44396;&#50669; &#51648;&#46020;</h3>
           <div class="map-layout">
             <div id="zoneMapView" class="sector-map" aria-label="neutral zone map"></div>
-            <div id="zoneDetailView" class="zone-detail">&#44144;&#51216;&#51012; &#49440;&#53469;&#54616;&#49464;&#50836;.</div>
+            <div id="zoneDetailView" class="zone-detail draggable-window">&#44144;&#51216;&#51012; &#49440;&#53469;&#54616;&#49464;&#50836;.</div>
           </div>
           <button id="toggleZoneSearchButton" type="button" class="zone-search-toggle">&#49345;&#49464; &#44160;&#49353;</button>
-          <div id="zoneSearchPanel" class="zone-search-panel hidden">
+          <div id="zoneSearchPanel" class="zone-search-panel hidden draggable-window">
             <div class="design-grid">
               <div>
                 <label for="zoneSearchInput">&#44160;&#49353;&#50612;</label>
@@ -170,6 +170,12 @@
               </div>
             </div>
             <div id="zoneView" class="zone-list compact-list"></div>
+            <hr>
+            <div>
+              <label for="playerSearchInput">&#49345;&#45824; &#44592;&#51648; &#52286;&#44592;</label>
+              <input id="playerSearchInput" type="text" placeholder="&#54540;&#47112;&#51060;&#50612;&#47749;">
+            </div>
+            <div id="playerSearchView" class="zone-list compact-list"></div>
           </div>
         </article>
       </section>
