@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SF SLG MVP</title>
+  <link rel="stylesheet" href="/style.css?v=16">
+</head>
+<body>
+  <main class="app-shell">
+    <section class="panel" id="authPanel">
+      <p class="eyebrow">Deep Orbit Command</p>
+      <h1>&#50864;&#51452; &#54632;&#45824; &#44592;&#51648;</h1>
+      <p class="lead">&#54632;&#49440;&#51012; &#49373;&#49328;&#54616;&#44256; &#51473;&#47549; &#44396;&#50669;&#51012; &#54869;&#48372;&#54644; &#51088;&#50896; &#49373;&#49328;&#47049;&#51012; &#45720;&#47532;&#49464;&#50836;.</p>
+
+      <label for="usernameInput">&#50500;&#51060;&#46356;</label>
+      <input id="usernameInput" type="text" autocomplete="username" placeholder="commander">
+
+      <label for="passwordInput">&#48708;&#48128;&#48264;&#54840;</label>
+      <input id="passwordInput" type="password" autocomplete="current-password" placeholder="password">
+
+      <div class="button-row">
+        <button id="signupButton" type="button">&#54924;&#50896;&#44032;&#51077;</button>
+        <button id="loginButton" type="button" class="primary">&#47196;&#44536;&#51064;</button>
+      </div>
+    </section>
+
+    <section class="panel hidden" id="gamePanel">
+      <div class="topbar">
+        <div>
+          <p class="eyebrow">Command Center</p>
+          <h2 id="commanderName">&#49324;&#47161;&#44288; &#44592;&#51648;</h2>
+        </div>
+        <button id="logoutButton" type="button">&#47196;&#44536;&#50500;&#50883;</button>
+      </div>
+
+      <div class="button-row game-actions">
+        <button id="refreshResourcesButton" type="button">&#51088;&#50896; &#51312;&#54924;</button>
+        <button id="refreshFleetButton" type="button">&#54632;&#45824; &#51312;&#54924;</button>
+        <button id="refreshZonesButton" type="button">&#51473;&#47549; &#44396;&#50669;</button>
+        <button id="battleButton" type="button" class="primary">&#51204;&#53804;&#44592;&#47197;</button>
+      </div>
+
+      <nav class="tab-nav" aria-label="game sections">
+        <button type="button" class="tab-button" data-tab="main">&#47700;&#51064;</button>
+        <button type="button" class="tab-button active" data-tab="map">&#51648;&#46020;</button>
+        <button type="button" class="tab-button" data-tab="production">&#49373;&#49328;</button>
+        <button type="button" class="tab-button" data-tab="growth">&#49457;&#51109;</button>
+        <button type="button" class="tab-button" data-tab="battle">&#51204;&#53804;&#44592;&#47197;</button>
+      </nav>
+
+      <section class="tab-panel" data-tab-panel="main">
+        <div class="grid">
+          <article class="card">
+            <h3>&#51088;&#50896;</h3>
+            <div id="resourcesView" class="metric">&#48520;&#47084;&#50724;&#45716; &#51473;...</div>
+            <p id="productionView" class="hint"></p>
+          </article>
+
+          <article class="card">
+            <h3>&#54632;&#45824;</h3>
+            <div id="fleetView" class="metric">&#48520;&#47084;&#50724;&#45716; &#51473;...</div>
+          </article>
+        </div>
+
+        <article class="card">
+          <h3>&#51216;&#47161;&#51648;</h3>
+          <div id="empireView" class="zone-list">&#50500;&#51649; &#51216;&#47161;&#51648;&#44032; &#50630;&#49845;&#45768;&#45796;.</div>
+        </article>
+      </section>
+
+      <section class="tab-panel active map-panel" data-tab-panel="map">
+        <article class="card">
+          <h3>&#45236; &#44592;&#51648;</h3>
+          <div id="baseView" class="metric">&#44592;&#51648; &#50948;&#52824;&#47484; &#48520;&#47084;&#50724;&#45716; &#51473;...</div>
+          <div class="move-controls">
+            <label for="baseMoveX">X</label>
+            <input id="baseMoveX" type="number" min="0" max="100" value="50">
+            <label for="baseMoveY">Y</label>
+            <input id="baseMoveY" type="number" min="0" max="100" value="50">
+            <button id="moveBaseButton" type="button" class="primary">&#44592;&#51648; &#51060;&#46041;</button>
+          </div>
+          <p id="baseMoveCostView" class="hint">&#47569;&#45796;&#54620; &#50672;&#47308;&#47484; &#49548;&#47784;&#54644; &#50896;&#54616;&#45716; &#51340;&#54364;&#47196; &#51060;&#46041;&#54633;&#45768;&#45796;.</p>
+        </article>
+
+        <article class="card">
+          <h3>&#51473;&#47549; &#44396;&#50669; &#51648;&#46020;</h3>
+          <div class="map-layout">
+            <div id="zoneMapView" class="sector-map" aria-label="neutral zone map"></div>
+            <div id="zoneDetailView" class="zone-detail">&#44144;&#51216;&#51012; &#49440;&#53469;&#54616;&#49464;&#50836;.</div>
+          </div>
+          <button id="toggleZoneSearchButton" type="button" class="zone-search-toggle">&#49345;&#49464; &#44160;&#49353;</button>
+          <div id="zoneSearchPanel" class="zone-search-panel hidden">
+            <div class="design-grid">
+              <div>
+                <label for="zoneSearchInput">&#44160;&#49353;&#50612;</label>
+                <input id="zoneSearchInput" type="text" placeholder="&#44144;&#51216;&#47749; / &#49548;&#50976;&#51088;">
+              </div>
+              <div>
+                <label for="zoneLevelFilter">&#47112;&#48296;</label>
+                <select id="zoneLevelFilter">
+                  <option value="">&#51204;&#52404;</option>
+                  <option value="1">Lv.1</option>
+                  <option value="2">Lv.2</option>
+                  <option value="3">Lv.3</option>
+                  <option value="4">Lv.4</option>
+                  <option value="5">Lv.5</option>
+                </select>
+              </div>
+              <div>
+                <label for="zoneOwnerFilter">&#49548;&#50976;</label>
+                <select id="zoneOwnerFilter">
+                  <option value="">&#51204;&#52404;</option>
+                  <option value="neutral">&#51473;&#47549;</option>
+                  <option value="mine">&#45236; &#51216;&#47161;&#51648;</option>
+                  <option value="enemy">&#53448;&#52712; &#44032;&#45733;</option>
+                </select>
+              </div>
+            </div>
+            <div id="zoneView" class="zone-list compact-list"></div>
+          </div>
+        </article>
+      </section>
+
+      <section class="tab-panel" data-tab-panel="production">
+        <article class="card">
+          <h3>&#54632;&#49440; &#49444;&#44228;</h3>
+          <label for="designNameInput">&#49444;&#44228;&#47749;</label>
+          <input id="designNameInput" type="text" placeholder="Wasp Mk-1">
+          <div class="design-grid">
+            <div>
+              <label for="hullSelect">&#49440;&#52404;</label>
+              <select id="hullSelect"></select>
+            </div>
+          </div>
+          <div class="slot-groups">
+            <div>
+              <label>&#50644;&#51652; &#49836;&#47215;</label>
+              <div id="engineSlots" class="slot-list"></div>
+            </div>
+            <div>
+              <label>&#47924;&#44592; &#49836;&#47215;</label>
+              <div id="weaponSlots" class="slot-list"></div>
+            </div>
+            <div>
+              <label>&#48169;&#50612; &#49836;&#47215;</label>
+              <div id="defenseSlots" class="slot-list"></div>
+            </div>
+            <div>
+              <label>&#48372;&#51312; &#49836;&#47215;</label>
+              <div id="utilitySlots" class="slot-list"></div>
+            </div>
+          </div>
+          <div id="designPreview" class="design-preview">&#49444;&#44228; &#49828;&#53483;&#51012; &#44228;&#49328;&#54616;&#45716; &#51473;...</div>
+          <button id="saveDesignButton" type="button" class="primary">&#49444;&#44228;&#50504; &#51200;&#51109;</button>
+        </article>
+
+        <article class="card">
+          <h3>&#49444;&#44228;&#50504; &#49373;&#49328;</h3>
+          <div class="design-grid">
+            <div>
+              <label for="productionDesignSelect">&#49444;&#44228;&#50504;</label>
+              <select id="productionDesignSelect"></select>
+            </div>
+            <div>
+              <label for="productionQuantityInput">&#49688;&#47049;</label>
+              <input id="productionQuantityInput" type="number" min="1" max="50" value="1">
+            </div>
+          </div>
+          <button id="startProductionButton" type="button" class="primary">&#49373;&#49328; &#49884;&#51089;</button>
+          <div id="productionQueueView" class="growth-list"></div>
+          <div id="ownedShipsView" class="growth-list"></div>
+        </article>
+
+        <div id="shipCostView" class="hidden"></div>
+      </section>
+
+      <section class="tab-panel" data-tab-panel="growth">
+        <div class="grid">
+          <article class="card">
+            <h3>&#50672;&#44396;</h3>
+            <div id="researchView" class="growth-list">&#48520;&#47084;&#50724;&#45716; &#51473;...</div>
+          </article>
+
+          <article class="card">
+            <h3>&#51228;&#46021;</h3>
+            <p class="hint">&#51228;&#46021; &#50689;&#51077; &#48708;&#50857;: &#44552;&#49549; 600, &#50672;&#47308; 300</p>
+            <button id="drawAdmiralButton" type="button" class="primary">&#51228;&#46021; &#50689;&#51077;</button>
+            <div id="admiralView" class="growth-list">&#48372;&#50976; &#51228;&#46021;&#51060; &#50630;&#49845;&#45768;&#45796;.</div>
+          </article>
+        </div>
+      </section>
+
+      <section class="tab-panel" data-tab-panel="battle">
+        <article class="card">
+          <h3>&#51204;&#53804;&#44592;&#47197;</h3>
+          <pre id="battleLog">&#50500;&#51649; &#51204;&#53804; &#44592;&#47197;&#51060; &#50630;&#49845;&#45768;&#45796;.</pre>
+        </article>
+      </section>
+    </section>
+
+    <section id="messagePanel" class="message-panel" aria-live="polite">
+      <div id="statusMessage" class="status"></div>
+      <div id="errorMessage" class="error"></div>
+    </section>
+  </main>
+
+  <script src="/app.js?v=17"></script>
+</body>
+</html>

@@ -1,0 +1,2813 @@
+const path = require("path");
+const fs = require("fs");
+const express = require("express");
+const sqlite3 = require("sqlite3").verbose();
+const bcrypt = require("bcrypt");
+const jwt = require("jsonwebtoken");
+const cors = require("cors");
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+const JWT_SECRET = process.env.JWT_SECRET || "dev-secret-change-me";
+const CORS_ORIGIN = process.env.CORS_ORIGIN || "*";
+const DB_PATH = process.env.DB_PATH || path.join(__dirname, "game.db");
+
+const dbDir = path.dirname(DB_PATH);
+if (!fs.existsSync(dbDir)) {
+  fs.mkdirSync(dbDir, { recursive: true });
+}
+
+app.use(cors({
+  origin: CORS_ORIGIN === "*" ? true : CORS_ORIGIN
+}));
+app.use(express.json());
+app.use(express.static(path.join(__dirname, "public")));
+
+const db = new sqlite3.Database(DB_PATH);
+let passwordColumn = "password_hash";
+
+const SHIPS = {
+  corvette: {
+    name: "\ucd08\uacc4\ud568",
+    cost: { metal: 120, fuel: 40 },
+    attack: 8,
+    hp: 18,
+    speed: 9,
+    targetPriority: ["corvette", "destroyer", "cruiser", "battleship", "carrier"]
+  },
+  destroyer: {
+    name: "\uad6c\ucd95\ud568",
+    cost: { metal: 300, fuel: 120 },
+    attack: 22,
+    hp: 48,
+    speed: 7,
+    targetPriority: ["corvette", "destroyer", "cruiser", "carrier", "battleship"]
+  },
+  cruiser: {
+    name: "\uc21c\uc591\ud568",
+    cost: { metal: 700, fuel: 260 },
+    attack: 46,
+    hp: 115,
+    speed: 5,
+    targetPriority: ["destroyer", "cruiser", "battleship", "carrier", "corvette"]
+  },
+  battleship: {
+    name: "\uc804\ud568",
+    cost: { metal: 1500, fuel: 700 },
+    attack: 110,
+    hp: 320,
+    speed: 3,
+    targetPriority: ["cruiser", "battleship", "carrier", "destroyer", "corvette"]
+  },
+  carrier: {
+    name: "\ud56d\uacf5\ubaa8\ud568",
+    cost: { metal: 2200, fuel: 1100 },
+    attack: 150,
+    hp: 260,
+    speed: 2,
+    targetPriority: ["battleship", "cruiser", "destroyer", "carrier", "corvette"]
+  }
+};
+
+const SHIP_TYPES = Object.keys(SHIPS);
+const FLEET_COLUMNS = SHIP_TYPES.join(", ");
+const BASE_PRODUCTION = { metal: 2, fuel: 1 };
+const BASE_MOVE_FUEL_PER_DISTANCE = 120;
+
+const DEFAULT_ZONES = [
+  {
+    id: 1,
+    name: "\uc678\uacfd \uc18c\ud589\uc131 \uad11\uc0b0",
+    description: "\uae08\uc18d \uc0dd\uc0b0\uc5d0 \uac15\uc810\uc774 \uc788\ub294 \uc911\ub9bd \ucc44\uad74\uc9c0",
+    level: 1,
+    x: 16,
+    y: 58,
+    metalRate: 5,
+    fuelRate: 1,
+    recommendedPower: 80,
+    garrison: { corvette: 5, destroyer: 1, cruiser: 0, battleship: 0, carrier: 0 }
+  },
+  {
+    id: 2,
+    name: "\uc5f0\ub8cc \uc131\uc6b4 \ucd94\ucd9c\uc18c",
+    description: "\uc5f0\ub8cc \uc0dd\uc0b0\uc744 \ub298\ub9ac\ub294 \uc131\uc6b4 \uac70\uc810",
+    level: 1,
+    x: 28,
+    y: 31,
+    metalRate: 1,
+    fuelRate: 4,
+    recommendedPower: 100,
+    garrison: { corvette: 7, destroyer: 2, cruiser: 0, battleship: 0, carrier: 0 }
+  },
+  {
+    id: 3,
+    name: "\ud3d0\ud5c8\ud654\ub41c \uae30\uc9c0 \ud3ec\ud2b8",
+    description: "\uae08\uc18d\uacfc \uc5f0\ub8cc\ub97c \uade0\ud615 \uc788\uac8c \uc0dd\uc0b0\ud558\ub294 \uc804\ucd08 \uae30\uc9c0",
+    level: 2,
+    x: 43,
+    y: 64,
+    metalRate: 3,
+    fuelRate: 3,
+    recommendedPower: 180,
+    garrison: { corvette: 9, destroyer: 3, cruiser: 1, battleship: 0, carrier: 0 }
+  },
+  {
+    id: 4,
+    name: "\uc774\uc628 \ud30c\ud3b8\ub300",
+    description: "\ub0ae\uc740 \uc704\ud5d8\ub3c4\uc758 \uae08\uc18d \uc794\ud574 \uc9c0\ub300",
+    level: 2,
+    x: 55,
+    y: 24,
+    metalRate: 6,
+    fuelRate: 2,
+    recommendedPower: 240,
+    garrison: { corvette: 12, destroyer: 4, cruiser: 1, battleship: 0, carrier: 0 }
+  },
+  {
+    id: 5,
+    name: "\uc544\ub974\uace4 \ub9ac\ud504\ud2b8",
+    description: "\uc5f0\ub8cc \uc0dd\uc0b0\uc774 \ub192\uc740 \uc131\uac04 \uae30\ub958 \uad6c\uc5ed",
+    level: 3,
+    x: 62,
+    y: 73,
+    metalRate: 2,
+    fuelRate: 8,
+    recommendedPower: 360,
+    garrison: { corvette: 12, destroyer: 5, cruiser: 2, battleship: 0, carrier: 0 }
+  },
+  {
+    id: 6,
+    name: "\ud669\ud3d0\ud55c \uae30\uacc4 \uc870\uc120\uc18c",
+    description: "\uace0\uae09 \ud568\uc120 \uc0dd\uc0b0\uc758 \ubc1c\ud310\uc774 \ub418\ub294 \uc911\uc559 \uacf5\uc5c5 \uac70\uc810",
+    level: 3,
+    x: 74,
+    y: 42,
+    metalRate: 7,
+    fuelRate: 5,
+    recommendedPower: 460,
+    garrison: { corvette: 14, destroyer: 6, cruiser: 3, battleship: 0, carrier: 0 }
+  },
+  {
+    id: 7,
+    name: "\uac80\uc740 \ub9ac\uc544 \uad00\ubb38",
+    description: "\uace0\uc704\ud5d8 \uacf5\uac04 \uad00\ubb38. \ubc29\uc5b4 \ud568\ub300\uac00 \ub450\ud130\uc6b4 \uad6c\uc5ed",
+    level: 4,
+    x: 84,
+    y: 18,
+    metalRate: 10,
+    fuelRate: 6,
+    recommendedPower: 720,
+    garrison: { corvette: 18, destroyer: 8, cruiser: 4, battleship: 1, carrier: 0 }
+  },
+  {
+    id: 8,
+    name: "\uc720\ub839 \uc131\ucc44",
+    description: "\ubc84\ub824\uc9c4 \ud558\uc774\ube0c \ubc29\uc5b4\uc120. \ub300\ud615 \ubcf4\uc0c1\uc744 \uc81c\uacf5",
+    level: 4,
+    x: 88,
+    y: 67,
+    metalRate: 8,
+    fuelRate: 9,
+    recommendedPower: 860,
+    garrison: { corvette: 20, destroyer: 9, cruiser: 5, battleship: 1, carrier: 0 }
+  },
+  {
+    id: 9,
+    name: "\uc624\ub9ac\uc628 \uc911\ucd94 \uc2a4\ud14c\uc774\uc158",
+    description: "\uc131\uacc4 \ud655\uc7a5\uc758 \ud575\uc2ec \ucd95. \ub9e4\uc6b0 \uac15\ub825\ud55c \uc8fc\ub454\uad70\uc774 \uc788\uc74c",
+    level: 5,
+    x: 95,
+    y: 46,
+    metalRate: 14,
+    fuelRate: 12,
+    recommendedPower: 1250,
+    garrison: { corvette: 24, destroyer: 12, cruiser: 6, battleship: 2, carrier: 1 }
+  }
+];
+
+for (let id = 10; id <= 60; id += 1) {
+  const level = Math.min(5, Math.floor((id - 10) / 11) + 1);
+  const x = 6 + ((id * 17) % 89);
+  const y = 7 + ((id * 29) % 86);
+  DEFAULT_ZONES.push({
+    id,
+    name: `\uc12d\ud130 ${id} \uc804\ucd08 \uac70\uc810`,
+    description: `Lv.${level} \uc911\ub9bd \uc790\uc6d0 \uac70\uc810. \uc131\uacc4 \ud655\uc7a5\uc744 \uc704\ud55c \uc810\ub839 \ubaa9\ud45c\uc785\ub2c8\ub2e4.`,
+    level,
+    x,
+    y,
+    metalRate: 2 + level * 2 + (id % 3),
+    fuelRate: 1 + level * 2 + (id % 4),
+    recommendedPower: 80 + level * 170 + id * 8,
+    garrison: {
+      corvette: 4 + level * 4 + (id % 5),
+      destroyer: 1 + level * 2 + (id % 3),
+      cruiser: Math.max(0, level - 2) + (id % 2),
+      battleship: level >= 4 ? 1 + (id % 2) : 0,
+      carrier: level >= 5 && id % 4 === 0 ? 1 : 0
+    }
+  });
+}
+
+const RESEARCH = {
+  resource: {
+    name: "\uc790\uc6d0 \uac1c\ubc1c",
+    description: "\uae30\uc9c0\uc640 \uc810\ub839\uc9c0\uc758 \uc790\uc6d0 \uc0dd\uc0b0\ub7c9\uc744 \ub298\ub9bd\ub2c8\ub2e4.",
+    metalCost: 500,
+    fuelCost: 180,
+    metalGrowth: 1.7,
+    fuelGrowth: 1.55,
+    effectPerLevel: 0.05
+  },
+  logistics: {
+    name: "\ubcf4\uae09 \ucd5c\uc801\ud654",
+    description: "\ud568\uc120 \uc0dd\uc0b0 \uc790\uc6d0 \uc18c\ube44\ub97c \uc904\uc785\ub2c8\ub2e4.",
+    metalCost: 450,
+    fuelCost: 260,
+    metalGrowth: 1.65,
+    fuelGrowth: 1.6,
+    effectPerLevel: 0.03
+  },
+  tactics: {
+    name: "\ud568\ub300 \uc804\uc220",
+    description: "\uc804\ud22c \uc2dc \uc544\uad70 \ud568\ub300\uc758 \uacf5\uaca9\ub825\uc744 \ub298\ub9bd\ub2c8\ub2e4.",
+    metalCost: 650,
+    fuelCost: 320,
+    metalGrowth: 1.75,
+    fuelGrowth: 1.65,
+    effectPerLevel: 0.07
+  }
+};
+
+const ADMIRAL_POOL = [
+  { name: "\uc720\ub098 \ubc14\uc2a4", rarity: "R", combatBonus: 0.04, resourceBonus: 0.02, costBonus: 0 },
+  { name: "\uce74\uc774 \ubca0\ub974\ub2e8", rarity: "R", combatBonus: 0.02, resourceBonus: 0, costBonus: 0.02 },
+  { name: "\ub9ac\uc624 \uc0e4\ub974", rarity: "SR", combatBonus: 0.08, resourceBonus: 0.03, costBonus: 0.02 },
+  { name: "\uc138\ub77c \uc624\ub974\ud2f4", rarity: "SR", combatBonus: 0.04, resourceBonus: 0.08, costBonus: 0.01 },
+  { name: "\uc544\ub378 \ud06c\ub85c\uc2a4", rarity: "SSR", combatBonus: 0.14, resourceBonus: 0.08, costBonus: 0.05 }
+];
+
+const DEFAULT_HULLS = [
+  {
+    key: "corvette",
+    name: "\ucd08\uacc4\ud568 \uc120\uccb4",
+    classType: "corvette",
+    baseHp: 80,
+    baseSpeed: 9,
+    powerLimit: 75,
+    baseBuildTime: 30,
+    metalCost: 180,
+    fuelCost: 60,
+    slots: { engine: 1, weapon: 1, defense: 1, utility: 1 }
+  },
+  {
+    key: "destroyer",
+    name: "\uad6c\ucd95\ud568 \uc120\uccb4",
+    classType: "destroyer",
+    baseHp: 160,
+    baseSpeed: 7,
+    powerLimit: 135,
+    baseBuildTime: 95,
+    metalCost: 420,
+    fuelCost: 160,
+    slots: { engine: 1, weapon: 2, defense: 2, utility: 1 }
+  },
+  {
+    key: "cruiser",
+    name: "\uc21c\uc591\ud568 \uc120\uccb4",
+    classType: "cruiser",
+    baseHp: 340,
+    baseSpeed: 5,
+    powerLimit: 230,
+    baseBuildTime: 240,
+    metalCost: 900,
+    fuelCost: 360,
+    slots: { engine: 1, weapon: 3, defense: 2, utility: 2 }
+  },
+  {
+    key: "battleship",
+    name: "\uc804\ud568 \uc120\uccb4",
+    classType: "battleship",
+    baseHp: 760,
+    baseSpeed: 3,
+    powerLimit: 420,
+    baseBuildTime: 680,
+    metalCost: 2600,
+    fuelCost: 1300,
+    slots: { engine: 2, weapon: 4, defense: 4, utility: 2 }
+  },
+  {
+    key: "carrier",
+    name: "\ud56d\uacf5\ubaa8\ud568 \uc120\uccb4",
+    classType: "carrier",
+    baseHp: 610,
+    baseSpeed: 3,
+    powerLimit: 390,
+    baseBuildTime: 920,
+    metalCost: 3000,
+    fuelCost: 1700,
+    slots: { engine: 2, weapon: 3, defense: 3, utility: 4 }
+  },
+  {
+    key: "dreadnought",
+    name: "\ub4dc\ub808\ub4dc\ub178\ud2b8 \uc120\uccb4",
+    classType: "dreadnought",
+    baseHp: 1180,
+    baseSpeed: 2,
+    powerLimit: 620,
+    baseBuildTime: 1650,
+    metalCost: 5600,
+    fuelCost: 3200,
+    slots: { engine: 2, weapon: 5, defense: 5, utility: 2 }
+  },
+  {
+    key: "titan",
+    name: "\ud0c0\uc774\ud0c4 \uc120\uccb4",
+    classType: "titan",
+    baseHp: 1850,
+    baseSpeed: 1,
+    powerLimit: 920,
+    baseBuildTime: 2900,
+    metalCost: 9800,
+    fuelCost: 5600,
+    slots: { engine: 3, weapon: 6, defense: 6, utility: 3 }
+  }
+];
+
+const DEFAULT_COMPONENTS = [
+  { key: "standard_engine", name: "\ud45c\uc900 \uc5d4\uc9c4", category: "engine", hp: 0, attack: 0, defense: 0, speed: 1, power: 12, metal: 80, fuel: 40 },
+  { key: "high_output_engine", name: "\uace0\ucd9c\ub825 \uc5d4\uc9c4", category: "engine", hp: 0, attack: 0, defense: 0, speed: 3, power: 26, metal: 180, fuel: 130 },
+  { key: "warp_stabilizer_engine", name: "\uc6cc\ud504 \uc548\uc815\ud654 \uc5d4\uc9c4", category: "engine", hp: 50, attack: 0, defense: 8, speed: 2, power: 36, metal: 320, fuel: 220 },
+  { key: "ion_turbine_engine", name: "\uc774\uc628 \ud130\ube48 \uc5d4\uc9c4", category: "engine", hp: 20, attack: 0, defense: 2, speed: 2, power: 18, metal: 130, fuel: 80 },
+  { key: "fusion_drive", name: "\ud575\uc735\ud569 \ub4dc\ub77c\uc774\ube0c", category: "engine", hp: 45, attack: 0, defense: 4, speed: 3, power: 30, metal: 260, fuel: 180 },
+  { key: "vector_thruster", name: "\ubca1\ud130 \uc2a4\ub7ec\uc2a4\ud130", category: "engine", hp: 30, attack: 0, defense: 6, speed: 4, power: 34, metal: 290, fuel: 210 },
+  { key: "gravitic_impeller", name: "\uc911\ub825 \uc784\ud3a0\ub7ec", category: "engine", hp: 70, attack: 0, defense: 10, speed: 1, power: 40, metal: 360, fuel: 260 },
+  { key: "pulse_booster", name: "\ud384\uc2a4 \ubd80\uc2a4\ud130", category: "engine", hp: 10, attack: 0, defense: 0, speed: 5, power: 28, metal: 240, fuel: 240 },
+  { key: "antimatter_nozzle", name: "\ubc18\ubb3c\uc9c8 \ub178\uc990", category: "engine", hp: 85, attack: 0, defense: 12, speed: 2, power: 52, metal: 520, fuel: 420 },
+  { key: "titan_reactor_core", name: "\ud0c0\uc774\ud0c4 \ub9ac\uc561\ud130 \ucf54\uc5b4", category: "engine", hp: 140, attack: 0, defense: 18, speed: 0, power: 74, metal: 820, fuel: 620 },
+  { key: "light_railgun", name: "\uacbd\ub7c9 \ub808\uc77c\uac74", category: "weapon", hp: 0, attack: 28, defense: 0, speed: 0, power: 18, metal: 140, fuel: 40 },
+  { key: "missile_launcher", name: "\ubbf8\uc0ac\uc77c \ubc1c\uc0ac\uae30", category: "weapon", hp: 0, attack: 45, defense: 0, speed: -1, power: 30, metal: 220, fuel: 90 },
+  { key: "plasma_lance", name: "\ud50c\ub77c\uc988\ub9c8 \ub79c\uc2a4", category: "weapon", hp: 0, attack: 72, defense: 0, speed: -2, power: 52, metal: 430, fuel: 260 },
+  { key: "coil_cannon", name: "\ucf54\uc77c \uce90\ub17c", category: "weapon", hp: 0, attack: 34, defense: 0, speed: 0, power: 22, metal: 170, fuel: 60 },
+  { key: "gauss_battery", name: "\uac00\uc6b0\uc2a4 \ubc30\ud130\ub9ac", category: "weapon", hp: 0, attack: 56, defense: 0, speed: -1, power: 38, metal: 290, fuel: 170 },
+  { key: "heavy_torpedo_bay", name: "\uc911\uc5b4\ub8b0 \ud1a0\ub974\ud398\ub3c4 \ubca0\uc774", category: "weapon", hp: 0, attack: 84, defense: 0, speed: -2, power: 60, metal: 510, fuel: 320 },
+  { key: "beam_emitter", name: "\ube54 \uc5d0\ubbf8\ud130", category: "weapon", hp: 0, attack: 63, defense: 0, speed: -1, power: 44, metal: 350, fuel: 250 },
+  { key: "siege_artillery", name: "\uc2dc\uc988 \ud3ec\ubcd1", category: "weapon", hp: 0, attack: 108, defense: 0, speed: -3, power: 78, metal: 760, fuel: 470 },
+  { key: "flak_array", name: "\ud50c\ub799 \ubc30\uc5f4", category: "weapon", hp: 0, attack: 41, defense: 4, speed: 0, power: 26, metal: 220, fuel: 120 },
+  { key: "spinal_cannon", name: "\ucc99\ucd94 \uc8fc\ud3ec", category: "weapon", hp: 0, attack: 160, defense: 0, speed: -4, power: 110, metal: 1300, fuel: 900 },
+  { key: "reinforced_armor", name: "\uac15\ud654 \uc7a5\uac11\ud310", category: "defense", hp: 70, attack: 0, defense: 18, speed: -1, power: 20, metal: 190, fuel: 30 },
+  { key: "shield_generator", name: "\uc2e4\ub4dc \ubc1c\uc0dd\uae30", category: "defense", hp: 120, attack: 0, defense: 12, speed: 0, power: 32, metal: 260, fuel: 150 },
+  { key: "reactive_armor", name: "\ubc18\uc751\uc131 \uc7a5\uac11", category: "defense", hp: 210, attack: 0, defense: 26, speed: -2, power: 55, metal: 520, fuel: 240 },
+  { key: "nano_plating", name: "\ub098\ub178 \ud50c\ub808\uc774\ud305", category: "defense", hp: 95, attack: 0, defense: 16, speed: 0, power: 24, metal: 180, fuel: 120 },
+  { key: "ablative_layer", name: "\uc5b4\ube14\ub808\uc774\ud2f0\ube0c \ub808\uc774\uc5b4", category: "defense", hp: 150, attack: 0, defense: 14, speed: -1, power: 30, metal: 230, fuel: 140 },
+  { key: "fortress_bulkhead", name: "\ud3ec\ud2b8\ub9ac\uc2a4 \ubcbd\uccb4", category: "defense", hp: 260, attack: 0, defense: 30, speed: -3, power: 70, metal: 680, fuel: 310 },
+  { key: "phase_shield", name: "\ud398\uc774\uc988 \uc2e4\ub4dc", category: "defense", hp: 190, attack: 0, defense: 22, speed: 0, power: 46, metal: 420, fuel: 300 },
+  { key: "point_defense_grid", name: "\uc810\ubc29\uc5b4 \uadf8\ub9ac\ub4dc", category: "defense", hp: 80, attack: 6, defense: 20, speed: 0, power: 34, metal: 300, fuel: 190 },
+  { key: "adaptive_barrier", name: "\uc801\uc751\uc131 \ubc14\ub9ac\uc5b4", category: "defense", hp: 310, attack: 0, defense: 38, speed: -2, power: 86, metal: 980, fuel: 640 },
+  { key: "citadel_armor", name: "\uc2dc\ud0c0\ub378 \uc544\uba38", category: "defense", hp: 520, attack: 0, defense: 56, speed: -4, power: 140, metal: 2200, fuel: 1200 },
+  { key: "tactical_ai", name: "\uc804\uc220 AI", category: "utility", hp: 0, attack: 14, defense: 0, speed: 0, power: 14, metal: 120, fuel: 120 },
+  { key: "cargo_module", name: "\ud654\ubb3c \ubaa8\ub4c8", category: "utility", hp: 30, attack: 0, defense: 4, speed: -1, power: 10, metal: 110, fuel: 40 },
+  { key: "targeting_array", name: "\ud0c0\uaca9 \uc5f0\uc0b0 \ubc30\uc5f4", category: "utility", hp: 0, attack: 22, defense: 6, speed: 0, power: 28, metal: 240, fuel: 170 },
+  { key: "repair_drone_bay", name: "\uc218\ub9ac \ub4dc\ub860 \ubca0\uc774", category: "utility", hp: 110, attack: 0, defense: 10, speed: 0, power: 36, metal: 330, fuel: 230 },
+  { key: "ecm_suite", name: "ECM \uc218\ud2b8", category: "utility", hp: 40, attack: 0, defense: 14, speed: 1, power: 26, metal: 210, fuel: 190 },
+  { key: "sensor_fusion_core", name: "\uc13c\uc11c \ud719\ud569 \ucf54\uc5b4", category: "utility", hp: 35, attack: 10, defense: 6, speed: 1, power: 24, metal: 200, fuel: 160 },
+  { key: "command_uplink", name: "\uc9c0\ud718 \uc5c5\ub9c1\ud06c", category: "utility", hp: 60, attack: 18, defense: 8, speed: 0, power: 34, metal: 320, fuel: 220 },
+  { key: "fuel_optimizer", name: "\uc5f0\ub8cc \ucd5c\uc801\ud654 \ubaa8\ub4c8", category: "utility", hp: 20, attack: 0, defense: 8, speed: 2, power: 18, metal: 180, fuel: 120 },
+  { key: "ammo_fabricator", name: "\ud0c4\uc57d \uc81c\uc870 \ubaa8\ub4c8", category: "utility", hp: 50, attack: 26, defense: 4, speed: -1, power: 40, metal: 420, fuel: 260 },
+  { key: "battle_computer", name: "\ubc30\ud2c0 \ucef4\ud4e8\ud130", category: "utility", hp: 75, attack: 34, defense: 10, speed: 0, power: 52, metal: 560, fuel: 420 }
+];
+
+function run(sql, params = []) {
+  return new Promise((resolve, reject) => {
+    db.run(sql, params, function onRun(err) {
+      if (err) reject(err);
+      else resolve(this);
+    });
+  });
+}
+
+function get(sql, params = []) {
+  return new Promise((resolve, reject) => {
+    db.get(sql, params, (err, row) => {
+      if (err) reject(err);
+      else resolve(row);
+    });
+  });
+}
+
+function all(sql, params = []) {
+  return new Promise((resolve, reject) => {
+    db.all(sql, params, (err, rows) => {
+      if (err) reject(err);
+      else resolve(rows);
+    });
+  });
+}
+
+async function ensureColumn(table, column, definition) {
+  const columns = await all(`PRAGMA table_info(${table})`);
+  if (!columns.some((item) => item.name === column)) {
+    await run(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  }
+}
+
+async function seedNeutralZones() {
+  for (const zone of DEFAULT_ZONES) {
+    await run(
+      `
+        INSERT OR IGNORE INTO neutral_zones
+          (id, name, description, level, map_x, map_y, metal_rate, fuel_rate, recommended_power, garrison_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+      [
+        zone.id,
+        zone.name,
+        zone.description,
+        zone.level,
+        zone.x,
+        zone.y,
+        zone.metalRate,
+        zone.fuelRate,
+        zone.recommendedPower,
+        JSON.stringify(zone.garrison)
+      ]
+    );
+
+    await run(
+      `
+        UPDATE neutral_zones
+        SET name = ?, description = ?, level = ?, map_x = ?, map_y = ?,
+            metal_rate = ?, fuel_rate = ?, recommended_power = ?, garrison_json = ?
+        WHERE id = ?
+      `,
+      [
+        zone.name,
+        zone.description,
+        zone.level,
+        zone.x,
+        zone.y,
+        zone.metalRate,
+        zone.fuelRate,
+        zone.recommendedPower,
+        JSON.stringify(zone.garrison),
+        zone.id
+      ]
+    );
+  }
+}
+
+async function normalizeZoneOwnership() {
+  await run(`
+    DELETE FROM occupied_zones
+    WHERE rowid NOT IN (
+      SELECT MAX(rowid)
+      FROM occupied_zones
+      GROUP BY zone_id
+    )
+  `);
+}
+
+async function seedShipyardData() {
+  for (const hull of DEFAULT_HULLS) {
+    await run(
+      `
+        INSERT OR IGNORE INTO hulls
+          (key, name, class_type, base_hp, base_speed, power_limit, base_build_time, metal_cost, fuel_cost,
+           slot_engine, slot_weapon, slot_defense, slot_utility, tech_requirement)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '')
+      `,
+      [
+        hull.key,
+        hull.name,
+        hull.classType,
+        hull.baseHp,
+        hull.baseSpeed,
+        hull.powerLimit,
+        hull.baseBuildTime,
+        hull.metalCost,
+        hull.fuelCost,
+        hull.slots.engine,
+        hull.slots.weapon,
+        hull.slots.defense,
+        hull.slots.utility
+      ]
+    );
+    await run(
+      `
+        UPDATE hulls
+        SET name = ?, class_type = ?, base_hp = ?, base_speed = ?, power_limit = ?,
+            base_build_time = ?, metal_cost = ?, fuel_cost = ?, slot_engine = ?, slot_weapon = ?, slot_defense = ?, slot_utility = ?
+        WHERE key = ?
+      `,
+      [
+        hull.name,
+        hull.classType,
+        hull.baseHp,
+        hull.baseSpeed,
+        hull.powerLimit,
+        hull.baseBuildTime,
+        hull.metalCost,
+        hull.fuelCost,
+        hull.slots.engine,
+        hull.slots.weapon,
+        hull.slots.defense,
+        hull.slots.utility,
+        hull.key
+      ]
+    );
+  }
+
+  for (const component of DEFAULT_COMPONENTS) {
+    await run(
+      `
+        INSERT OR IGNORE INTO components
+          (key, name, category, hp_bonus, attack_bonus, defense_bonus, speed_bonus,
+           power_cost, metal_cost, fuel_cost, tech_requirement)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '')
+      `,
+      [
+        component.key,
+        component.name,
+        component.category,
+        component.hp,
+        component.attack,
+        component.defense,
+        component.speed,
+        component.power,
+        component.metal,
+        component.fuel
+      ]
+    );
+  }
+}
+
+function randomBaseCoordinate() {
+  return Math.floor(8 + Math.random() * 84);
+}
+
+async function ensureBase(userId) {
+  let base = await get("SELECT user_id, map_x, map_y FROM bases WHERE user_id = ?", [userId]);
+  if (!base) {
+    await run(
+      "INSERT INTO bases (user_id, map_x, map_y, moved_at) VALUES (?, ?, ?, ?)",
+      [userId, randomBaseCoordinate(), randomBaseCoordinate(), Date.now()]
+    );
+    base = await get("SELECT user_id, map_x, map_y FROM bases WHERE user_id = ?", [userId]);
+  }
+
+  return {
+    userId: base.user_id,
+    x: base.map_x,
+    y: base.map_y
+  };
+}
+
+function movementCost(from, to) {
+  const dx = Number(from.x) - Number(to.x);
+  const dy = Number(from.y) - Number(to.y);
+  return Math.ceil(Math.sqrt(dx * dx + dy * dy) * BASE_MOVE_FUEL_PER_DISTANCE);
+}
+
+async function initDb() {
+  await run(`
+    CREATE TABLE IF NOT EXISTS users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      username TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      created_at INTEGER
+    )
+  `);
+
+  await run(`
+    CREATE TABLE IF NOT EXISTS resources (
+      user_id INTEGER PRIMARY KEY,
+      metal INTEGER NOT NULL DEFAULT 1000,
+      fuel INTEGER NOT NULL DEFAULT 500,
+      last_update INTEGER NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    )
+  `);
+
+  await run(`
+    CREATE TABLE IF NOT EXISTS fleets (
+      user_id INTEGER PRIMARY KEY,
+      corvette INTEGER NOT NULL DEFAULT 6,
+      destroyer INTEGER NOT NULL DEFAULT 2,
+      cruiser INTEGER NOT NULL DEFAULT 0,
+      battleship INTEGER NOT NULL DEFAULT 0,
+      carrier INTEGER NOT NULL DEFAULT 0,
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    )
+  `);
+
+  await run(`
+    CREATE TABLE IF NOT EXISTS neutral_zones (
+      id INTEGER PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT NOT NULL,
+      level INTEGER NOT NULL DEFAULT 1,
+      map_x INTEGER NOT NULL DEFAULT 50,
+      map_y INTEGER NOT NULL DEFAULT 50,
+      metal_rate INTEGER NOT NULL,
+      fuel_rate INTEGER NOT NULL,
+      recommended_power INTEGER NOT NULL DEFAULT 100,
+      garrison_json TEXT NOT NULL
+    )
+  `);
+
+  await run(`
+    CREATE TABLE IF NOT EXISTS occupied_zones (
+      user_id INTEGER NOT NULL,
+      zone_id INTEGER NOT NULL,
+      captured_at INTEGER NOT NULL,
+      PRIMARY KEY (user_id, zone_id),
+      FOREIGN KEY (user_id) REFERENCES users(id),
+      FOREIGN KEY (zone_id) REFERENCES neutral_zones(id)
+    )
+  `);
+
+  await run(`
+    CREATE TABLE IF NOT EXISTS bases (
+      user_id INTEGER PRIMARY KEY,
+      map_x INTEGER NOT NULL,
+      map_y INTEGER NOT NULL,
+      moved_at INTEGER NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    )
+  `);
+
+  await run(`
+    CREATE TABLE IF NOT EXISTS hulls (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      key TEXT NOT NULL UNIQUE,
+      name TEXT NOT NULL,
+      class_type TEXT NOT NULL,
+      base_hp INTEGER NOT NULL,
+      base_speed INTEGER NOT NULL,
+      power_limit INTEGER NOT NULL,
+      base_build_time INTEGER NOT NULL,
+      metal_cost INTEGER NOT NULL,
+      fuel_cost INTEGER NOT NULL,
+      slot_engine INTEGER NOT NULL DEFAULT 1,
+      slot_weapon INTEGER NOT NULL DEFAULT 1,
+      slot_defense INTEGER NOT NULL DEFAULT 1,
+      slot_utility INTEGER NOT NULL DEFAULT 1,
+      tech_requirement TEXT
+    )
+  `);
+
+  await run(`
+    CREATE TABLE IF NOT EXISTS components (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      key TEXT NOT NULL UNIQUE,
+      name TEXT NOT NULL,
+      category TEXT NOT NULL,
+      hp_bonus INTEGER NOT NULL DEFAULT 0,
+      attack_bonus INTEGER NOT NULL DEFAULT 0,
+      defense_bonus INTEGER NOT NULL DEFAULT 0,
+      speed_bonus INTEGER NOT NULL DEFAULT 0,
+      power_cost INTEGER NOT NULL DEFAULT 0,
+      metal_cost INTEGER NOT NULL DEFAULT 0,
+      fuel_cost INTEGER NOT NULL DEFAULT 0,
+      tech_requirement TEXT
+    )
+  `);
+
+  await run(`
+    CREATE TABLE IF NOT EXISTS ship_designs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      hull_id INTEGER NOT NULL,
+      engine_component_id INTEGER NOT NULL,
+      weapon_component_id INTEGER NOT NULL,
+      defense_component_id INTEGER NOT NULL,
+      utility_component_id INTEGER NOT NULL,
+      final_hp INTEGER NOT NULL,
+      final_attack INTEGER NOT NULL,
+      final_defense INTEGER NOT NULL,
+      final_speed INTEGER NOT NULL,
+      total_power INTEGER NOT NULL,
+      total_metal_cost INTEGER NOT NULL,
+      total_fuel_cost INTEGER NOT NULL,
+      total_build_time INTEGER NOT NULL,
+      created_at INTEGER NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users(id),
+      FOREIGN KEY (hull_id) REFERENCES hulls(id)
+    )
+  `);
+  await ensureColumn("ship_designs", "engine_components_json", "TEXT NOT NULL DEFAULT '[]'");
+  await ensureColumn("ship_designs", "weapon_components_json", "TEXT NOT NULL DEFAULT '[]'");
+  await ensureColumn("ship_designs", "defense_components_json", "TEXT NOT NULL DEFAULT '[]'");
+  await ensureColumn("ship_designs", "utility_components_json", "TEXT NOT NULL DEFAULT '[]'");
+
+  await run(`
+    CREATE TABLE IF NOT EXISTS production_queue (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      design_id INTEGER NOT NULL,
+      quantity INTEGER NOT NULL,
+      start_time INTEGER NOT NULL,
+      end_time INTEGER NOT NULL,
+      status TEXT NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users(id),
+      FOREIGN KEY (design_id) REFERENCES ship_designs(id)
+    )
+  `);
+
+  await run(`
+    CREATE TABLE IF NOT EXISTS owned_ships (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      design_id INTEGER NOT NULL,
+      quantity INTEGER NOT NULL DEFAULT 0,
+      UNIQUE(user_id, design_id),
+      FOREIGN KEY (user_id) REFERENCES users(id),
+      FOREIGN KEY (design_id) REFERENCES ship_designs(id)
+    )
+  `);
+
+  await run(`
+    CREATE TABLE IF NOT EXISTS missions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      mission_type TEXT NOT NULL,
+      target_user_id INTEGER,
+      target_zone_id INTEGER,
+      target_name TEXT NOT NULL,
+      from_x INTEGER NOT NULL,
+      from_y INTEGER NOT NULL,
+      to_x INTEGER NOT NULL,
+      to_y INTEGER NOT NULL,
+      started_at INTEGER NOT NULL,
+      arrive_at INTEGER NOT NULL,
+      status TEXT NOT NULL DEFAULT 'traveling',
+      result TEXT,
+      log_json TEXT,
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    )
+  `);
+
+  await run(`
+    CREATE TABLE IF NOT EXISTS battle_records (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      title TEXT NOT NULL,
+      result TEXT NOT NULL,
+      travel_seconds INTEGER NOT NULL,
+      created_at INTEGER NOT NULL,
+      log_json TEXT NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    )
+  `);
+
+  await run(`
+    CREATE TABLE IF NOT EXISTS research (
+      user_id INTEGER PRIMARY KEY,
+      resource_level INTEGER NOT NULL DEFAULT 0,
+      logistics_level INTEGER NOT NULL DEFAULT 0,
+      tactics_level INTEGER NOT NULL DEFAULT 0,
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    )
+  `);
+
+  await run(`
+    CREATE TABLE IF NOT EXISTS admirals (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      rarity TEXT NOT NULL,
+      combat_bonus REAL NOT NULL DEFAULT 0,
+      resource_bonus REAL NOT NULL DEFAULT 0,
+      cost_bonus REAL NOT NULL DEFAULT 0,
+      assigned INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    )
+  `);
+  await ensureColumn("admirals", "captured_from", "INTEGER");
+  await ensureColumn("admirals", "captured_at", "INTEGER");
+
+  const userColumns = await all("PRAGMA table_info(users)");
+  const userColumnNames = userColumns.map((column) => column.name);
+  if (!userColumnNames.includes("created_at")) {
+    await run("ALTER TABLE users ADD COLUMN created_at INTEGER");
+  }
+  passwordColumn = userColumnNames.includes("password_hash") ? "password_hash" : "password";
+
+  await ensureColumn("fleets", "cruiser", "INTEGER NOT NULL DEFAULT 0");
+  await ensureColumn("fleets", "battleship", "INTEGER NOT NULL DEFAULT 0");
+  await ensureColumn("fleets", "carrier", "INTEGER NOT NULL DEFAULT 0");
+  await ensureColumn("neutral_zones", "level", "INTEGER NOT NULL DEFAULT 1");
+  await ensureColumn("neutral_zones", "map_x", "INTEGER NOT NULL DEFAULT 50");
+  await ensureColumn("neutral_zones", "map_y", "INTEGER NOT NULL DEFAULT 50");
+  await ensureColumn("neutral_zones", "recommended_power", "INTEGER NOT NULL DEFAULT 100");
+  await seedNeutralZones();
+  await normalizeZoneOwnership();
+  await seedShipyardData();
+
+  const users = await all("SELECT id FROM users");
+  for (const user of users) {
+    await ensureBase(user.id);
+    await ensureStarterDesign(user.id);
+  }
+}
+
+function signToken(user) {
+  return jwt.sign(
+    { id: user.id, username: user.username },
+    JWT_SECRET,
+    { expiresIn: "7d" }
+  );
+}
+
+function readToken(req) {
+  const header = req.headers.authorization || "";
+  if (header.startsWith("Bearer ")) return header.slice(7);
+  return header;
+}
+
+function requireAuth(req, res, next) {
+  const token = readToken(req);
+
+  if (!token) {
+    return res.status(401).json({ error: "\uc778\uc99d \ud1a0\ud070\uc774 \uc5c6\uc2b5\ub2c8\ub2e4. \ub2e4\uc2dc \ub85c\uadf8\uc778\ud558\uc138\uc694." });
+  }
+
+  try {
+    req.user = jwt.verify(token, JWT_SECRET);
+    return next();
+  } catch (err) {
+    return res.status(401).json({ error: "\ud1a0\ud070\uc774 \ub9cc\ub8cc\ub418\uc5c8\uac70\ub098 \uc62c\ubc14\ub974\uc9c0 \uc54a\uc2b5\ub2c8\ub2e4." });
+  }
+}
+
+async function getProductionRates(userId) {
+  const bonus = await get(
+    `
+      SELECT
+        COALESCE(SUM(z.metal_rate), 0) AS metal,
+        COALESCE(SUM(z.fuel_rate), 0) AS fuel
+      FROM occupied_zones oz
+      JOIN neutral_zones z ON z.id = oz.zone_id
+      WHERE oz.user_id = ?
+    `,
+    [userId]
+  );
+
+  const playerBonuses = await getPlayerBonuses(userId);
+  const rawMetal = BASE_PRODUCTION.metal + Number(bonus?.metal || 0);
+  const rawFuel = BASE_PRODUCTION.fuel + Number(bonus?.fuel || 0);
+
+  return {
+    metal: Math.floor(rawMetal * playerBonuses.resourceMultiplier * 100) / 100,
+    fuel: Math.floor(rawFuel * playerBonuses.resourceMultiplier * 100) / 100,
+    base: BASE_PRODUCTION,
+    zones: {
+      metal: Number(bonus?.metal || 0),
+      fuel: Number(bonus?.fuel || 0)
+    },
+    multiplier: playerBonuses.resourceMultiplier
+  };
+}
+
+async function getResearch(userId) {
+  let row = await get("SELECT * FROM research WHERE user_id = ?", [userId]);
+  if (!row) {
+    await run(
+      "INSERT INTO research (user_id, resource_level, logistics_level, tactics_level) VALUES (?, 0, 0, 0)",
+      [userId]
+    );
+    row = await get("SELECT * FROM research WHERE user_id = ?", [userId]);
+  }
+
+  return {
+    resource: Number(row.resource_level || 0),
+    logistics: Number(row.logistics_level || 0),
+    tactics: Number(row.tactics_level || 0)
+  };
+}
+
+async function getAssignedAdmiral(userId) {
+  return get(
+    `
+      SELECT id, name, rarity, combat_bonus AS combatBonus,
+             resource_bonus AS resourceBonus, cost_bonus AS costBonus, assigned
+      FROM admirals
+      WHERE user_id = ? AND assigned = 1
+      ORDER BY id DESC
+      LIMIT 1
+    `,
+    [userId]
+  );
+}
+
+async function getPlayerBonuses(userId) {
+  const research = await getResearch(userId);
+  const admiral = await getAssignedAdmiral(userId);
+  const resourceBonus = research.resource * RESEARCH.resource.effectPerLevel + Number(admiral?.resourceBonus || 0);
+  const costBonus = research.logistics * RESEARCH.logistics.effectPerLevel + Number(admiral?.costBonus || 0);
+  const combatBonus = research.tactics * RESEARCH.tactics.effectPerLevel + Number(admiral?.combatBonus || 0);
+  const movementBonus =
+    research.logistics * 0.05 +
+    Number(admiral?.combatBonus || 0) * 0.5 +
+    Number(admiral?.resourceBonus || 0) * 0.25;
+
+  return {
+    resourceMultiplier: 1 + resourceBonus,
+    buildCostMultiplier: Math.max(0.5, 1 - costBonus),
+    combatMultiplier: 1 + combatBonus,
+    movementMultiplier: 1 + movementBonus,
+    research,
+    admiral: admiral || null
+  };
+}
+
+function researchCost(type, level) {
+  const item = RESEARCH[type];
+  return {
+    metal: Math.floor(item.metalCost * Math.pow(item.metalGrowth, level)),
+    fuel: Math.floor(item.fuelCost * Math.pow(item.fuelGrowth, level))
+  };
+}
+
+function formatResearchState(research) {
+  return Object.entries(RESEARCH).map(([type, item]) => {
+    const level = research[type] || 0;
+    return {
+      type,
+      name: item.name,
+      description: item.description,
+      level,
+      effectPerLevel: item.effectPerLevel,
+      nextCost: researchCost(type, level)
+    };
+  });
+}
+
+function parseComponentList(value, fallback) {
+  if (Array.isArray(value)) return value.map((id) => Number.parseInt(id, 10)).filter(Number.isInteger);
+  if (typeof value === "string" && value.trim()) {
+    return value.split(",").map((id) => Number.parseInt(id, 10)).filter(Number.isInteger);
+  }
+  if (Number.isInteger(fallback)) return [fallback];
+  return [];
+}
+
+function groupComponentsByCategory(components) {
+  const grouped = { engine: [], weapon: [], defense: [], utility: [] };
+  for (const component of components) {
+    if (grouped[component.category]) grouped[component.category].push(component);
+  }
+  return grouped;
+}
+
+async function calculateDesign(input) {
+  const hull = await get("SELECT * FROM hulls WHERE id = ?", [input.hullId]);
+  if (!hull) {
+    const error = new Error("\uc120\uccb4\ub97c \ucc3e\uc744 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4.");
+    error.status = 400;
+    throw error;
+  }
+
+  const engines = parseComponentList(input.engines, input.engineId);
+  const weapons = parseComponentList(input.weapons, input.weaponId);
+  const defenses = parseComponentList(input.defenses, input.defenseId);
+  const utilities = parseComponentList(input.utilities, input.utilityId);
+  const expected = {
+    engine: Number(hull.slot_engine || 1),
+    weapon: Number(hull.slot_weapon || 1),
+    defense: Number(hull.slot_defense || 1),
+    utility: Number(hull.slot_utility || 1)
+  };
+
+  if (engines.length !== expected.engine || weapons.length !== expected.weapon || defenses.length !== expected.defense || utilities.length !== expected.utility) {
+    const error = new Error(
+      `\uc2ac\ub86f \uac1c\uc218\uac00 \ub9de\uc9c0 \uc54a\uc2b5\ub2c8\ub2e4. \uc5d4\uc9c4 ${expected.engine}, \ubb34\uae30 ${expected.weapon}, \ubc29\uc5b4 ${expected.defense}, \ubcf4\uc870 ${expected.utility}`
+    );
+    error.status = 400;
+    throw error;
+  }
+
+  const componentIds = [...engines, ...weapons, ...defenses, ...utilities];
+  const components = [];
+  for (const id of componentIds) {
+    const component = await get("SELECT * FROM components WHERE id = ?", [id]);
+    if (!component) {
+      const error = new Error("\ubd80\ud488\uc744 \ucc3e\uc744 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4.");
+      error.status = 400;
+      throw error;
+    }
+    components.push(component);
+  }
+
+  const byCategory = groupComponentsByCategory(components);
+  for (const [category, count] of Object.entries(expected)) {
+    if (byCategory[category].length !== count) {
+      const error = new Error(`${category} \ubd80\ud488\uc774 ${count}\uac1c \ud544\uc694\ud569\ub2c8\ub2e4.`);
+      error.status = 400;
+      throw error;
+    }
+  }
+
+  const totalPower = components.reduce((sum, component) => sum + component.power_cost, 0);
+  if (totalPower > hull.power_limit) {
+    const error = new Error(`\uc804\ub825 \uc81c\ud55c\uc744 \ucd08\uacfc\ud588\uc2b5\ub2c8\ub2e4. ${totalPower}/${hull.power_limit}`);
+    error.status = 400;
+    throw error;
+  }
+
+  const finalHp = hull.base_hp + components.reduce((sum, component) => sum + component.hp_bonus, 0);
+  const finalAttack = components.reduce((sum, component) => sum + component.attack_bonus, 0);
+  const finalDefense = components.reduce((sum, component) => sum + component.defense_bonus, 0);
+  const finalSpeed = Math.max(1, hull.base_speed + components.reduce((sum, component) => sum + component.speed_bonus, 0));
+  const totalMetalCost = hull.metal_cost + components.reduce((sum, component) => sum + component.metal_cost, 0);
+  const totalFuelCost = hull.fuel_cost + components.reduce((sum, component) => sum + component.fuel_cost, 0);
+  const slotWeight = expected.engine * 0.6 + expected.weapon * 1.2 + expected.defense + expected.utility * 0.7;
+  const complexity = Math.pow(1 + totalPower / 110, 1.45);
+  const totalBuildTime = Math.max(20, Math.floor(hull.base_build_time * complexity + slotWeight * 25));
+
+  return {
+    hull,
+    components: byCategory,
+    componentIds: {
+      engines,
+      weapons,
+      defenses,
+      utilities
+    },
+    finalHp,
+    finalAttack,
+    finalDefense,
+    finalSpeed,
+    totalPower,
+    powerLimit: hull.power_limit,
+    totalMetalCost,
+    totalFuelCost,
+    totalBuildTime
+  };
+}
+
+function formatDesign(row) {
+  const parseJson = (value, fallbackId) => {
+    try {
+      const parsed = JSON.parse(value || "[]");
+      if (Array.isArray(parsed) && parsed.length) return parsed;
+    } catch (err) {
+      // ignore
+    }
+    return Number.isInteger(fallbackId) ? [fallbackId] : [];
+  };
+
+  return {
+    id: row.id,
+    name: row.name,
+    hullId: row.hull_id,
+    hullName: row.hull_name,
+    classType: row.class_type,
+    components: {
+      engines: parseJson(row.engine_components_json, row.engine_component_id),
+      weapons: parseJson(row.weapon_components_json, row.weapon_component_id),
+      defenses: parseJson(row.defense_components_json, row.defense_component_id),
+      utilities: parseJson(row.utility_components_json, row.utility_component_id)
+    },
+    finalHp: row.final_hp,
+    finalAttack: row.final_attack,
+    finalDefense: row.final_defense,
+    finalSpeed: row.final_speed,
+    totalPower: row.total_power,
+    powerLimit: row.power_limit,
+    totalMetalCost: row.total_metal_cost,
+    totalFuelCost: row.total_fuel_cost,
+    totalBuildTime: row.total_build_time,
+    createdAt: row.created_at
+  };
+}
+
+async function getDesigns(userId) {
+  const rows = await all(
+    `
+      SELECT d.*, h.name AS hull_name, h.class_type, h.power_limit
+      FROM ship_designs d
+      JOIN hulls h ON h.id = d.hull_id
+      WHERE d.user_id = ?
+      ORDER BY d.id DESC
+    `,
+    [userId]
+  );
+
+  return rows.map(formatDesign);
+}
+
+async function processProductionQueue(userId) {
+  const now = Date.now();
+  const completed = await all(
+    "SELECT * FROM production_queue WHERE user_id = ? AND status = 'building' AND end_time <= ?",
+    [userId, now]
+  );
+
+  for (const item of completed) {
+    await run("BEGIN TRANSACTION");
+    try {
+      await run(
+        `
+          INSERT INTO owned_ships (user_id, design_id, quantity)
+          VALUES (?, ?, ?)
+          ON CONFLICT(user_id, design_id)
+          DO UPDATE SET quantity = quantity + excluded.quantity
+        `,
+        [userId, item.design_id, item.quantity]
+      );
+      await run("UPDATE production_queue SET status = 'completed' WHERE id = ?", [item.id]);
+      await run("COMMIT");
+    } catch (err) {
+      await run("ROLLBACK");
+      throw err;
+    }
+  }
+}
+
+async function getProductionQueue(userId) {
+  await processProductionQueue(userId);
+  const rows = await all(
+    `
+      SELECT q.*, d.name AS design_name
+      FROM production_queue q
+      JOIN ship_designs d ON d.id = q.design_id
+      WHERE q.user_id = ?
+      ORDER BY q.id DESC
+    `,
+    [userId]
+  );
+  const now = Date.now();
+
+  return rows.map((row) => ({
+    id: row.id,
+    designId: row.design_id,
+    designName: row.design_name,
+    quantity: row.quantity,
+    startTime: row.start_time,
+    endTime: row.end_time,
+    status: row.status,
+    remainingSeconds: row.status === "building" ? Math.max(0, Math.ceil((row.end_time - now) / 1000)) : 0
+  }));
+}
+
+async function getOwnedShips(userId) {
+  await processProductionQueue(userId);
+  const rows = await all(
+    `
+      SELECT os.quantity, d.*
+      FROM owned_ships os
+      JOIN ship_designs d ON d.id = os.design_id
+      WHERE os.user_id = ?
+      ORDER BY os.id DESC
+    `,
+    [userId]
+  );
+
+  return rows.map((row) => ({
+    designId: row.id,
+    name: row.name,
+    quantity: row.quantity,
+    finalHp: row.final_hp,
+    finalAttack: row.final_attack,
+    finalDefense: row.final_defense,
+    finalSpeed: row.final_speed
+  }));
+}
+
+async function ensureStarterDesign(userId) {
+  const existing = await get("SELECT id FROM ship_designs WHERE user_id = ? LIMIT 1", [userId]);
+  if (existing) return existing.id;
+
+  const parts = await get(
+    `
+      SELECT
+        h.id AS hull_id,
+        e.id AS engine_id,
+        w.id AS weapon_id,
+        d.id AS defense_id,
+        u.id AS utility_id
+      FROM hulls h
+      JOIN components e ON e.key = 'standard_engine'
+      JOIN components w ON w.key = 'light_railgun'
+      JOIN components d ON d.key = 'reinforced_armor'
+      JOIN components u ON u.key = 'cargo_module'
+      WHERE h.key = 'corvette'
+      LIMIT 1
+    `
+  );
+  if (!parts) return null;
+
+  const calculated = await calculateDesign({
+    hullId: parts.hull_id,
+    engines: [parts.engine_id],
+    weapons: [parts.weapon_id],
+    defenses: [parts.defense_id],
+    utilities: [parts.utility_id]
+  });
+
+  const result = await run(
+    `
+      INSERT INTO ship_designs
+        (user_id, name, hull_id, engine_component_id, weapon_component_id, defense_component_id, utility_component_id,
+         engine_components_json, weapon_components_json, defense_components_json, utility_components_json,
+         final_hp, final_attack, final_defense, final_speed, total_power, total_metal_cost, total_fuel_cost, total_build_time, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `,
+    [
+      userId,
+      "\uc2a4\ud0c0\ud130 \uc21c\ucc30\ud568",
+      parts.hull_id,
+      parts.engine_id,
+      parts.weapon_id,
+      parts.defense_id,
+      parts.utility_id,
+      JSON.stringify(calculated.componentIds.engines),
+      JSON.stringify(calculated.componentIds.weapons),
+      JSON.stringify(calculated.componentIds.defenses),
+      JSON.stringify(calculated.componentIds.utilities),
+      calculated.finalHp,
+      calculated.finalAttack,
+      calculated.finalDefense,
+      calculated.finalSpeed,
+      calculated.totalPower,
+      calculated.totalMetalCost,
+      calculated.totalFuelCost,
+      calculated.totalBuildTime,
+      Date.now()
+    ]
+  );
+
+  await run(
+    "INSERT INTO owned_ships (user_id, design_id, quantity) VALUES (?, ?, ?) ON CONFLICT(user_id, design_id) DO NOTHING",
+    [userId, result.lastID, 6]
+  );
+
+  return result.lastID;
+}
+
+async function getOwnedShipFleet(userId) {
+  await ensureStarterDesign(userId);
+  const ships = await getOwnedShips(userId);
+  return ships.filter((ship) => Number(ship.quantity || 0) > 0);
+}
+
+function designFleetSummary(fleet) {
+  const ships = Array.isArray(fleet) ? fleet : [];
+  if (!ships.length) return "\uc5c6\uc74c";
+  return ships.map((ship) => `${ship.name} ${Number(ship.quantity || 0)}\ucc99`).join(", ");
+}
+
+function designFleetPower(fleet) {
+  const ships = Array.isArray(fleet) ? fleet : [];
+  return ships.reduce((sum, ship) => {
+    const attack = Number(ship.finalAttack || ship.attack || 0);
+    const defense = Number(ship.finalDefense || ship.defense || 0);
+    const hp = Number(ship.finalHp || ship.hp || 0);
+    return sum + Number(ship.quantity || 0) * (attack + defense * 0.45 + hp * 0.12);
+  }, 0);
+}
+
+function designFleetSpeed(fleet) {
+  const ships = Array.isArray(fleet) ? fleet : [];
+  const count = ships.reduce((sum, ship) => sum + Number(ship.quantity || 0), 0);
+  if (count <= 0) return 0;
+
+  const weightedSpeed = ships.reduce((sum, ship) => {
+    return sum + Number(ship.quantity || 0) * Number(ship.finalSpeed || ship.speed || 1);
+  }, 0) / count;
+  const sizePenalty = 1 + count / 80;
+
+  return Math.max(0.5, weightedSpeed / sizePenalty);
+}
+
+function travelTimeSecondsForDesignFleet(from, to, fleet, bonuses) {
+  const dx = Number(from.x) - Number(to.x);
+  const dy = Number(from.y) - Number(to.y);
+  const distance = Math.sqrt(dx * dx + dy * dy);
+  const speed = designFleetSpeed(fleet) * Number(bonuses?.movementMultiplier || 1);
+  return Math.max(10, Math.ceil((distance / Math.max(0.5, speed)) * 60));
+}
+
+function hasDesignShips(fleet) {
+  return Array.isArray(fleet) && fleet.some((ship) => Number(ship.quantity || 0) > 0);
+}
+
+function cloneDesignFleet(fleet) {
+  return (Array.isArray(fleet) ? fleet : []).map((ship) => ({
+    designId: ship.designId || ship.id || ship.key || ship.name,
+    name: ship.name,
+    quantity: Math.max(0, Number(ship.quantity || 0)),
+    finalHp: Math.max(1, Number(ship.finalHp || ship.hp || 1)),
+    finalAttack: Math.max(1, Number(ship.finalAttack || ship.attack || 1)),
+    finalDefense: Math.max(0, Number(ship.finalDefense || ship.defense || 0)),
+    finalSpeed: Math.max(1, Number(ship.finalSpeed || ship.speed || 1))
+  }));
+}
+
+function chooseDesignTarget(fleet) {
+  return fleet
+    .filter((ship) => ship.quantity > 0)
+    .sort((a, b) => (a.finalHp + a.finalDefense * 2) - (b.finalHp + b.finalDefense * 2))[0];
+}
+
+function resolveDesignAttack(attacker, defender, prefix, multiplier = 1) {
+  if (attacker.quantity <= 0 || !hasDesignShips(defender)) return null;
+
+  const target = chooseDesignTarget(defender);
+  if (!target) return null;
+
+  const variance = 0.85 + Math.random() * 0.3;
+  const damage = Math.max(1, Math.floor(attacker.quantity * attacker.finalAttack * variance * multiplier));
+  const effectiveHp = Math.max(1, target.finalHp + target.finalDefense * 2);
+  const destroyed = Math.min(target.quantity, Math.floor(damage / effectiveHp));
+  if (destroyed > 0) target.quantity -= destroyed;
+
+  return destroyed > 0
+    ? `${prefix} ${attacker.name} -> ${target.name} ${destroyed}\ucc99 \uaca9\uce68`
+    : `${prefix} ${attacker.name} -> ${target.name} \ud53c\ud574 ${damage}`;
+}
+
+function simulateDesignBattle(attackerInput, defenderInput, contextLabel, attackerMultiplier = 1, defenderMultiplier = 1) {
+  const attacker = cloneDesignFleet(attackerInput);
+  const defender = cloneDesignFleet(defenderInput);
+  const log = [
+    `[\uc804\ud22c \uac1c\uc2dc] ${contextLabel}`,
+    `\uc544\uad70 \ud3b8\uc131: ${designFleetSummary(attacker)}`,
+    `\uc801\uad70 \ud3b8\uc131: ${designFleetSummary(defender)}`
+  ];
+
+  for (let turn = 1; turn <= 8; turn += 1) {
+    if (!hasDesignShips(attacker) || !hasDesignShips(defender)) break;
+
+    log.push(`[${turn}\ud134]`);
+    for (const ship of attacker) {
+      const strike = resolveDesignAttack(ship, defender, "\uc544\uad70", attackerMultiplier);
+      if (strike) log.push(strike);
+    }
+
+    if (!hasDesignShips(defender)) {
+      log.push("\uc801 \ud568\ub300\uac00 \uc804\ud22c \uc9c0\uc18d \ub2a5\ub825\uc744 \uc0c1\uc2e4\ud588\uc2b5\ub2c8\ub2e4.");
+      break;
+    }
+
+    for (const ship of defender) {
+      const strike = resolveDesignAttack(ship, attacker, "\uc801\uad70", defenderMultiplier);
+      if (strike) log.push(strike);
+    }
+  }
+
+  const attackerScore = designFleetPower(attacker) * attackerMultiplier;
+  const defenderScore = designFleetPower(defender) * defenderMultiplier;
+  const result = attackerScore >= defenderScore ? "victory" : "defeat";
+
+  log.push("[\uc804\ud22c \uc885\ub8cc]");
+  log.push(result === "victory" ? "\uacb0\uacfc: \uc2b9\ub9ac." : "\uacb0\uacfc: \ud328\ubc30.");
+  log.push(`\uc544\uad70 \uc794\uc874: ${designFleetSummary(attacker)}`);
+  log.push(`\uc801\uad70 \uc794\uc874: ${designFleetSummary(defender)}`);
+
+  return { result, log, remainingFleet: attacker, remainingEnemy: defender };
+}
+
+async function updateOwnedShipsFromBattle(userId, remainingFleet) {
+  for (const ship of remainingFleet) {
+    if (!Number.isInteger(Number(ship.designId))) continue;
+    await run(
+      "UPDATE owned_ships SET quantity = ? WHERE user_id = ? AND design_id = ?",
+      [Math.max(0, Number(ship.quantity || 0)), userId, Number(ship.designId)]
+    );
+  }
+}
+
+function garrisonToDesignFleet(garrison) {
+  const legacy = normalizeFleet(garrison);
+  return SHIP_TYPES
+    .filter((type) => legacy[type] > 0)
+    .map((type) => ({
+      designId: `garrison-${type}`,
+      name: `\uc911\ub9bd ${SHIPS[type].name}`,
+      quantity: legacy[type],
+      finalHp: SHIPS[type].hp,
+      finalAttack: SHIPS[type].attack,
+      finalDefense: Math.floor(SHIPS[type].hp / 8),
+      finalSpeed: SHIPS[type].speed
+    }));
+}
+
+function formatMission(row) {
+  const now = Date.now();
+  return {
+    id: row.id,
+    missionType: row.mission_type,
+    targetUserId: row.target_user_id,
+    targetZoneId: row.target_zone_id,
+    targetName: row.target_name,
+    from: { x: row.from_x, y: row.from_y },
+    to: { x: row.to_x, y: row.to_y },
+    startedAt: row.started_at,
+    arriveAt: row.arrive_at,
+    status: row.status,
+    result: row.result || null,
+    remainingSeconds: row.status === "traveling" ? Math.max(0, Math.ceil((row.arrive_at - now) / 1000)) : 0
+  };
+}
+
+async function addBattleRecord(userId, title, result, travelSeconds, log) {
+  await run(
+    `
+      INSERT INTO battle_records (user_id, title, result, travel_seconds, created_at, log_json)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `,
+    [userId, title, result, travelSeconds, Date.now(), JSON.stringify(log || [])]
+  );
+}
+
+async function getBattleRecords(userId) {
+  const rows = await all(
+    `
+      SELECT *
+      FROM battle_records
+      WHERE user_id = ?
+      ORDER BY id DESC
+      LIMIT 40
+    `,
+    [userId]
+  );
+  return rows.map((row) => ({
+    id: row.id,
+    title: row.title,
+    result: row.result,
+    travelSeconds: row.travel_seconds,
+    createdAt: row.created_at,
+    log: (() => {
+      try {
+        return JSON.parse(row.log_json || "[]");
+      } catch (err) {
+        return [];
+      }
+    })()
+  }));
+}
+
+async function getActiveMissions(userId) {
+  const rows = await all(
+    "SELECT * FROM missions WHERE user_id = ? AND status = 'traveling' ORDER BY arrive_at ASC",
+    [userId]
+  );
+  return rows.map(formatMission);
+}
+
+async function resolveMission(mission) {
+  if (mission.mission_type === "pvp") {
+    const targetUser = await get("SELECT id, username FROM users WHERE id = ?", [mission.target_user_id]);
+    if (!targetUser) {
+      return {
+        result: "failed",
+        title: "\ucd9c\uaca9 \uc2e4\ud328",
+        log: ["[\uc804\ud22c \ucde8\uc18c] \ub300\uc0c1 \uae30\uc9c0\uac00 \uc874\uc7ac\ud558\uc9c0 \uc54a\uc2b5\ub2c8\ub2e4."]
+      };
+    }
+
+    const attackerFleet = await getOwnedShipFleet(mission.user_id);
+    if (!hasDesignShips(attackerFleet)) {
+      return {
+        result: "failed",
+        title: `${targetUser.username} \uae30\uc9c0 \uae30\uc2b5`,
+        log: ["[\ucd9c\uaca9 \uc2e4\ud328] \ucd9c\uaca9 \uac00\ub2a5\ud55c \uc124\uacc4 \ud568\uc120\uc774 \uc5c6\uc2b5\ub2c8\ub2e4."]
+      };
+    }
+
+    const defenderFleet = await getOwnedShipFleet(targetUser.id);
+    const attackerBonuses = await getPlayerBonuses(mission.user_id);
+    const defenderBonuses = await getPlayerBonuses(targetUser.id);
+    const travelSeconds = Math.max(10, Math.ceil((mission.arrive_at - mission.started_at) / 1000));
+
+    let battle;
+    if (!hasDesignShips(defenderFleet)) {
+      battle = {
+        result: "victory",
+        log: [
+          `[\uc804\ud22c \uac1c\uc2dc] ${targetUser.username} \uae30\uc9c0 \uae30\uc2b5`,
+          "\uc801 \ubc29\uc5b4 \ud568\ub300\uac00 \uc5c6\uc5b4 \uc790\ub3d9 \uc2b9\ub9ac\ud588\uc2b5\ub2c8\ub2e4.",
+          "[\uc804\ud22c \uc885\ub8cc]",
+          "\uacb0\uacfc: \uc2b9\ub9ac."
+        ],
+        remainingFleet: attackerFleet,
+        remainingEnemy: defenderFleet
+      };
+    } else {
+      battle = simulateDesignBattle(
+        attackerFleet,
+        defenderFleet,
+        `${targetUser.username} \uae30\uc9c0\ub97c \uae30\uc2b5\ud569\ub2c8\ub2e4.`,
+        attackerBonuses.combatMultiplier,
+        defenderBonuses.combatMultiplier
+      );
+    }
+
+    const attackerState = await getUpdatedResources(mission.user_id);
+    const defenderState = await getUpdatedResources(targetUser.id);
+    const loot = { metal: 0, fuel: 0 };
+    let capturedAdmiral = null;
+    if (battle.result === "victory") {
+      loot.metal = Math.min(Math.floor(defenderState.resources.metal * 0.2), 2000);
+      loot.fuel = Math.min(Math.floor(defenderState.resources.fuel * 0.2), 1200);
+      const defenderAdmiral = await getAssignedAdmiral(targetUser.id);
+      if (defenderAdmiral && Math.random() < 0.25) capturedAdmiral = defenderAdmiral;
+    }
+
+    await run("BEGIN TRANSACTION");
+    try {
+      await updateOwnedShipsFromBattle(mission.user_id, battle.remainingFleet);
+      await updateOwnedShipsFromBattle(targetUser.id, battle.remainingEnemy);
+
+      if (battle.result === "victory" && (loot.metal > 0 || loot.fuel > 0)) {
+        await run("UPDATE resources SET metal = metal + ?, fuel = fuel + ? WHERE user_id = ?", [loot.metal, loot.fuel, mission.user_id]);
+        await run("UPDATE resources SET metal = MAX(0, metal - ?), fuel = MAX(0, fuel - ?) WHERE user_id = ?", [loot.metal, loot.fuel, targetUser.id]);
+      }
+      if (capturedAdmiral) {
+        await run(
+          "UPDATE admirals SET user_id = ?, assigned = 0, captured_from = ?, captured_at = ? WHERE id = ?",
+          [mission.user_id, targetUser.id, Date.now(), capturedAdmiral.id]
+        );
+      }
+      await run("COMMIT");
+    } catch (err) {
+      await run("ROLLBACK");
+      throw err;
+    }
+
+    const log = [...battle.log];
+    if (battle.result === "victory") {
+      log.push(`\uc57d\ud0c8 \uc131\uacf5: \uae08\uc18d ${loot.metal}, \uc5f0\ub8cc ${loot.fuel}`);
+      if (capturedAdmiral) log.push(`\uc81c\ub3c5 \uc0dd\ud3ec: [${capturedAdmiral.rarity}] ${capturedAdmiral.name}`);
+    } else {
+      log.push("\uacf5\uaca9 \uc2e4\ud328: \uc57d\ud0c8\uc5d0 \uc2e4\ud328\ud588\uc2b5\ub2c8\ub2e4.");
+    }
+
+    await addBattleRecord(
+      mission.user_id,
+      `${targetUser.username} \uae30\uc9c0 \uae30\uc2b5`,
+      battle.result,
+      travelSeconds,
+      log
+    );
+    await addBattleRecord(
+      targetUser.id,
+      `\ubc29\uc5b4: ${targetUser.username} \uae30\uc9c0`,
+      battle.result === "victory" ? "defeat" : "victory",
+      travelSeconds,
+      log
+    );
+
+    return { result: battle.result, title: `${targetUser.username} \uae30\uc9c0 \uae30\uc2b5`, log };
+  }
+
+  if (mission.mission_type === "zone") {
+    const zone = await get("SELECT * FROM neutral_zones WHERE id = ?", [mission.target_zone_id]);
+    if (!zone) {
+      return {
+        result: "failed",
+        title: "\uc810\ub839 \uc2e4\ud328",
+        log: ["[\uc804\ud22c \ucde8\uc18c] \ub300\uc0c1 \uac70\uc810\uc774 \uc874\uc7ac\ud558\uc9c0 \uc54a\uc2b5\ub2c8\ub2e4."]
+      };
+    }
+
+    const owner = await get(
+      `
+        SELECT oz.user_id, u.username
+        FROM occupied_zones oz
+        JOIN users u ON u.id = oz.user_id
+        WHERE oz.zone_id = ?
+      `,
+      [zone.id]
+    );
+    if (owner?.user_id === mission.user_id) {
+      return {
+        result: "failed",
+        title: `${zone.name} \uc810\ub839`,
+        log: ["[\ucd9c\uaca9 \ucde8\uc18c] \uc774\ubbf8 \ub0b4 \uc810\ub839\uc9c0\uc785\ub2c8\ub2e4."]
+      };
+    }
+
+    const fleet = await getOwnedShipFleet(mission.user_id);
+    if (!hasDesignShips(fleet)) {
+      return {
+        result: "failed",
+        title: `${zone.name} \uc810\ub839`,
+        log: ["[\ucd9c\uaca9 \uc2e4\ud328] \ucd9c\uaca9 \uac00\ub2a5\ud55c \uc124\uacc4 \ud568\uc120\uc774 \uc5c6\uc2b5\ub2c8\ub2e4."]
+      };
+    }
+
+    const enemy = owner ? await getOwnedShipFleet(owner.user_id) : garrisonToDesignFleet(parseGarrison(zone));
+    const playerBonuses = await getPlayerBonuses(mission.user_id);
+    const defenderBonuses = owner ? await getPlayerBonuses(owner.user_id) : { combatMultiplier: 1 };
+    const travelSeconds = Math.max(10, Math.ceil((mission.arrive_at - mission.started_at) / 1000));
+    const battle = simulateDesignBattle(
+      fleet,
+      enemy,
+      owner ? `${owner.username}\uc758 ${zone.name} \uc810\ub839\uc9c0 \ud0c8\ucde8 \uc804\ud22c` : `${zone.name} \uc810\ub839 \uc804\ud22c`,
+      playerBonuses.combatMultiplier,
+      defenderBonuses.combatMultiplier
+    );
+
+    await run("BEGIN TRANSACTION");
+    try {
+      await updateOwnedShipsFromBattle(mission.user_id, battle.remainingFleet);
+      if (owner) await updateOwnedShipsFromBattle(owner.user_id, battle.remainingEnemy);
+      if (battle.result === "victory") {
+        await run("DELETE FROM occupied_zones WHERE zone_id = ?", [zone.id]);
+        await run("INSERT INTO occupied_zones (user_id, zone_id, captured_at) VALUES (?, ?, ?)", [mission.user_id, zone.id, Date.now()]);
+      }
+      await run("COMMIT");
+    } catch (err) {
+      await run("ROLLBACK");
+      throw err;
+    }
+
+    const log = [...battle.log];
+    await addBattleRecord(
+      mission.user_id,
+      `${zone.name} ${owner ? "\ud0c8\ucde8" : "\uc810\ub839"}`,
+      battle.result,
+      travelSeconds,
+      log
+    );
+    if (owner) {
+      await addBattleRecord(
+        owner.user_id,
+        `\ubc29\uc5b4: ${zone.name}`,
+        battle.result === "victory" ? "defeat" : "victory",
+        travelSeconds,
+        log
+      );
+    }
+
+    return {
+      result: battle.result,
+      title: `${zone.name} ${owner ? "\ud0c8\ucde8" : "\uc810\ub839"}`,
+      log
+    };
+  }
+
+  return {
+    result: "failed",
+    title: "\uc784\ubb34 \uc2e4\ud328",
+    log: ["[\uc2e4\ud328] \uc54c \uc218 \uc5c6\ub294 \uc784\ubb34 \ud0c0\uc785\uc785\ub2c8\ub2e4."]
+  };
+}
+
+async function processMissionQueueForUser(userId) {
+  const now = Date.now();
+  const due = await all(
+    "SELECT * FROM missions WHERE user_id = ? AND status = 'traveling' AND arrive_at <= ? ORDER BY id ASC",
+    [userId, now]
+  );
+
+  for (const mission of due) {
+    try {
+      const resolved = await resolveMission(mission);
+      await run(
+        "UPDATE missions SET status = 'completed', result = ?, log_json = ? WHERE id = ?",
+        [resolved.result, JSON.stringify(resolved.log || []), mission.id]
+      );
+    } catch (err) {
+      await run(
+        "UPDATE missions SET status = 'failed', result = 'failed', log_json = ? WHERE id = ?",
+        [JSON.stringify(["[\uc2dc\uc2a4\ud15c \uc624\ub958] \uc804\ud22c \ucc98\ub9ac\uc5d0 \uc2e4\ud328\ud588\uc2b5\ub2c8\ub2e4."]), mission.id]
+      );
+      console.error(err);
+    }
+  }
+}
+
+function applyProduction(resources, rates) {
+  const now = Date.now();
+  const elapsedSeconds = Math.max(0, Math.floor((now - resources.last_update) / 1000));
+
+  return {
+    ...resources,
+    metal: resources.metal + elapsedSeconds * rates.metal,
+    fuel: resources.fuel + elapsedSeconds * rates.fuel,
+    last_update: now
+  };
+}
+
+async function getUpdatedResources(userId) {
+  const row = await get("SELECT * FROM resources WHERE user_id = ?", [userId]);
+  if (!row) return null;
+
+  const rates = await getProductionRates(userId);
+  const updated = applyProduction(row, rates);
+  await run(
+    "UPDATE resources SET metal = ?, fuel = ?, last_update = ? WHERE user_id = ?",
+    [updated.metal, updated.fuel, updated.last_update, userId]
+  );
+
+  return { resources: updated, rates };
+}
+
+function normalizeFleet(fleet) {
+  const normalized = {};
+  for (const type of SHIP_TYPES) {
+    normalized[type] = Math.max(0, Number.parseInt(fleet?.[type] || 0, 10));
+  }
+  return normalized;
+}
+
+function fleetSummary(fleet) {
+  return SHIP_TYPES
+    .map((type) => `${SHIPS[type].name} ${fleet[type]}\ucc99`)
+    .join(", ");
+}
+
+function fleetPower(fleet) {
+  return SHIP_TYPES.reduce((sum, type) => sum + fleet[type] * SHIPS[type].attack, 0);
+}
+
+function totalShips(fleet) {
+  return SHIP_TYPES.reduce((sum, type) => sum + Number(fleet[type] || 0), 0);
+}
+
+function fleetSpeed(fleet) {
+  const count = totalShips(fleet);
+  if (count <= 0) return 0;
+
+  const weightedSpeed = SHIP_TYPES.reduce((sum, type) => {
+    return sum + Number(fleet[type] || 0) * SHIPS[type].speed;
+  }, 0) / count;
+  const sizePenalty = 1 + count / 80;
+
+  return Math.max(0.5, weightedSpeed / sizePenalty);
+}
+
+function travelTimeSeconds(from, to, fleet, bonuses) {
+  const dx = Number(from.x) - Number(to.x);
+  const dy = Number(from.y) - Number(to.y);
+  const distance = Math.sqrt(dx * dx + dy * dy);
+  const speed = fleetSpeed(fleet) * Number(bonuses?.movementMultiplier || 1);
+  return Math.max(10, Math.ceil((distance / Math.max(0.5, speed)) * 60));
+}
+
+function formatTravelTime(seconds) {
+  if (seconds < 60) return `${seconds}\ucd08`;
+  const minutes = Math.floor(seconds / 60);
+  const rest = seconds % 60;
+  return rest > 0 ? `${minutes}\ubd84 ${rest}\ucd08` : `${minutes}\ubd84`;
+}
+
+function hasShips(fleet) {
+  return SHIP_TYPES.some((type) => fleet[type] > 0);
+}
+
+function chooseTarget(fleet, priority) {
+  return priority.find((type) => fleet[type] > 0) || SHIP_TYPES.find((type) => fleet[type] > 0);
+}
+
+function resolveAttack(attackerFleet, defenderFleet, attackerType, attackMultiplier = 1) {
+  const attackerCount = attackerFleet[attackerType];
+  if (attackerCount <= 0 || !hasShips(defenderFleet)) return null;
+
+  const attacker = SHIPS[attackerType];
+  const targetType = chooseTarget(defenderFleet, attacker.targetPriority);
+  const target = SHIPS[targetType];
+  const variance = 0.85 + Math.random() * 0.3;
+  const damage = Math.max(1, Math.floor(attackerCount * attacker.attack * variance * attackMultiplier));
+  const destroyed = Math.min(defenderFleet[targetType], Math.floor(damage / target.hp));
+
+  if (destroyed > 0) {
+    defenderFleet[targetType] -= destroyed;
+  }
+
+  return { attackerType, targetType, damage, destroyed };
+}
+
+function formatStrike(prefix, strike) {
+  const attackerName = SHIPS[strike.attackerType].name;
+  const targetName = SHIPS[strike.targetType].name;
+
+  if (strike.destroyed > 0) {
+    return `${prefix} ${attackerName} -> ${targetName} ${strike.destroyed}\ucc99 \uaca9\uce68`;
+  }
+
+  return `${prefix} ${attackerName} -> ${targetName} \ud53c\ud574 ${strike.damage}`;
+}
+
+function simulateBattle(playerInput, enemyInput, contextLabel, playerAttackMultiplier = 1, enemyAttackMultiplier = 1) {
+  const player = normalizeFleet(playerInput);
+  const enemy = normalizeFleet(enemyInput);
+  const startPlayer = { ...player };
+  const startEnemy = { ...enemy };
+  const log = [
+    `[\uc804\ud22c \uac1c\uc2dc] ${contextLabel}`,
+    `\uc544\uad70 \ud3b8\uc131: ${fleetSummary(startPlayer)}`,
+    `\uc801\uad70 \ud3b8\uc131: ${fleetSummary(startEnemy)}`
+  ];
+
+  for (let turn = 1; turn <= 8; turn += 1) {
+    if (!hasShips(player) || !hasShips(enemy)) break;
+
+    log.push(`[${turn}\ud134]`);
+
+    for (const type of SHIP_TYPES) {
+      const strike = resolveAttack(player, enemy, type, playerAttackMultiplier);
+      if (strike) log.push(formatStrike("\uc544\uad70", strike));
+    }
+
+    if (!hasShips(enemy)) {
+      log.push("\uc801 \ud568\ub300\uac00 \uc804\ud22c \uc9c0\uc18d \ub2a5\ub825\uc744 \uc0c1\uc2e4\ud588\uc2b5\ub2c8\ub2e4.");
+      break;
+    }
+
+    for (const type of SHIP_TYPES) {
+      const strike = resolveAttack(enemy, player, type, enemyAttackMultiplier);
+      if (strike) log.push(formatStrike("\uc801\uad70", strike));
+    }
+  }
+
+  const playerScore = fleetPower(player) * playerAttackMultiplier;
+  const enemyScore = fleetPower(enemy) * enemyAttackMultiplier;
+  const result = playerScore >= enemyScore ? "victory" : "defeat";
+
+  log.push("[\uc804\ud22c \uc885\ub8cc]");
+  log.push(result === "victory" ? "\uacb0\uacfc: \uc2b9\ub9ac." : "\uacb0\uacfc: \ud328\ubc30.");
+  log.push(`\uc544\uad70 \uc794\uc874: ${fleetSummary(player)}`);
+  log.push(`\uc801\uad70 \uc794\uc874: ${fleetSummary(enemy)}`);
+
+  return { result, log, remainingFleet: player, remainingEnemy: enemy };
+}
+
+async function getFleet(userId) {
+  const fleet = await get(`SELECT ${FLEET_COLUMNS} FROM fleets WHERE user_id = ?`, [userId]);
+  return fleet ? normalizeFleet(fleet) : null;
+}
+
+async function getPlayerTarget(userId, viewerId) {
+  const user = await get("SELECT id, username FROM users WHERE id = ?", [userId]);
+  if (!user) return null;
+
+  const fleet = await getOwnedShipFleet(userId);
+  const resources = await getUpdatedResources(userId);
+  const zones = await get(
+    "SELECT COUNT(*) AS count FROM occupied_zones WHERE user_id = ?",
+    [userId]
+  );
+  const admiral = await getAssignedAdmiral(userId);
+  const base = await ensureBase(userId);
+
+  return {
+    id: user.id,
+    username: user.username,
+    base,
+    fleetPower: Math.floor(designFleetPower(fleet)),
+    occupiedZones: Number(zones?.count || 0),
+    estimatedMetal: userId === viewerId ? resources?.resources?.metal || 0 : Math.floor((resources?.resources?.metal || 0) * 0.5),
+    estimatedFuel: userId === viewerId ? resources?.resources?.fuel || 0 : Math.floor((resources?.resources?.fuel || 0) * 0.5),
+    assignedAdmiral: admiral ? { name: admiral.name, rarity: admiral.rarity } : null
+  };
+}
+
+async function updateFleet(userId, fleet) {
+  await run(
+    `
+      UPDATE fleets
+      SET corvette = ?, destroyer = ?, cruiser = ?, battleship = ?, carrier = ?
+      WHERE user_id = ?
+    `,
+    [fleet.corvette, fleet.destroyer, fleet.cruiser, fleet.battleship, fleet.carrier, userId]
+  );
+}
+
+function parseGarrison(zone) {
+  try {
+    return normalizeFleet(JSON.parse(zone.garrison_json || "{}"));
+  } catch (err) {
+    return normalizeFleet({});
+  }
+}
+
+function formatZone(row) {
+  const garrison = parseGarrison(row);
+  const garrisonFleet = garrisonToDesignFleet(garrison);
+
+  return {
+    id: row.id,
+    name: row.name,
+    description: row.description,
+    level: row.level,
+    x: row.map_x,
+    y: row.map_y,
+    metalRate: row.metal_rate,
+    fuelRate: row.fuel_rate,
+    recommendedPower: row.recommended_power,
+    actualPower: Math.floor(designFleetPower(garrisonFleet)),
+    garrison,
+    ownerId: row.owner_id || null,
+    ownerUsername: row.owner_username || null,
+    occupied: Boolean(row.owner_id),
+    ownedByMe: Boolean(row.owned_by_me)
+  };
+}
+
+app.get("/health", (req, res) => {
+  return res.json({
+    ok: true,
+    time: Date.now()
+  });
+});
+
+app.post("/signup", async (req, res) => {
+  try {
+    const username = String(req.body.username || "").trim();
+    const password = String(req.body.password || "");
+
+    if (username.length < 3 || username.length > 20) {
+      return res.status(400).json({ error: "\uc544\uc774\ub514\ub294 3~20\uc790\ub85c \uc785\ub825\ud558\uc138\uc694." });
+    }
+
+    if (password.length < 4) {
+      return res.status(400).json({ error: "\ube44\ubc00\ubc88\ud638\ub294 4\uc790 \uc774\uc0c1 \uc785\ub825\ud558\uc138\uc694." });
+    }
+
+    const passwordHash = await bcrypt.hash(password, 10);
+    const result = await run(
+      `INSERT INTO users (username, ${passwordColumn}, created_at) VALUES (?, ?, ?)`,
+      [username, passwordHash, Date.now()]
+    );
+
+    await run(
+      "INSERT INTO resources (user_id, metal, fuel, last_update) VALUES (?, ?, ?, ?)",
+      [result.lastID, 1000, 500, Date.now()]
+    );
+
+    await run(
+      `
+        INSERT INTO fleets (user_id, corvette, destroyer, cruiser, battleship, carrier)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `,
+      [result.lastID, 6, 2, 0, 0, 0]
+    );
+
+    await run(
+      "INSERT INTO research (user_id, resource_level, logistics_level, tactics_level) VALUES (?, 0, 0, 0)",
+      [result.lastID]
+    );
+    await run(
+      "INSERT INTO bases (user_id, map_x, map_y, moved_at) VALUES (?, ?, ?, ?)",
+      [result.lastID, randomBaseCoordinate(), randomBaseCoordinate(), Date.now()]
+    );
+    await ensureStarterDesign(result.lastID);
+
+    return res.status(201).json({ message: "\ud68c\uc6d0\uac00\uc785 \uc644\ub8cc. \uc774\uc81c \ub85c\uadf8\uc778\ud558\uc138\uc694." });
+  } catch (err) {
+    if (err.code === "SQLITE_CONSTRAINT") {
+      return res.status(409).json({ error: "\uc774\ubbf8 \uc0ac\uc6a9 \uc911\uc778 \uc544\uc774\ub514\uc785\ub2c8\ub2e4." });
+    }
+
+    console.error(err);
+    return res.status(500).json({ error: "\ud68c\uc6d0\uac00\uc785 \ucc98\ub9ac \uc911 \uc624\ub958\uac00 \ubc1c\uc0dd\ud588\uc2b5\ub2c8\ub2e4." });
+  }
+});
+
+app.post("/login", async (req, res) => {
+  try {
+    const username = String(req.body.username || "").trim();
+    const password = String(req.body.password || "");
+
+    if (!username || !password) {
+      return res.status(400).json({ error: "\uc544\uc774\ub514\uc640 \ube44\ubc00\ubc88\ud638\ub97c \ubaa8\ub450 \uc785\ub825\ud558\uc138\uc694." });
+    }
+
+    const user = await get("SELECT * FROM users WHERE username = ?", [username]);
+    if (!user) {
+      return res.status(401).json({ error: "\uc544\uc774\ub514 \ub610\ub294 \ube44\ubc00\ubc88\ud638\uac00 \uc62c\ubc14\ub974\uc9c0 \uc54a\uc2b5\ub2c8\ub2e4." });
+    }
+
+    const ok = await bcrypt.compare(password, user[passwordColumn]);
+    if (!ok) {
+      return res.status(401).json({ error: "\uc544\uc774\ub514 \ub610\ub294 \ube44\ubc00\ubc88\ud638\uac00 \uc62c\ubc14\ub974\uc9c0 \uc54a\uc2b5\ub2c8\ub2e4." });
+    }
+
+    return res.json({
+      message: "\ub85c\uadf8\uc778 \uc131\uacf5.",
+      token: signToken(user),
+      username: user.username
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "\ub85c\uadf8\uc778 \ucc98\ub9ac \uc911 \uc624\ub958\uac00 \ubc1c\uc0dd\ud588\uc2b5\ub2c8\ub2e4." });
+  }
+});
+
+app.get("/resources", requireAuth, async (req, res) => {
+  try {
+    await processMissionQueueForUser(req.user.id);
+    const state = await getUpdatedResources(req.user.id);
+    if (!state) {
+      return res.status(404).json({ error: "\uc790\uc6d0 \uc815\ubcf4\ub97c \ucc3e\uc744 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4." });
+    }
+
+    return res.json({
+      metal: state.resources.metal,
+      fuel: state.resources.fuel,
+      production: {
+        metalPerSecond: state.rates.metal,
+        fuelPerSecond: state.rates.fuel,
+        base: state.rates.base,
+        zones: state.rates.zones,
+        multiplier: state.rates.multiplier
+      }
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "\uc790\uc6d0 \uc870\ud68c \uc911 \uc624\ub958\uac00 \ubc1c\uc0dd\ud588\uc2b5\ub2c8\ub2e4." });
+  }
+});
+
+app.get("/fleet", requireAuth, async (req, res) => {
+  try {
+    await processMissionQueueForUser(req.user.id);
+    return res.json(await getOwnedShipFleet(req.user.id));
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "\ud568\ub300 \uc870\ud68c \uc911 \uc624\ub958\uac00 \ubc1c\uc0dd\ud588\uc2b5\ub2c8\ub2e4." });
+  }
+});
+
+app.get("/ships", (req, res) => {
+  return res.json({
+    ships: SHIP_TYPES.map((type) => ({
+      type,
+      name: SHIPS[type].name,
+      cost: SHIPS[type].cost,
+      attack: SHIPS[type].attack,
+      hp: SHIPS[type].hp
+    }))
+  });
+});
+
+app.get("/shipyard/options", requireAuth, async (req, res) => {
+  try {
+    const hulls = await all("SELECT * FROM hulls ORDER BY id");
+    const components = await all("SELECT * FROM components ORDER BY category, id");
+
+    return res.json({
+      hulls: hulls.map((hull) => ({
+        id: hull.id,
+        key: hull.key,
+        name: hull.name,
+        classType: hull.class_type,
+        baseHp: hull.base_hp,
+        baseSpeed: hull.base_speed,
+        powerLimit: hull.power_limit,
+        baseBuildTime: hull.base_build_time,
+        metalCost: hull.metal_cost,
+        fuelCost: hull.fuel_cost,
+        slots: {
+          engine: Number(hull.slot_engine || 1),
+          weapon: Number(hull.slot_weapon || 1),
+          defense: Number(hull.slot_defense || 1),
+          utility: Number(hull.slot_utility || 1)
+        }
+      })),
+      components: components.map((component) => ({
+        id: component.id,
+        key: component.key,
+        name: component.name,
+        category: component.category,
+        hpBonus: component.hp_bonus,
+        attackBonus: component.attack_bonus,
+        defenseBonus: component.defense_bonus,
+        speedBonus: component.speed_bonus,
+        powerCost: component.power_cost,
+        metalCost: component.metal_cost,
+        fuelCost: component.fuel_cost,
+        techRequirement: component.tech_requirement
+      }))
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "\uc870\uc120\uc18c \uc635\uc158 \uc870\ud68c \uc911 \uc624\ub958\uac00 \ubc1c\uc0dd\ud588\uc2b5\ub2c8\ub2e4." });
+  }
+});
+
+app.get("/designs", requireAuth, async (req, res) => {
+  try {
+    return res.json({ designs: await getDesigns(req.user.id) });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "\uc124\uacc4\uc548 \uc870\ud68c \uc911 \uc624\ub958\uac00 \ubc1c\uc0dd\ud588\uc2b5\ub2c8\ub2e4." });
+  }
+});
+
+app.post("/designs", requireAuth, async (req, res) => {
+  try {
+    const name = String(req.body.name || "").trim();
+    if (name.length < 2 || name.length > 32) {
+      return res.status(400).json({ error: "\uc124\uacc4\uba85\uc740 2~32\uc790\ub85c \uc785\ub825\ud558\uc138\uc694." });
+    }
+
+    const calculated = await calculateDesign({
+      hullId: Number.parseInt(req.body.hullId, 10),
+      engines: req.body.engines,
+      weapons: req.body.weapons,
+      defenses: req.body.defenses,
+      utilities: req.body.utilities,
+      engineId: Number.parseInt(req.body.engineId, 10),
+      weaponId: Number.parseInt(req.body.weaponId, 10),
+      defenseId: Number.parseInt(req.body.defenseId, 10),
+      utilityId: Number.parseInt(req.body.utilityId, 10)
+    });
+
+    const result = await run(
+      `
+        INSERT INTO ship_designs
+          (user_id, name, hull_id, engine_component_id, weapon_component_id, defense_component_id, utility_component_id,
+           engine_components_json, weapon_components_json, defense_components_json, utility_components_json,
+           final_hp, final_attack, final_defense, final_speed, total_power, total_metal_cost, total_fuel_cost,
+           total_build_time, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+      [
+        req.user.id,
+        name,
+        calculated.hull.id,
+        calculated.componentIds.engines[0],
+        calculated.componentIds.weapons[0],
+        calculated.componentIds.defenses[0],
+        calculated.componentIds.utilities[0],
+        JSON.stringify(calculated.componentIds.engines),
+        JSON.stringify(calculated.componentIds.weapons),
+        JSON.stringify(calculated.componentIds.defenses),
+        JSON.stringify(calculated.componentIds.utilities),
+        calculated.finalHp,
+        calculated.finalAttack,
+        calculated.finalDefense,
+        calculated.finalSpeed,
+        calculated.totalPower,
+        calculated.totalMetalCost,
+        calculated.totalFuelCost,
+        calculated.totalBuildTime,
+        Date.now()
+      ]
+    );
+
+    return res.status(201).json({
+      message: `${name} \uc124\uacc4\uc548\uc744 \uc800\uc7a5\ud588\uc2b5\ub2c8\ub2e4.`,
+      designId: result.lastID,
+      designs: await getDesigns(req.user.id)
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(err.status || 500).json({ error: err.message || "\uc124\uacc4\uc548 \uc800\uc7a5 \uc911 \uc624\ub958\uac00 \ubc1c\uc0dd\ud588\uc2b5\ub2c8\ub2e4." });
+  }
+});
+
+app.get("/production", requireAuth, async (req, res) => {
+  try {
+    await processMissionQueueForUser(req.user.id);
+    return res.json({
+      queue: await getProductionQueue(req.user.id),
+      ownedShips: await getOwnedShips(req.user.id)
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "\uc0dd\uc0b0 \ud050 \uc870\ud68c \uc911 \uc624\ub958\uac00 \ubc1c\uc0dd\ud588\uc2b5\ub2c8\ub2e4." });
+  }
+});
+
+app.post("/production", requireAuth, async (req, res) => {
+  try {
+    await processProductionQueue(req.user.id);
+
+    const active = await get("SELECT id FROM production_queue WHERE user_id = ? AND status = 'building'", [req.user.id]);
+    if (active) {
+      return res.status(400).json({ error: "\uc774\ubbf8 \uc9c4\ud589 \uc911\uc778 \uc0dd\uc0b0 \ud050\uac00 \uc788\uc2b5\ub2c8\ub2e4." });
+    }
+
+    const designId = Number.parseInt(req.body.designId, 10);
+    const quantity = Number.parseInt(req.body.quantity, 10);
+    if (!Number.isInteger(quantity) || quantity < 1 || quantity > 50) {
+      return res.status(400).json({ error: "\uc0dd\uc0b0 \uc218\ub7c9\uc740 1~50 \uc0ac\uc774\uc5ec\uc57c \ud569\ub2c8\ub2e4." });
+    }
+
+    const design = await get("SELECT * FROM ship_designs WHERE id = ? AND user_id = ?", [designId, req.user.id]);
+    if (!design) {
+      return res.status(404).json({ error: "\uc124\uacc4\uc548\uc744 \ucc3e\uc744 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4." });
+    }
+
+    const state = await getUpdatedResources(req.user.id);
+    const bonuses = await getPlayerBonuses(req.user.id);
+    const metalCost = Math.floor(design.total_metal_cost * quantity * bonuses.buildCostMultiplier);
+    const fuelCost = Math.floor(design.total_fuel_cost * quantity * bonuses.buildCostMultiplier);
+
+    if (state.resources.metal < metalCost || state.resources.fuel < fuelCost) {
+      return res.status(400).json({ error: `\uc790\uc6d0\uc774 \ubd80\uc871\ud569\ub2c8\ub2e4. \ud544\uc694: \uae08\uc18d ${metalCost}, \uc5f0\ub8cc ${fuelCost}` });
+    }
+
+    const now = Date.now();
+    const endTime = now + design.total_build_time * quantity * 1000;
+    await run("BEGIN TRANSACTION");
+    try {
+      await run("UPDATE resources SET metal = metal - ?, fuel = fuel - ? WHERE user_id = ?", [metalCost, fuelCost, req.user.id]);
+      await run(
+        "INSERT INTO production_queue (user_id, design_id, quantity, start_time, end_time, status) VALUES (?, ?, ?, ?, ?, 'building')",
+        [req.user.id, designId, quantity, now, endTime]
+      );
+      await run("COMMIT");
+    } catch (err) {
+      await run("ROLLBACK");
+      throw err;
+    }
+
+    const nextState = await getUpdatedResources(req.user.id);
+    return res.status(201).json({
+      message: `${design.name} ${quantity}\ucc99 \uc0dd\uc0b0\uc744 \uc2dc\uc791\ud588\uc2b5\ub2c8\ub2e4.`,
+      queue: await getProductionQueue(req.user.id),
+      ownedShips: await getOwnedShips(req.user.id),
+      resources: {
+        metal: nextState.resources.metal,
+        fuel: nextState.resources.fuel,
+        production: {
+          metalPerSecond: nextState.rates.metal,
+          fuelPerSecond: nextState.rates.fuel,
+          base: nextState.rates.base,
+          zones: nextState.rates.zones,
+          multiplier: nextState.rates.multiplier
+        }
+      }
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "\uc124\uacc4\uc548 \uc0dd\uc0b0 \uc2dc\uc791 \uc911 \uc624\ub958\uac00 \ubc1c\uc0dd\ud588\uc2b5\ub2c8\ub2e4." });
+  }
+});
+
+app.get("/owned-ships", requireAuth, async (req, res) => {
+  try {
+    await processMissionQueueForUser(req.user.id);
+    return res.json({ ownedShips: await getOwnedShips(req.user.id) });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "\ubcf4\uc720 \ud568\uc120 \uc870\ud68c \uc911 \uc624\ub958\uac00 \ubc1c\uc0dd\ud588\uc2b5\ub2c8\ub2e4." });
+  }
+});
+
+app.get("/base", requireAuth, async (req, res) => {
+  try {
+    const base = await ensureBase(req.user.id);
+    return res.json({
+      base,
+      moveFuelPerDistance: BASE_MOVE_FUEL_PER_DISTANCE
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "\uae30\uc9c0 \uc870\ud68c \uc911 \uc624\ub958\uac00 \ubc1c\uc0dd\ud588\uc2b5\ub2c8\ub2e4." });
+  }
+});
+
+app.post("/base/move", requireAuth, async (req, res) => {
+  try {
+    const x = Math.round(Number(req.body.x));
+    const y = Math.round(Number(req.body.y));
+    if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || x > 100 || y < 0 || y > 100) {
+      return res.status(400).json({ error: "\uc774\ub3d9\ud560 \uc88c\ud45c\ub294 0~100 \uc0ac\uc774\uc5ec\uc57c \ud569\ub2c8\ub2e4." });
+    }
+
+    const base = await ensureBase(req.user.id);
+    const cost = movementCost(base, { x, y });
+    const state = await getUpdatedResources(req.user.id);
+
+    if (state.resources.fuel < cost) {
+      return res.status(400).json({ error: `\uc5f0\ub8cc\uac00 \ubd80\uc871\ud569\ub2c8\ub2e4. \ud544\uc694 \uc5f0\ub8cc: ${cost}` });
+    }
+
+    await run("BEGIN TRANSACTION");
+    try {
+      await run("UPDATE resources SET fuel = fuel - ? WHERE user_id = ?", [cost, req.user.id]);
+      await run("UPDATE bases SET map_x = ?, map_y = ?, moved_at = ? WHERE user_id = ?", [x, y, Date.now(), req.user.id]);
+      await run("COMMIT");
+    } catch (err) {
+      await run("ROLLBACK");
+      throw err;
+    }
+
+    const nextState = await getUpdatedResources(req.user.id);
+    return res.json({
+      message: `\uae30\uc9c0\ub97c (${x}, ${y}) \uc88c\ud45c\ub85c \uc774\ub3d9\ud588\uc2b5\ub2c8\ub2e4. \uc5f0\ub8cc ${cost}\uc744 \uc18c\ubaa8\ud588\uc2b5\ub2c8\ub2e4.`,
+      base: { userId: req.user.id, x, y },
+      cost,
+      resources: {
+        metal: nextState.resources.metal,
+        fuel: nextState.resources.fuel,
+        production: {
+          metalPerSecond: nextState.rates.metal,
+          fuelPerSecond: nextState.rates.fuel,
+          base: nextState.rates.base,
+          zones: nextState.rates.zones,
+          multiplier: nextState.rates.multiplier
+        }
+      }
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "\uae30\uc9c0 \uc774\ub3d9 \uc911 \uc624\ub958\uac00 \ubc1c\uc0dd\ud588\uc2b5\ub2c8\ub2e4." });
+  }
+});
+
+app.get("/zones", requireAuth, async (req, res) => {
+  try {
+    await processMissionQueueForUser(req.user.id);
+    const rows = await all(
+      `
+        SELECT z.*,
+               owner.user_id AS owner_id,
+               u.username AS owner_username,
+               owner.user_id = ? AS owned_by_me
+        FROM neutral_zones z
+        LEFT JOIN occupied_zones owner ON owner.zone_id = z.id
+        LEFT JOIN users u ON u.id = owner.user_id
+        ORDER BY z.level, z.id
+      `,
+      [req.user.id]
+    );
+
+    const base = await ensureBase(req.user.id);
+    return res.json({ base, zones: rows.map(formatZone) });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "\uc911\ub9bd \uad6c\uc5ed \uc870\ud68c \uc911 \uc624\ub958\uac00 \ubc1c\uc0dd\ud588\uc2b5\ub2c8\ub2e4." });
+  }
+});
+
+app.get("/map", requireAuth, async (req, res) => {
+  try {
+    await processMissionQueueForUser(req.user.id);
+    const rows = await all(
+      `
+        SELECT z.*,
+               owner.user_id AS owner_id,
+               u.username AS owner_username,
+               owner.user_id = ? AS owned_by_me
+        FROM neutral_zones z
+        LEFT JOIN occupied_zones owner ON owner.zone_id = z.id
+        LEFT JOIN users u ON u.id = owner.user_id
+        ORDER BY z.level, z.id
+      `,
+      [req.user.id]
+    );
+
+    const users = await all(
+      "SELECT id FROM users WHERE id != ? ORDER BY id DESC LIMIT 80",
+      [req.user.id]
+    );
+    const players = [];
+    for (const user of users) {
+      const target = await getPlayerTarget(user.id, req.user.id);
+      if (target) players.push(target);
+    }
+
+    const base = await ensureBase(req.user.id);
+    return res.json({
+      base,
+      zones: rows.map(formatZone),
+      players,
+      activeMissions: await getActiveMissions(req.user.id)
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "\uc9c0\ub3c4 \uc870\ud68c \uc911 \uc624\ub958\uac00 \ubc1c\uc0dd\ud588\uc2b5\ub2c8\ub2e4." });
+  }
+});
+
+app.get("/empire", requireAuth, async (req, res) => {
+  try {
+    await processMissionQueueForUser(req.user.id);
+    const rows = await all(
+      `
+        SELECT z.*, oz.user_id AS owner_id, u.username AS owner_username, 1 AS owned_by_me
+        FROM occupied_zones oz
+        JOIN neutral_zones z ON z.id = oz.zone_id
+        JOIN users u ON u.id = oz.user_id
+        WHERE oz.user_id = ?
+        ORDER BY z.id
+      `,
+      [req.user.id]
+    );
+    const rates = await getProductionRates(req.user.id);
+
+    return res.json({
+      production: rates,
+      occupiedZones: rows.map(formatZone)
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "\uc810\ub839\uc9c0 \uc870\ud68c \uc911 \uc624\ub958\uac00 \ubc1c\uc0dd\ud588\uc2b5\ub2c8\ub2e4." });
+  }
+});
+
+app.get("/research", requireAuth, async (req, res) => {
+  try {
+    const research = await getResearch(req.user.id);
+    const bonuses = await getPlayerBonuses(req.user.id);
+
+    return res.json({
+      research: formatResearchState(research),
+      bonuses: {
+        resourceMultiplier: bonuses.resourceMultiplier,
+        buildCostMultiplier: bonuses.buildCostMultiplier,
+        combatMultiplier: bonuses.combatMultiplier,
+        movementMultiplier: bonuses.movementMultiplier
+      }
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "\uc5f0\uad6c \uc870\ud68c \uc911 \uc624\ub958\uac00 \ubc1c\uc0dd\ud588\uc2b5\ub2c8\ub2e4." });
+  }
+});
+
+app.post("/research/:type/upgrade", requireAuth, async (req, res) => {
+  try {
+    const type = String(req.params.type || "");
+    if (!RESEARCH[type]) {
+      return res.status(400).json({ error: "\uc5f0\uad6c\ud560 \uc218 \uc5c6\ub294 \ud56d\ubaa9\uc785\ub2c8\ub2e4." });
+    }
+
+    const research = await getResearch(req.user.id);
+    const level = research[type] || 0;
+    const cost = researchCost(type, level);
+    const state = await getUpdatedResources(req.user.id);
+
+    if (state.resources.metal < cost.metal || state.resources.fuel < cost.fuel) {
+      return res.status(400).json({
+        error: `\uc790\uc6d0\uc774 \ubd80\uc871\ud569\ub2c8\ub2e4. \ud544\uc694: \uae08\uc18d ${cost.metal}, \uc5f0\ub8cc ${cost.fuel}`
+      });
+    }
+
+    const column = `${type}_level`;
+    await run("BEGIN TRANSACTION");
+    try {
+      await run("UPDATE resources SET metal = metal - ?, fuel = fuel - ? WHERE user_id = ?", [cost.metal, cost.fuel, req.user.id]);
+      await run(`UPDATE research SET ${column} = ${column} + 1 WHERE user_id = ?`, [req.user.id]);
+      await run("COMMIT");
+    } catch (err) {
+      await run("ROLLBACK");
+      throw err;
+    }
+
+    const nextResearch = await getResearch(req.user.id);
+    const nextState = await getUpdatedResources(req.user.id);
+    const bonuses = await getPlayerBonuses(req.user.id);
+
+    return res.json({
+      message: `${RESEARCH[type].name} Lv.${nextResearch[type]} \uc5f0\uad6c \uc644\ub8cc.`,
+      research: formatResearchState(nextResearch),
+      resources: {
+        metal: nextState.resources.metal,
+        fuel: nextState.resources.fuel,
+        production: {
+          metalPerSecond: nextState.rates.metal,
+          fuelPerSecond: nextState.rates.fuel,
+          base: nextState.rates.base,
+          zones: nextState.rates.zones,
+          multiplier: nextState.rates.multiplier
+        }
+      },
+      bonuses
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "\uc5f0\uad6c \uc5c5\uadf8\ub808\uc774\ub4dc \uc911 \uc624\ub958\uac00 \ubc1c\uc0dd\ud588\uc2b5\ub2c8\ub2e4." });
+  }
+});
+
+app.get("/admirals", requireAuth, async (req, res) => {
+  try {
+    const rows = await all(
+      `
+        SELECT id, name, rarity, combat_bonus AS combatBonus,
+               resource_bonus AS resourceBonus, cost_bonus AS costBonus, assigned
+        FROM admirals
+        WHERE user_id = ?
+        ORDER BY assigned DESC, id DESC
+      `,
+      [req.user.id]
+    );
+
+    return res.json({ admirals: rows });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "\uc81c\ub3c5 \uc870\ud68c \uc911 \uc624\ub958\uac00 \ubc1c\uc0dd\ud588\uc2b5\ub2c8\ub2e4." });
+  }
+});
+
+app.post("/admirals/draw", requireAuth, async (req, res) => {
+  try {
+    const cost = { metal: 600, fuel: 300 };
+    const state = await getUpdatedResources(req.user.id);
+    if (state.resources.metal < cost.metal || state.resources.fuel < cost.fuel) {
+      return res.status(400).json({ error: "\uc81c\ub3c5 \uc601\uc785\uc5d0 \ud544\uc694\ud55c \uc790\uc6d0\uc774 \ubd80\uc871\ud569\ub2c8\ub2e4." });
+    }
+
+    const roll = Math.random();
+    const candidates = ADMIRAL_POOL.filter((admiral) => {
+      if (roll > 0.92) return admiral.rarity === "SSR";
+      if (roll > 0.62) return admiral.rarity === "SR";
+      return admiral.rarity === "R";
+    });
+    const admiral = candidates[Math.floor(Math.random() * candidates.length)];
+
+    await run("BEGIN TRANSACTION");
+    try {
+      await run("UPDATE resources SET metal = metal - ?, fuel = fuel - ? WHERE user_id = ?", [cost.metal, cost.fuel, req.user.id]);
+      const currentAssigned = await getAssignedAdmiral(req.user.id);
+      await run(
+        `
+          INSERT INTO admirals
+            (user_id, name, rarity, combat_bonus, resource_bonus, cost_bonus, assigned, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+        [
+          req.user.id,
+          admiral.name,
+          admiral.rarity,
+          admiral.combatBonus,
+          admiral.resourceBonus,
+          admiral.costBonus,
+          currentAssigned ? 0 : 1,
+          Date.now()
+        ]
+      );
+      await run("COMMIT");
+    } catch (err) {
+      await run("ROLLBACK");
+      throw err;
+    }
+
+    const rows = await all(
+      "SELECT id, name, rarity, combat_bonus AS combatBonus, resource_bonus AS resourceBonus, cost_bonus AS costBonus, assigned FROM admirals WHERE user_id = ? ORDER BY assigned DESC, id DESC",
+      [req.user.id]
+    );
+    const nextState = await getUpdatedResources(req.user.id);
+
+    return res.json({
+      message: `${admiral.rarity} \uc81c\ub3c5 ${admiral.name}\uc744 \uc601\uc785\ud588\uc2b5\ub2c8\ub2e4.`,
+      admirals: rows,
+      resources: {
+        metal: nextState.resources.metal,
+        fuel: nextState.resources.fuel,
+        production: {
+          metalPerSecond: nextState.rates.metal,
+          fuelPerSecond: nextState.rates.fuel,
+          base: nextState.rates.base,
+          zones: nextState.rates.zones,
+          multiplier: nextState.rates.multiplier
+        }
+      }
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "\uc81c\ub3c5 \uc601\uc785 \uc911 \uc624\ub958\uac00 \ubc1c\uc0dd\ud588\uc2b5\ub2c8\ub2e4." });
+  }
+});
+
+app.post("/admirals/:id/assign", requireAuth, async (req, res) => {
+  try {
+    const admiralId = Number.parseInt(req.params.id, 10);
+    const admiral = await get("SELECT id FROM admirals WHERE id = ? AND user_id = ?", [admiralId, req.user.id]);
+    if (!admiral) {
+      return res.status(404).json({ error: "\uc81c\ub3c5\uc744 \ucc3e\uc744 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4." });
+    }
+
+    await run("BEGIN TRANSACTION");
+    try {
+      await run("UPDATE admirals SET assigned = 0 WHERE user_id = ?", [req.user.id]);
+      await run("UPDATE admirals SET assigned = 1 WHERE id = ? AND user_id = ?", [admiralId, req.user.id]);
+      await run("COMMIT");
+    } catch (err) {
+      await run("ROLLBACK");
+      throw err;
+    }
+
+    const rows = await all(
+      "SELECT id, name, rarity, combat_bonus AS combatBonus, resource_bonus AS resourceBonus, cost_bonus AS costBonus, assigned FROM admirals WHERE user_id = ? ORDER BY assigned DESC, id DESC",
+      [req.user.id]
+    );
+
+    return res.json({ message: "\uc81c\ub3c5\uc744 \ubc30\uce58\ud588\uc2b5\ub2c8\ub2e4.", admirals: rows });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "\uc81c\ub3c5 \ubc30\uce58 \uc911 \uc624\ub958\uac00 \ubc1c\uc0dd\ud588\uc2b5\ub2c8\ub2e4." });
+  }
+});
+
+app.get("/players", requireAuth, async (req, res) => {
+  try {
+    await processMissionQueueForUser(req.user.id);
+    const users = await all(
+      "SELECT id FROM users WHERE id != ? ORDER BY id DESC LIMIT 20",
+      [req.user.id]
+    );
+    const players = [];
+
+    for (const user of users) {
+      const target = await getPlayerTarget(user.id, req.user.id);
+      if (target) players.push(target);
+    }
+
+    return res.json({ players });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "\ud50c\ub808\uc774\uc5b4 \ubaa9\ub85d \uc870\ud68c \uc911 \uc624\ub958\uac00 \ubc1c\uc0dd\ud588\uc2b5\ub2c8\ub2e4." });
+  }
+});
+
+app.get("/missions", requireAuth, async (req, res) => {
+  try {
+    await processMissionQueueForUser(req.user.id);
+    return res.json({ activeMissions: await getActiveMissions(req.user.id) });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "\uc784\ubb34 \uc870\ud68c \uc911 \uc624\ub958\uac00 \ubc1c\uc0dd\ud588\uc2b5\ub2c8\ub2e4." });
+  }
+});
+
+app.get("/battle-records", requireAuth, async (req, res) => {
+  try {
+    await processMissionQueueForUser(req.user.id);
+    return res.json({ records: await getBattleRecords(req.user.id) });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "\uc804\ud22c\uae30\ub85d \uc870\ud68c \uc911 \uc624\ub958\uac00 \ubc1c\uc0dd\ud588\uc2b5\ub2c8\ub2e4." });
+  }
+});
+
+app.post("/pvp/attack", requireAuth, async (req, res) => {
+  try {
+    await processMissionQueueForUser(req.user.id);
+    const targetUserId = Number.parseInt(req.body.targetUserId, 10);
+    if (!Number.isInteger(targetUserId) || targetUserId === req.user.id) {
+      return res.status(400).json({ error: "\uacf5\uaca9\ud560 \ub300\uc0c1\uc774 \uc62c\ubc14\ub974\uc9c0 \uc54a\uc2b5\ub2c8\ub2e4." });
+    }
+
+    const targetUser = await get("SELECT id, username FROM users WHERE id = ?", [targetUserId]);
+    if (!targetUser) {
+      return res.status(404).json({ error: "\ub300\uc0c1 \uc720\uc800\ub97c \ucc3e\uc744 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4." });
+    }
+
+    const activeMission = await get("SELECT id FROM missions WHERE user_id = ? AND status = 'traveling' LIMIT 1", [req.user.id]);
+    if (activeMission) {
+      return res.status(400).json({ error: "\uc774\ubbf8 \uc9c4\ud589 \uc911\uc778 \ucd9c\uaca9 \uc784\ubb34\uac00 \uc788\uc2b5\ub2c8\ub2e4." });
+    }
+
+    const attackerFleet = await getOwnedShipFleet(req.user.id);
+    if (!hasDesignShips(attackerFleet)) {
+      return res.status(400).json({ error: "\ucd9c\uaca9 \uac00\ub2a5\ud55c \uc124\uacc4 \ud568\uc120\uc774 \uc5c6\uc2b5\ub2c8\ub2e4." });
+    }
+
+    const attackerBonuses = await getPlayerBonuses(req.user.id);
+    const attackerBase = await ensureBase(req.user.id);
+    const defenderBase = await ensureBase(targetUserId);
+    const travelSeconds = travelTimeSecondsForDesignFleet(attackerBase, defenderBase, attackerFleet, attackerBonuses);
+    const now = Date.now();
+    const arriveAt = now + travelSeconds * 1000;
+
+    const result = await run(
+      `
+        INSERT INTO missions
+          (user_id, mission_type, target_user_id, target_name, from_x, from_y, to_x, to_y, started_at, arrive_at, status)
+        VALUES (?, 'pvp', ?, ?, ?, ?, ?, ?, ?, ?, 'traveling')
+      `,
+      [req.user.id, targetUserId, targetUser.username, attackerBase.x, attackerBase.y, defenderBase.x, defenderBase.y, now, arriveAt]
+    );
+
+    return res.json({
+      queued: true,
+      missionId: result.lastID,
+      missionType: "pvp",
+      message: `${targetUser.username} \uae30\uc9c0\ub85c \ucd9c\uaca9\ud588\uc2b5\ub2c8\ub2e4. \ub3c4\ucc29 \ud6c4 \uc804\ud22c\uac00 \uc790\ub3d9 \ucc98\ub9ac\ub429\ub2c8\ub2e4.`,
+      travelTimeSeconds: travelSeconds,
+      travelTimeText: formatTravelTime(travelSeconds),
+      arriveAt,
+      to: { x: defenderBase.x, y: defenderBase.y }
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "PvP \uacf5\uaca9 \ucc98\ub9ac \uc911 \uc624\ub958\uac00 \ubc1c\uc0dd\ud588\uc2b5\ub2c8\ub2e4." });
+  }
+});
+
+app.post("/build", requireAuth, async (req, res) => {
+  return res.status(410).json({
+    error: "\uae30\uc874 \ud568\uc120 \ud0c0\uc785 \uc0dd\uc0b0\uc740 \uc81c\uac70\ub418\uc5c8\uc2b5\ub2c8\ub2e4. \uc0dd\uc0b0 \ud0ed\uc758 \uc124\uacc4\uc548 \uc0dd\uc0b0\uc744 \uc0ac\uc6a9\ud558\uc138\uc694."
+  });
+});
+
+app.post("/battle", requireAuth, async (req, res) => {
+  try {
+    const fleet = await getOwnedShipFleet(req.user.id);
+    if (!hasDesignShips(fleet)) {
+      return res.status(400).json({ error: "\ucd9c\uaca9 \uac00\ub2a5\ud55c \uc124\uacc4 \ud568\uc120\uc774 \uc5c6\uc2b5\ub2c8\ub2e4." });
+    }
+
+    const enemy = garrisonToDesignFleet({ corvette: 7, destroyer: 2, cruiser: 1, battleship: 0, carrier: 0 });
+    const playerBonuses = await getPlayerBonuses(req.user.id);
+    const battle = simulateDesignBattle(
+      fleet,
+      enemy,
+      "\uc911\ub9bd \ud56d\ub85c\uc758 \uc21c\ucc30 \ud568\ub300\uc640 \uad50\uc804\ud569\ub2c8\ub2e4.",
+      playerBonuses.combatMultiplier
+    );
+    await updateOwnedShipsFromBattle(req.user.id, battle.remainingFleet);
+    const savedFleet = await getOwnedShipFleet(req.user.id);
+
+    return res.json({ result: battle.result, log: battle.log, fleet: savedFleet || battle.remainingFleet });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "\uc804\ud22c \ucc98\ub9ac \uc911 \uc624\ub958\uac00 \ubc1c\uc0dd\ud588\uc2b5\ub2c8\ub2e4." });
+  }
+});
+
+app.post("/zones/:id/capture", requireAuth, async (req, res) => {
+  try {
+    await processMissionQueueForUser(req.user.id);
+    const zoneId = Number.parseInt(req.params.id, 10);
+    const zone = await get("SELECT * FROM neutral_zones WHERE id = ?", [zoneId]);
+    if (!zone) {
+      return res.status(404).json({ error: "\uc911\ub9bd \uad6c\uc5ed\uc744 \ucc3e\uc744 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4." });
+    }
+
+    const owner = await get(
+      `
+        SELECT oz.user_id, u.username
+        FROM occupied_zones oz
+        JOIN users u ON u.id = oz.user_id
+        WHERE oz.zone_id = ?
+      `,
+      [zoneId]
+    );
+    if (owner?.user_id === req.user.id) {
+      return res.status(400).json({ error: "\uc774\ubbf8 \uc810\ub839\ud55c \uad6c\uc5ed\uc785\ub2c8\ub2e4." });
+    }
+
+    const activeMission = await get("SELECT id FROM missions WHERE user_id = ? AND status = 'traveling' LIMIT 1", [req.user.id]);
+    if (activeMission) {
+      return res.status(400).json({ error: "\uc774\ubbf8 \uc9c4\ud589 \uc911\uc778 \ucd9c\uaca9 \uc784\ubb34\uac00 \uc788\uc2b5\ub2c8\ub2e4." });
+    }
+
+    const fleet = await getOwnedShipFleet(req.user.id);
+    if (!hasDesignShips(fleet)) {
+      return res.status(400).json({ error: "\ucd9c\uaca9 \uac00\ub2a5\ud55c \uc124\uacc4 \ud568\uc120\uc774 \uc5c6\uc2b5\ub2c8\ub2e4." });
+    }
+
+    const playerBonuses = await getPlayerBonuses(req.user.id);
+    const attackerBase = await ensureBase(req.user.id);
+    const travelSeconds = travelTimeSecondsForDesignFleet(
+      attackerBase,
+      { x: zone.map_x, y: zone.map_y },
+      fleet,
+      playerBonuses
+    );
+    const now = Date.now();
+    const arriveAt = now + travelSeconds * 1000;
+    const missionResult = await run(
+      `
+        INSERT INTO missions
+          (user_id, mission_type, target_zone_id, target_name, from_x, from_y, to_x, to_y, started_at, arrive_at, status)
+        VALUES (?, 'zone', ?, ?, ?, ?, ?, ?, ?, ?, 'traveling')
+      `,
+      [req.user.id, zoneId, zone.name, attackerBase.x, attackerBase.y, zone.map_x, zone.map_y, now, arriveAt]
+    );
+
+    return res.json({
+      queued: true,
+      missionId: missionResult.lastID,
+      missionType: "zone",
+      message: `${zone.name}\ub85c \ucd9c\uaca9\ud588\uc2b5\ub2c8\ub2e4. \ub3c4\ucc29 \ud6c4 \uc810\ub839 \uc804\ud22c\uac00 \uc790\ub3d9 \ucc98\ub9ac\ub429\ub2c8\ub2e4.`,
+      travelTimeSeconds: travelSeconds,
+      travelTimeText: formatTravelTime(travelSeconds),
+      arriveAt,
+      to: { x: zone.map_x, y: zone.map_y }
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "\uc911\ub9bd \uad6c\uc5ed \uc810\ub839 \uc911 \uc624\ub958\uac00 \ubc1c\uc0dd\ud588\uc2b5\ub2c8\ub2e4." });
+  }
+});
+
+app.get(/.*/, (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "index.html"));
+});
+
+initDb()
+  .then(() => {
+    app.listen(PORT, () => {
+      console.log(`SF SLG MVP server running at http://localhost:${PORT}`);
+    });
+  })
+  .catch((err) => {
+    console.error("DB initialization failed:", err);
+    process.exit(1);
+  });
