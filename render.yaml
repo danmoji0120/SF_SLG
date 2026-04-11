@@ -1,17 +1,13 @@
 services:
   - type: web
     name: sf-slg
-    env: node
+    env: docker
     plan: starter
-    buildCommand: npm ci
-    startCommand: npm start
     autoDeploy: true
     healthCheckPath: /health
     envVars:
       - key: NODE_ENV
         value: production
-      - key: PORT
-        value: 3000
       - key: JWT_SECRET
         generateValue: true
       - key: CORS_ORIGIN

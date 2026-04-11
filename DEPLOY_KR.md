@@ -1,6 +1,6 @@
 # SF_SLG 배포 가이드
 
-## 1) Render로 가장 빠르게 배포
+## 1) Render로 가장 빠르게 배포 (권장: Docker)
 
 1. GitHub에 이 프로젝트를 푸시합니다.
 2. Render에서 `New +` -> `Blueprint`를 선택합니다.
@@ -14,6 +14,11 @@
 
 헬스체크:
 - `GET /health`
+
+### 왜 Docker 권장인가
+
+- `sqlite3` 네이티브 모듈은 실행환경 `glibc` 버전에 민감합니다.
+- Render `Node` 런타임 대신 `Docker`로 배포하면 빌드/실행 환경이 동일해 `GLIBC_2.38 not found` 오류를 피할 수 있습니다.
 
 ## 2) Docker로 직접 배포 (VPS, ECS, Fly.io 등)
 

@@ -1,8 +1,15 @@
-FROM node:20-slim
+FROM node:20-bookworm-slim
 
 WORKDIR /app
 
+RUN apt-get update && apt-get install -y --no-install-recommends \
+  python3 \
+  make \
+  g++ \
+  && rm -rf /var/lib/apt/lists/*
+
 COPY package*.json ./
+ENV npm_config_build_from_source=true
 RUN npm ci --omit=dev
 
 COPY . .
