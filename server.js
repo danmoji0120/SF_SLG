@@ -386,6 +386,63 @@ const STRATEGIC_POLICIES = {
   ]
 };
 
+function componentUnlockNodeKey(componentKey) {
+  const fixed = {
+    gauss_battery: "rail_mk2",
+    shield_generator: "shield_system",
+    battle_computer: "tactical_computer",
+    reactor_boost: "reactor_control",
+    adaptive_barrier: "advanced_shield_module",
+    siege_artillery: "siege_artillery_suite"
+  };
+  return fixed[String(componentKey || "")] || `unlock_component_${String(componentKey || "")}`;
+}
+
+function buildAutoComponentTechNodes() {
+  const basicKeys = new Set(["standard_engine", "light_railgun", "reinforced_armor", "cargo_module"]);
+  const reserved = new Set(
+    ACTIVE_TECH_TREE_NODES
+      .filter((node) => String(node.effectType || "") === "unlock_component" && String(node.unlockKey || ""))
+      .map((node) => String(node.unlockKey))
+  );
+  const categoryRoot = {
+    engine: "engine_1",
+    weapon: "rail_mk2",
+    defense: "armor_1",
+    utility: "industry_1"
+  };
+
+  return DEFAULT_COMPONENTS
+    .filter((component) => !basicKeys.has(String(component.key || "")))
+    .filter((component) => !reserved.has(String(component.key || "")))
+    .map((component) => {
+      const power = Number(component.power || 0);
+      const baseTier = componentTierByPower(power);
+      const tier = Math.max(2, Math.min(4, baseTier));
+      const requires = [String(categoryRoot[String(component.category || "")] || "industry_1")];
+      if (tier >= 3) requires.push("destroyer_blueprint");
+      if (tier >= 4) requires.push("cruiser_command");
+      const metal = Math.max(1800, Math.floor(Number(component.metal || 0) * (6 + tier * 0.6)));
+      const fuel = Math.max(900, Math.floor(Number(component.fuel || 0) * (6 + tier * 0.6)));
+      const researchTime = Math.max(700, Math.floor((power * 25) + (tier * 260)));
+      return {
+        key: componentUnlockNodeKey(component.key),
+        name: `${component.name} 설계`,
+        tier,
+        category: String(component.category || "special"),
+        description: `${component.name} 모듈 사용 해금`,
+        metalCost: metal,
+        fuelCost: fuel,
+        researchTime,
+        requires,
+        exclusiveGroup: "",
+        effectType: "unlock_component",
+        effectValue: 0,
+        unlockKey: String(component.key)
+      };
+    });
+}
+
 const CITY_BUILDINGS = {
   shipyard: {
     key: "shipyard",
@@ -828,12 +885,14 @@ async function seedShipyardData() {
 }
 
 async function seedTechTreeData() {
-  const activeKeys = ACTIVE_TECH_TREE_NODES.map((node) => String(node.key));
+  const generatedNodes = buildAutoComponentTechNodes();
+  const allTechNodes = [...ACTIVE_TECH_TREE_NODES, ...generatedNodes];
+  const activeKeys = allTechNodes.map((node) => String(node.key));
   if (activeKeys.length) {
     const placeholders = activeKeys.map(() => "?").join(", ");
     await run(`DELETE FROM tech_nodes WHERE key NOT IN (${placeholders})`, activeKeys);
   }
-  for (const node of ACTIVE_TECH_TREE_NODES) {
+  for (const node of allTechNodes) {
     await run(
       `
         INSERT OR IGNORE INTO tech_nodes
@@ -1480,28 +1539,11 @@ function componentTierByPower(powerCost) {
 
 function componentUnlockRequirement(component) {
   const basicKeys = new Set(["standard_engine", "light_railgun", "reinforced_armor", "cargo_module"]);
-  if (String(component.key || "") === "reactor_boost") {
-    return { type: "tech", key: "engine_overdrive" };
-  }
-  if (basicKeys.has(String(component.key || ""))) {
+  const key = String(component?.key || "");
+  if (basicKeys.has(key)) {
     return { type: "lab", level: 1 };
   }
-  if (String(component.key || "") === "shield_generator") {
-    return { type: "tech", key: "shield_system" };
-  }
-  if (String(component.key || "") === "adaptive_barrier") {
-    return { type: "tech", key: "advanced_shield_module" };
-  }
-  const category = String(component.category || "");
-  const tier = componentTierByPower(component.power_cost);
-  if (tier <= 1) return { type: "lab", level: 1 };
-  if (tier === 2) {
-    return { type: "lab", level: category === "weapon" || category === "defense" ? 2 : 1 };
-  }
-  if (tier === 3) {
-    return { type: "lab", level: 3 };
-  }
-  return { type: "lab", level: 4 };
+  return { type: "tech", key: componentUnlockNodeKey(key) };
 }
 
 function isUnlockedByResearch(requirement, research) {
@@ -2225,16 +2267,22 @@ function formatRequirementText(requirement) {
 }
 
 function buildUnlockSummary(research, hulls, components) {
+  const requirementOrder = (requirement) => {
+    const type = String(requirement?.type || "");
+    if (type === "lab") return Number(requirement.level || 0);
+    if (type === "tech") return 1000;
+    return 500;
+  };
   const unlockedHulls = hulls.filter((hull) => isUnlockedByResearch(hullUnlockRequirement(hull.key), research));
   const unlockedComponents = components.filter((component) => isUnlockedByResearch(componentUnlockRequirement(component), research));
   const nextHull = hulls
     .filter((hull) => !isUnlockedByResearch(hullUnlockRequirement(hull.key), research))
     .map((hull) => ({ name: hull.name, requirement: hullUnlockRequirement(hull.key) }))
-    .sort((a, b) => a.requirement.level - b.requirement.level)[0] || null;
+    .sort((a, b) => requirementOrder(a.requirement) - requirementOrder(b.requirement))[0] || null;
   const nextComponent = components
     .filter((component) => !isUnlockedByResearch(componentUnlockRequirement(component), research))
     .map((component) => ({ name: component.name, requirement: componentUnlockRequirement(component) }))
-    .sort((a, b) => a.requirement.level - b.requirement.level)[0] || null;
+    .sort((a, b) => requirementOrder(a.requirement) - requirementOrder(b.requirement))[0] || null;
 
   return {
     hulls: {

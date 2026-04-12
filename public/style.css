@@ -949,6 +949,49 @@ body:has(#gamePanel:not(.hidden)) {
   gap: 14px;
 }
 
+.tech-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.tech-filter-button {
+  min-height: 34px;
+  padding: 6px 12px;
+}
+
+.tech-filter-button.active {
+  background: #0f766e;
+  border-color: #20a397;
+}
+
+.tech-group-wrap {
+  display: grid;
+  gap: 12px;
+  width: 100%;
+}
+
+.tech-group-section {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  background: rgba(12, 23, 31, 0.72);
+  border: 1px solid #355066;
+  border-radius: 8px;
+}
+
+.tech-group-section h4 {
+  margin: 0;
+  font-size: 15px;
+  color: #dce8ef;
+}
+
+.tech-node-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
 .research-grid {
   grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
 }
@@ -1228,6 +1271,7 @@ pre {
   .policy-grid,
   .slot-groups,
   .tech-tree,
+  .tech-node-grid,
   .stat-grid,
   .compact-list,
   .tab-nav,

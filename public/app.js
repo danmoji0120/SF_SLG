@@ -47,6 +47,7 @@ let cityState = null;
 let garrisonOverviewState = null;
 let garrisonZoneFilterId = null;
 let policyState = null;
+let researchCategoryFilter = "all";
 
 const elements = {
   authPanel: document.getElementById("authPanel"),
@@ -1203,7 +1204,7 @@ function renderResearchV2(data) {
   });
 }
 
-function renderResearchHub(data) {
+function renderResearchHubLegacy(data) {
   const nodes = Array.isArray(data?.nodes) ? data.nodes : [];
   if (!nodes.length) {
     elements.researchView.textContent = "테크트리 정보를 불러오지 못했습니다.";
@@ -1285,6 +1286,156 @@ function renderResearchHub(data) {
   researchButtons = Array.from(document.querySelectorAll("[data-tech-start]"));
   researchButtons.forEach((button) => {
     button.addEventListener("click", () => upgradeResearch(button.dataset.techStart));
+  });
+}
+
+function renderPolicyPanel(data) {
+  const payload = data || {};
+  policyState = payload;
+  const options = payload.options || {};
+  const selection = payload.policies || {};
+  const effects = payload.effects || {};
+  const lock = payload.lock || {};
+  const fillPolicySelect = (select, category) => {
+    if (!select) return;
+    const items = Array.isArray(options[category]) ? options[category] : [];
+    const selected = String(selection?.[category] || "");
+    select.innerHTML = items
+      .map((item) => {
+        const chosen = String(item.key) === selected ? "selected" : "";
+        return `<option value="${item.key}" ${chosen}>${item.name} - ${item.description || ""}</option>`;
+      })
+      .join("");
+  };
+  fillPolicySelect(elements.economyPolicySelect, "economy");
+  fillPolicySelect(elements.industryPolicySelect, "industry");
+  fillPolicySelect(elements.militaryPolicySelect, "military");
+  const remain = Math.max(0, Number(lock.remainingSeconds || 0));
+  if (elements.policyLockInfo) {
+    elements.policyLockInfo.textContent = remain > 0
+      ? `정책 변경 잠금: ${formatSeconds(remain)}`
+      : `정책 변경 가능 (변경 시 ${Number(lock.lockMinutes || 30)}분 고정)`;
+  }
+  if (elements.savePolicyButton) {
+    elements.savePolicyButton.disabled = remain > 0;
+  }
+  if (elements.policyEffectInfo) {
+    elements.policyEffectInfo.textContent =
+      `정책 효과: 자원 ${percent(effects.resourcePct)}, 생산비 -${Number(effects.buildCostPct || 0).toFixed(2)}, 전투 ${percent(effects.combatPct)}, 이동 ${percent(effects.movementPct)}`;
+  }
+}
+
+function renderResearchHub(data) {
+  const nodes = Array.isArray(data?.nodes) ? data.nodes : [];
+  if (!nodes.length) {
+    elements.researchView.textContent = "테크트리 정보를 불러오지 못했습니다.";
+    researchButtons = [];
+    return;
+  }
+  const active = data?.activeResearch;
+  const policy = data?.policies || {};
+  const tiers = [1, 2, 3, 4];
+  const filterOptions = [
+    { key: "all", label: "전체" },
+    { key: "engine", label: "엔진" },
+    { key: "weapon", label: "무기" },
+    { key: "defense", label: "방어" },
+    { key: "utility", label: "보조" }
+  ];
+  if (!filterOptions.some((item) => item.key === researchCategoryFilter)) {
+    researchCategoryFilter = "all";
+  }
+  const groupLabel = {
+    engine: "엔진",
+    weapon: "무기",
+    defense: "방어",
+    utility: "보조",
+    other: "기타"
+  };
+  const coreCategories = ["engine", "weapon", "defense", "utility"];
+  const normalizeGroup = (node) => {
+    const cat = String(node.category || "");
+    return coreCategories.includes(cat) ? cat : "other";
+  };
+  const renderNode = (node, tier) => {
+    const state = node.researched ? "완료" : node.lockedByBranch ? "분기잠금" : node.available ? "연구 가능" : "잠김";
+    const disabled = node.available ? "" : "disabled";
+    return `
+      <div class="tech-node level-${Math.min(5, tier + 1)}">
+        <div>
+          <strong>${node.name}</strong>
+          <p>${node.description}</p>
+          <span>상태: ${state}</span>
+          <span>비용: 금속 ${Number(node.cost?.metal || 0).toLocaleString()}, 연료 ${Number(node.cost?.fuel || 0).toLocaleString()}</span>
+          <span>시간: ${formatSeconds(Number(node.researchTime || 0))}</span>
+          <span>선행: ${(node.requires || []).length ? node.requires.join(", ") : "없음"}</span>
+        </div>
+        <button type="button" data-tech-start="${node.key}" ${disabled}>연구 시작</button>
+      </div>
+    `;
+  };
+
+  elements.researchView.innerHTML = `
+    <div class="growth-item">
+      <div>
+        <strong>연구 현황</strong>
+        <span>중앙정부 Lv.${Number(policy.governmentLevel || 1)} / 연구소 Lv.${Number(data?.labLevel || 1)} (해금 티어 ${Number(data?.labTierUnlocked || 1)})</span>
+        <span>진행 중 연구: ${active ? `${active.key} / 남은 ${formatSeconds(active.remainingSeconds || 0)}` : "없음"}</span>
+      </div>
+    </div>
+    <div class="growth-item">
+      <div class="tech-filter-bar">
+        ${filterOptions.map((item) => `
+          <button type="button" class="tech-filter-button ${researchCategoryFilter === item.key ? "active" : ""}" data-tech-filter="${item.key}">
+            ${item.label}
+          </button>
+        `).join("")}
+      </div>
+    </div>
+    ${tiers.map((tier) => {
+      const tierNodes = nodes.filter((node) => Number(node.tier) === tier);
+      const filteredTier = researchCategoryFilter === "all"
+        ? tierNodes
+        : tierNodes.filter((node) => normalizeGroup(node) === researchCategoryFilter);
+      if (!filteredTier.length) {
+        return `
+          <div class="growth-item">
+            <div><strong>Tier ${tier}</strong><span>표시할 연구가 없습니다.</span></div>
+          </div>
+        `;
+      }
+      const groups = ["engine", "weapon", "defense", "utility", "other"]
+        .map((key) => ({
+          key,
+          items: filteredTier.filter((node) => normalizeGroup(node) === key)
+        }))
+        .filter((entry) => entry.items.length > 0);
+      return `
+        <div class="growth-item">
+          <div><strong>Tier ${tier}</strong></div>
+          <div class="tech-group-wrap">
+            ${groups.map((entry) => `
+              <section class="tech-group-section">
+                <h4>${groupLabel[entry.key]}</h4>
+                <div class="tech-node-grid">
+                  ${entry.items.map((node) => renderNode(node, tier)).join("")}
+                </div>
+              </section>
+            `).join("")}
+          </div>
+        </div>
+      `;
+    }).join("")}
+  `;
+  researchButtons = Array.from(document.querySelectorAll("[data-tech-start]"));
+  researchButtons.forEach((button) => {
+    button.addEventListener("click", () => upgradeResearch(button.dataset.techStart));
+  });
+  Array.from(document.querySelectorAll("[data-tech-filter]")).forEach((button) => {
+    button.addEventListener("click", () => {
+      researchCategoryFilter = String(button.dataset.techFilter || "all");
+      renderResearchHub(data);
+    });
   });
 }
 
@@ -2757,7 +2908,12 @@ async function loadResearchHub() {
 }
 
 async function loadGrowth() {
-  renderAdmirals(await api("/admirals"));
+  const [admirals, policies] = await Promise.all([
+    api("/admirals"),
+    api("/policies")
+  ]);
+  renderAdmirals(admirals);
+  renderPolicyPanel(policies);
 }
 
 async function loadPlayers() {
@@ -2880,7 +3036,7 @@ async function saveStrategicPolicies() {
       })
     });
     await loadResources();
-    await loadResearchHub();
+    await loadGrowth();
     setStatus(data.message || "정책을 저장했습니다.");
   } catch (err) {
     handleAuthError(err);
@@ -3129,13 +3285,14 @@ async function captureZone(zoneId, fleetSlot = 1) {
 }
 
 async function refreshAll() {
-  const [resources, fleet, map, empire, research, admirals, players, options, designs, production, missions, records, trades, shipTrades, city, fleetGroups, garrison] = await Promise.all([
+  const [resources, fleet, map, empire, research, admirals, policies, players, options, designs, production, missions, records, trades, shipTrades, city, fleetGroups, garrison] = await Promise.all([
     api("/resources"),
     api("/fleet"),
     api("/map"),
     api("/empire"),
     api("/tech-tree"),
     api("/admirals"),
+    api("/policies"),
     api("/players"),
     api("/shipyard/options"),
     api("/designs"),
@@ -3156,6 +3313,7 @@ async function refreshAll() {
   renderResearchHub(research);
   renderCityV2(city);
   renderAdmirals(admirals);
+  renderPolicyPanel(policies);
   renderPlayers(players);
   renderFleetGroupsV2(fleetGroups);
   renderGarrisonOverviewV2(garrison);
