@@ -496,6 +496,104 @@ const EXTRA_TECH_TREE_NODES = [
     effectValue: 0.13
   },
   {
+    key: "industrial_standardization",
+    name: "산업 표준화",
+    tier: 5,
+    category: "industry",
+    description: "조선 공정 표준화를 통해 생산 비용을 추가로 낮춥니다.",
+    metalCost: 22400,
+    fuelCost: 14200,
+    researchTime: 6100,
+    requires: ["shipyard_parallel_1", "population_registry_1"],
+    exclusiveGroup: "",
+    effectType: "buff_build_cost_pct",
+    effectValue: 0.1
+  },
+  {
+    key: "frontier_harvest_network",
+    name: "변경 채굴망 확장",
+    tier: 6,
+    category: "industry",
+    description: "점령지 자원 처리량을 높여 전체 자원 수급을 강화합니다.",
+    metalCost: 29600,
+    fuelCost: 18800,
+    researchTime: 7600,
+    requires: ["resource_refinery_grid"],
+    exclusiveGroup: "",
+    effectType: "buff_resource_pct",
+    effectValue: 0.16
+  },
+  {
+    key: "fleet_command_reform",
+    name: "함대 지휘 체계 개혁",
+    tier: 7,
+    category: "tactics",
+    description: "실전 지휘 체계를 고도화해 전체 함대 전투 효율을 올립니다.",
+    metalCost: 36200,
+    fuelCost: 24500,
+    researchTime: 8700,
+    requires: ["maneuver_warp_coordination", "unlock_carrier"],
+    exclusiveGroup: "",
+    effectType: "buff_combat_pct",
+    effectValue: 0.14
+  },
+  {
+    key: "deep_space_logistics",
+    name: "심우주 보급로",
+    tier: 7,
+    category: "engine",
+    description: "장거리 이동 최적화를 통해 기동 보너스를 추가 확보합니다.",
+    metalCost: 35400,
+    fuelCost: 23800,
+    researchTime: 8600,
+    requires: ["maneuver_warp_coordination", "unlock_carrier"],
+    exclusiveGroup: "",
+    effectType: "buff_movement_pct",
+    effectValue: 0.12
+  },
+  {
+    key: "shipyard_parallel_2",
+    name: "조선소 병렬화 II",
+    tier: 8,
+    category: "industry",
+    description: "생산 라인을 추가 확장해 대량 생산 능력을 강화합니다.",
+    metalCost: 54800,
+    fuelCost: 42800,
+    researchTime: 12600,
+    requires: ["supercapital_logistics", "shipyard_parallel_1"],
+    exclusiveGroup: "",
+    effectType: "buff_build_lines_flat",
+    effectValue: 1
+  },
+  {
+    key: "population_registry_2",
+    name: "정착민 등록망 II",
+    tier: 8,
+    category: "industry",
+    description: "함선 운용 인구를 대폭 확충해 보유 상한을 늘립니다.",
+    metalCost: 56200,
+    fuelCost: 43600,
+    researchTime: 12800,
+    requires: ["population_registry_1", "supercapital_logistics"],
+    exclusiveGroup: "",
+    effectType: "buff_population_cap_flat",
+    effectValue: 180
+  },
+  {
+    key: "colony_governance_protocol",
+    name: "식민지 통치 프로토콜",
+    tier: 9,
+    category: "industry",
+    description: "점령지 통치 체계를 개선해 식민지 상한을 늘립니다.",
+    metalCost: 84800,
+    fuelCost: 66200,
+    researchTime: 15200,
+    requires: ["population_registry_2", "dreadnought_command_matrix"],
+    exclusiveGroup: "",
+    effectType: "buff_colony_cap_flat",
+    effectValue: 2
+  },
+  {
     key: "supercapital_logistics",
     name: "초주력 군수체계",
     tier: 8,
@@ -583,6 +681,17 @@ function normalizeTechNodeEconomy(node) {
   return tuned;
 }
 
+function normalizeTechNodeText(node) {
+  const tuned = { ...node };
+  if (String(tuned.effectType || "") === "unlock_component" && String(tuned.unlockKey || "")) {
+    const component = DEFAULT_COMPONENTS.find((item) => String(item.key || "") === String(tuned.unlockKey || ""));
+    const componentName = component ? String(component.name || tuned.unlockKey) : String(tuned.unlockKey);
+    tuned.name = `${componentName} 설계 연구`;
+    tuned.description = `${componentName} 모듈 사용을 해금합니다.`;
+  }
+  return tuned;
+}
+
 function getBaseTechNodes() {
   const tunedActive = ACTIVE_TECH_TREE_NODES.map((node) => {
     const override = TECH_NODE_KEY_OVERRIDES[String(node.key || "")];
@@ -601,6 +710,27 @@ function componentUnlockNodeKey(componentKey) {
     siege_artillery: "siege_artillery_suite"
   };
   return fixed[String(componentKey || "")] || `unlock_component_${String(componentKey || "")}`;
+}
+
+const COMPONENT_TECH_FOCUS_KEYS = new Set([
+  "gauss_battery",
+  "shield_generator",
+  "battle_computer",
+  "reactor_boost",
+  "adaptive_barrier",
+  "siege_artillery",
+  "spinal_cannon",
+  "antimatter_nozzle",
+  "phase_shield",
+  "command_uplink",
+  "titan_reactor_core",
+  "citadel_armor"
+]);
+
+function shouldCreateTechNodeForComponent(component) {
+  const key = String(component?.key || "");
+  const tier = componentTierByPower(Number(component?.power || 0));
+  return COMPONENT_TECH_FOCUS_KEYS.has(key) || tier >= 8;
 }
 
 function stableKeySpread(value) {
@@ -628,6 +758,7 @@ function buildAutoComponentTechNodes() {
 
   return DEFAULT_COMPONENTS
     .filter((component) => !basicKeys.has(String(component.key || "")))
+    .filter((component) => shouldCreateTechNodeForComponent(component))
     .filter((component) => !reserved.has(String(component.key || "")))
     .map((component) => {
       const power = Number(component.power || 0);
@@ -1127,7 +1258,7 @@ async function seedShipyardData() {
 
 async function seedTechTreeData() {
   const generatedNodes = buildAutoComponentTechNodes();
-  const allTechNodes = [...getBaseTechNodes(), ...generatedNodes];
+  const allTechNodes = [...getBaseTechNodes(), ...generatedNodes].map((node) => normalizeTechNodeText(node));
   const activeKeys = allTechNodes.map((node) => String(node.key));
   if (activeKeys.length) {
     const placeholders = activeKeys.map(() => "?").join(", ");
@@ -1808,13 +1939,35 @@ function tunedComponentForTier(baseComponent) {
   return component;
 }
 
+function getComponentTechUnlockKeySet() {
+  const techUnlocks = new Set(
+    getBaseTechNodes()
+      .filter((node) => String(node.effectType || "") === "unlock_component" && String(node.unlockKey || ""))
+      .map((node) => String(node.unlockKey || ""))
+  );
+  for (const component of DEFAULT_COMPONENTS) {
+    const key = String(component.key || "");
+    if (!key) continue;
+    if (techUnlocks.has(key)) continue;
+    if (shouldCreateTechNodeForComponent(component)) {
+      techUnlocks.add(key);
+    }
+  }
+  return techUnlocks;
+}
+
 function componentUnlockRequirement(component) {
   const basicKeys = new Set(["standard_engine", "light_railgun", "reinforced_armor", "cargo_module"]);
   const key = String(component?.key || "");
   if (basicKeys.has(key)) {
     return { type: "lab", level: 1 };
   }
-  return { type: "tech", key: componentUnlockNodeKey(key) };
+  const techManagedKeys = getComponentTechUnlockKeySet();
+  if (techManagedKeys.has(key)) {
+    return { type: "tech", key: componentUnlockNodeKey(key) };
+  }
+  const tier = componentTierByPower(Number(component?.power_cost || component?.power || 0));
+  return { type: "lab", level: Math.max(2, Math.min(10, tier)) };
 }
 
 function isUnlockedByResearch(requirement, research) {
