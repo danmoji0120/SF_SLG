@@ -294,31 +294,53 @@ const RESEARCH = {
   resource: {
     name: "\uc790\uc6d0 \uac1c\ubc1c",
     description: "\uae30\uc9c0\uc640 \uc810\ub839\uc9c0\uc758 \uc790\uc6d0 \uc0dd\uc0b0\ub7c9\uc744 \ub298\ub9bd\ub2c8\ub2e4.",
-    metalCost: 500,
-    fuelCost: 180,
-    metalGrowth: 1.7,
-    fuelGrowth: 1.55,
+    metalCost: 1400,
+    fuelCost: 700,
+    metalGrowth: 1.9,
+    fuelGrowth: 1.82,
     effectPerLevel: 0.05
   },
   logistics: {
     name: "\ubcf4\uae09 \ucd5c\uc801\ud654",
     description: "\ud568\uc120 \uc0dd\uc0b0 \uc790\uc6d0 \uc18c\ube44\ub97c \uc904\uc785\ub2c8\ub2e4.",
-    metalCost: 450,
-    fuelCost: 260,
-    metalGrowth: 1.65,
-    fuelGrowth: 1.6,
+    metalCost: 1300,
+    fuelCost: 840,
+    metalGrowth: 1.88,
+    fuelGrowth: 1.85,
     effectPerLevel: 0.03
   },
   tactics: {
     name: "\ud568\ub300 \uc804\uc220",
     description: "\uc804\ud22c \uc2dc \uc544\uad70 \ud568\ub300\uc758 \uacf5\uaca9\ub825\uc744 \ub298\ub9bd\ub2c8\ub2e4.",
-    metalCost: 650,
-    fuelCost: 320,
-    metalGrowth: 1.75,
-    fuelGrowth: 1.65,
+    metalCost: 1700,
+    fuelCost: 980,
+    metalGrowth: 1.92,
+    fuelGrowth: 1.86,
     effectPerLevel: 0.07
   }
 };
+
+const TECH_TREE_NODES = [
+  { key: "engine_1", name: "엔진 I", tier: 1, category: "engine", description: "기초 추진 제어. 함대 이동 보너스 +8%", metalCost: 1800, fuelCost: 900, researchTime: 600, requires: [], exclusiveGroup: "", effectType: "buff_movement_pct", effectValue: 0.08 },
+  { key: "armor_1", name: "장갑 I", tier: 1, category: "defense", description: "기초 장갑학. 함대 방어 보너스 +8%", metalCost: 1800, fuelCost: 900, researchTime: 600, requires: [], exclusiveGroup: "", effectType: "buff_defense_pct", effectValue: 0.08 },
+  { key: "industry_1", name: "채굴 I", tier: 1, category: "industry", description: "기초 산업학. 자원 생산 +10%", metalCost: 1700, fuelCost: 800, researchTime: 600, requires: [], exclusiveGroup: "", effectType: "buff_resource_pct", effectValue: 0.1 },
+
+  { key: "engine_overdrive", name: "고출력 엔진", tier: 2, category: "engine", description: "속도 강화, 연료 효율 저하. 이동 +15%", metalCost: 3600, fuelCost: 1900, researchTime: 1200, requires: ["engine_1"], exclusiveGroup: "engine_t2", effectType: "buff_movement_pct", effectValue: 0.15 },
+  { key: "engine_efficiency", name: "효율 엔진", tier: 2, category: "engine", description: "연료 효율 향상. 이동 +6%, 생산 연료비 절감", metalCost: 3400, fuelCost: 1700, researchTime: 1200, requires: ["engine_1"], exclusiveGroup: "engine_t2", effectType: "buff_build_cost_pct", effectValue: 0.06 },
+  { key: "armor_fort", name: "강화 장갑", tier: 2, category: "defense", description: "방어 교리 확장. 방어 +14%", metalCost: 3800, fuelCost: 1800, researchTime: 1200, requires: ["armor_1"], exclusiveGroup: "defense_t2", effectType: "buff_defense_pct", effectValue: 0.14 },
+  { key: "shield_system", name: "실드 시스템", tier: 2, category: "defense", description: "실드 기반 방어체계. 체력/방어 계열 강화", metalCost: 3800, fuelCost: 2100, researchTime: 1200, requires: ["armor_1"], exclusiveGroup: "defense_t2", effectType: "unlock_component", effectValue: 0, unlockKey: "shield_generator" },
+
+  { key: "doctrine_intercept", name: "요격 교리", tier: 3, category: "tactics", description: "기동전술 심화. 전투 +12%, 요격함급 해금", metalCost: 6200, fuelCost: 3400, researchTime: 2200, requires: ["engine_overdrive"], exclusiveGroup: "doctrine_t3", effectType: "unlock_hull", effectValue: 0, unlockKey: "destroyer" },
+  { key: "doctrine_mobility", name: "기동전 교리", tier: 3, category: "tactics", description: "선제 기동 강화. 이동 +18%, 전투 +6%", metalCost: 6200, fuelCost: 3400, researchTime: 2200, requires: ["engine_efficiency"], exclusiveGroup: "doctrine_t3", effectType: "buff_movement_pct", effectValue: 0.18 },
+  { key: "doctrine_siege", name: "공성 교리", tier: 3, category: "weapon", description: "중화력 교리. 전투 +16%, 전함급 해금", metalCost: 7000, fuelCost: 4200, researchTime: 2400, requires: ["armor_fort"], exclusiveGroup: "siege_t3", effectType: "unlock_hull", effectValue: 0, unlockKey: "battleship" },
+  { key: "doctrine_guard", name: "방어 교리", tier: 3, category: "defense", description: "방어 특화. 방어 +20%, 기지 방어 강화", metalCost: 6800, fuelCost: 3900, researchTime: 2400, requires: ["shield_system"], exclusiveGroup: "siege_t3", effectType: "buff_defense_pct", effectValue: 0.2 },
+
+  { key: "unlock_monitor", name: "모니터함 설계", tier: 4, category: "special", description: "특화 방어 함급 모니터 해금", metalCost: 11000, fuelCost: 6800, researchTime: 3600, requires: ["doctrine_siege"], exclusiveGroup: "", effectType: "unlock_hull", effectValue: 0, unlockKey: "monitor" },
+  { key: "advanced_shield_module", name: "고급 실드 모듈", tier: 4, category: "special", description: "고급 실드 계열 모듈 해금", metalCost: 10400, fuelCost: 7200, researchTime: 3600, requires: ["doctrine_guard"], exclusiveGroup: "", effectType: "unlock_component", effectValue: 0, unlockKey: "adaptive_barrier" },
+  { key: "unlock_carrier", name: "항공모함 운용", tier: 4, category: "special", description: "항공모함 선체 해금", metalCost: 12000, fuelCost: 8200, researchTime: 3800, requires: ["doctrine_intercept"], exclusiveGroup: "", effectType: "unlock_hull", effectValue: 0, unlockKey: "carrier" },
+  { key: "unlock_dreadnought", name: "드레드노트 공학", tier: 4, category: "special", description: "드레드노트 선체 해금", metalCost: 14500, fuelCost: 9800, researchTime: 4200, requires: ["doctrine_siege"], exclusiveGroup: "", effectType: "unlock_hull", effectValue: 0, unlockKey: "dreadnought" },
+  { key: "unlock_titan", name: "타이탄 프로젝트", tier: 4, category: "special", description: "타이탄 선체 해금", metalCost: 18000, fuelCost: 13000, researchTime: 5200, requires: ["unlock_dreadnought"], exclusiveGroup: "", effectType: "unlock_hull", effectValue: 0, unlockKey: "titan" }
+];
 
 const CITY_BUILDINGS = {
   shipyard: {
@@ -371,9 +393,21 @@ const CITY_BUILDINGS = {
 const ADMIRAL_POOL = [
   { name: "\uc720\ub098 \ubc14\uc2a4", rarity: "R", combatBonus: 0.12, resourceBonus: 0.06, costBonus: 0.04 },
   { name: "\uce74\uc774 \ubca0\ub974\ub2e8", rarity: "R", combatBonus: 0.1, resourceBonus: 0.04, costBonus: 0.06 },
+  { name: "\ub9c8\ub77c \ud3f0", rarity: "R", combatBonus: 0.11, resourceBonus: 0.07, costBonus: 0.03 },
+  { name: "\uc81c\ud06c \uc5d0\ub9ac\uc628", rarity: "R", combatBonus: 0.09, resourceBonus: 0.05, costBonus: 0.07 },
+  { name: "\ud5e4\ub77c \ub2cc\uc2a4", rarity: "R", combatBonus: 0.13, resourceBonus: 0.03, costBonus: 0.05 },
+  { name: "\ud1a0\ub9ac \uc5d8\ub9b0", rarity: "R", combatBonus: 0.1, resourceBonus: 0.08, costBonus: 0.04 },
   { name: "\ub9ac\uc624 \uc0e4\ub974", rarity: "SR", combatBonus: 0.2, resourceBonus: 0.09, costBonus: 0.08 },
   { name: "\uc138\ub77c \uc624\ub974\ud2f4", rarity: "SR", combatBonus: 0.16, resourceBonus: 0.18, costBonus: 0.06 },
+  { name: "\uc774\ubca0\ub978 \ud558\uc6b4\ub4dc", rarity: "SR", combatBonus: 0.24, resourceBonus: 0.1, costBonus: 0.08 },
+  { name: "\ub9ac\uc2a4 \ucf54\ubd88", rarity: "SR", combatBonus: 0.19, resourceBonus: 0.16, costBonus: 0.07 },
+  { name: "\ucf54\ub85c \ube14\ub79c\ud2b8", rarity: "SR", combatBonus: 0.22, resourceBonus: 0.11, costBonus: 0.1 },
+  { name: "\ud0a4\uc5d8 \ud2b8\ub808\uc2a4", rarity: "SR", combatBonus: 0.21, resourceBonus: 0.13, costBonus: 0.09 },
   { name: "\uc544\ub378 \ud06c\ub85c\uc2a4", rarity: "SSR", combatBonus: 0.34, resourceBonus: 0.2, costBonus: 0.14 }
+  ,{ name: "\ub77c\uc6b0\ub77c \ud06c\ub808\uc2a4", rarity: "SSR", combatBonus: 0.31, resourceBonus: 0.24, costBonus: 0.12 }
+  ,{ name: "\uce74\ub9ac\uc2a4 \ud544\ub4dc", rarity: "SSR", combatBonus: 0.36, resourceBonus: 0.16, costBonus: 0.15 }
+  ,{ name: "\ub3c4\ubbf8\ub2c9 \ub808\uc988", rarity: "SSR", combatBonus: 0.33, resourceBonus: 0.22, costBonus: 0.13 }
+  ,{ name: "\uc138\ub9ac\uc2a4 \ub8ec", rarity: "SSR", combatBonus: 0.29, resourceBonus: 0.28, costBonus: 0.1 }
 ];
 
 const DEFAULT_HULLS = [
@@ -749,6 +783,56 @@ async function seedShipyardData() {
   }
 }
 
+async function seedTechTreeData() {
+  for (const node of TECH_TREE_NODES) {
+    await run(
+      `
+        INSERT OR IGNORE INTO tech_nodes
+          (key, name, tier, category, description, metal_cost, fuel_cost, research_time, requires_json, exclusive_group, effect_type, effect_value, unlock_key)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+      [
+        node.key,
+        node.name,
+        node.tier,
+        node.category,
+        node.description,
+        node.metalCost,
+        node.fuelCost,
+        node.researchTime,
+        JSON.stringify(node.requires || []),
+        node.exclusiveGroup || "",
+        node.effectType || "",
+        Number(node.effectValue || 0),
+        node.unlockKey || ""
+      ]
+    );
+    await run(
+      `
+        UPDATE tech_nodes
+        SET name = ?, tier = ?, category = ?, description = ?, metal_cost = ?, fuel_cost = ?, research_time = ?,
+            requires_json = ?, exclusive_group = ?, effect_type = ?, effect_value = ?, unlock_key = ?
+        WHERE key = ?
+      `,
+      [
+        node.name,
+        node.tier,
+        node.category,
+        node.description,
+        node.metalCost,
+        node.fuelCost,
+        node.researchTime,
+        JSON.stringify(node.requires || []),
+        node.exclusiveGroup || "",
+        node.effectType || "",
+        Number(node.effectValue || 0),
+        node.unlockKey || "",
+        node.key
+      ]
+    );
+  }
+}
+
 function randomBaseCoordinate() {
   return Math.floor(40 + Math.random() * (MAP_MAX_X - 80));
 }
@@ -1105,6 +1189,44 @@ async function initDb() {
       FOREIGN KEY (zone_id) REFERENCES neutral_zones(id)
     )
   `);
+  await run(`
+    CREATE TABLE IF NOT EXISTS tech_nodes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      key TEXT NOT NULL UNIQUE,
+      name TEXT NOT NULL,
+      tier INTEGER NOT NULL,
+      category TEXT NOT NULL,
+      description TEXT NOT NULL,
+      metal_cost INTEGER NOT NULL DEFAULT 0,
+      fuel_cost INTEGER NOT NULL DEFAULT 0,
+      research_time INTEGER NOT NULL DEFAULT 60,
+      requires_json TEXT NOT NULL DEFAULT '[]',
+      exclusive_group TEXT NOT NULL DEFAULT '',
+      effect_type TEXT NOT NULL DEFAULT '',
+      effect_value REAL NOT NULL DEFAULT 0,
+      unlock_key TEXT NOT NULL DEFAULT ''
+    )
+  `);
+  await run(`
+    CREATE TABLE IF NOT EXISTS user_tech (
+      user_id INTEGER NOT NULL,
+      tech_key TEXT NOT NULL,
+      researched_at INTEGER NOT NULL,
+      PRIMARY KEY (user_id, tech_key),
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    )
+  `);
+  await run(`
+    CREATE TABLE IF NOT EXISTS tech_queue (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      tech_key TEXT NOT NULL,
+      start_time INTEGER NOT NULL,
+      end_time INTEGER NOT NULL,
+      status TEXT NOT NULL DEFAULT 'researching',
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    )
+  `);
 
   const userColumns = await all("PRAGMA table_info(users)");
   const userColumnNames = userColumns.map((column) => column.name);
@@ -1126,6 +1248,7 @@ async function initDb() {
   await seedNeutralZones();
   await normalizeZoneOwnership();
   await seedShipyardData();
+  await seedTechTreeData();
 
   const users = await all("SELECT id FROM users");
   for (const user of users) {
@@ -1214,16 +1337,16 @@ function ownerColorHex(ownerId) {
 
 function hullUnlockRequirement(hullKey) {
   const map = {
-    corvette: { type: "resource", level: 0 },
-    destroyer: { type: "resource", level: 2 },
-    cruiser: { type: "resource", level: 3 },
-    monitor: { type: "logistics", level: 3 },
-    battleship: { type: "logistics", level: 4 },
-    carrier: { type: "tactics", level: 4 },
-    dreadnought: { type: "resource", level: 6 },
-    titan: { type: "tactics", level: 7 }
+    corvette: { type: "lab", level: 1 },
+    destroyer: { type: "lab", level: 2 },
+    cruiser: { type: "lab", level: 3 },
+    monitor: { type: "tech", key: "unlock_monitor" },
+    battleship: { type: "tech", key: "doctrine_siege" },
+    carrier: { type: "tech", key: "unlock_carrier" },
+    dreadnought: { type: "tech", key: "unlock_dreadnought" },
+    titan: { type: "tech", key: "unlock_titan" }
   };
-  return map[hullKey] || { type: "resource", level: 0 };
+  return map[hullKey] || { type: "lab", level: 1 };
 }
 
 function componentTierByPower(powerCost) {
@@ -1237,24 +1360,37 @@ function componentTierByPower(powerCost) {
 function componentUnlockRequirement(component) {
   const basicKeys = new Set(["standard_engine", "light_railgun", "reinforced_armor", "cargo_module"]);
   if (String(component.key || "") === "reactor_boost") {
-    return { type: "logistics", level: 4 };
+    return { type: "tech", key: "engine_overdrive" };
   }
   if (basicKeys.has(String(component.key || ""))) {
-    return { type: "resource", level: 0 };
+    return { type: "lab", level: 1 };
+  }
+  if (String(component.key || "") === "shield_generator") {
+    return { type: "tech", key: "shield_system" };
+  }
+  if (String(component.key || "") === "adaptive_barrier") {
+    return { type: "tech", key: "advanced_shield_module" };
   }
   const category = String(component.category || "");
   const tier = componentTierByPower(component.power_cost);
-  if (tier <= 1) return { type: "resource", level: 1 };
+  if (tier <= 1) return { type: "lab", level: 1 };
   if (tier === 2) {
-    return { type: category === "weapon" || category === "defense" ? "tactics" : "logistics", level: 3 };
+    return { type: "lab", level: category === "weapon" || category === "defense" ? 2 : 1 };
   }
   if (tier === 3) {
-    return { type: category === "weapon" || category === "defense" ? "tactics" : "logistics", level: 5 };
+    return { type: "lab", level: 3 };
   }
-  return { type: "resource", level: 7 };
+  return { type: "lab", level: 4 };
 }
 
 function isUnlockedByResearch(requirement, research) {
+  if (String(requirement?.type || "") === "tech") {
+    const keys = Array.isArray(research?.techKeys) ? research.techKeys : [];
+    return keys.includes(String(requirement.key || ""));
+  }
+  if (String(requirement?.type || "") === "lab") {
+    return Number(research?.labLevel || 1) >= Number(requirement.level || 1);
+  }
   const level = Number(research?.[requirement.type] || 0);
   return level >= Number(requirement.level || 0);
 }
@@ -1307,18 +1443,17 @@ async function getSpeedupState(userId, category) {
 
 function speedupPenaltyMultiplier(streak) {
   const s = Math.max(0, Number(streak || 0));
-  if (s >= 15) return 5.5;
-  if (s >= 12) return 4.2;
-  if (s >= 9) return 3.3;
-  if (s >= 6) return 2.4;
-  if (s >= 3) return 1.7;
+  if (s >= 20) return 1.1;
+  if (s >= 12) return 1.08;
+  if (s >= 7) return 1.06;
+  if (s >= 3) return 1.03;
   return 1.0;
 }
 
 async function consumeSpeedup(userId, category, amount) {
   const state = await getSpeedupState(userId, category);
   const now = Date.now();
-  const resetWindowMs = 30 * 60 * 1000;
+  const resetWindowMs = 10 * 60 * 1000;
   const activeStreak = now - state.lastUsedAt > resetWindowMs ? 0 : state.streak;
   const multiplier = speedupPenaltyMultiplier(activeStreak);
   const resourcePerSecond = Math.max(1, Math.ceil(SPEEDUP_RESOURCE_PER_SECOND * multiplier));
@@ -1356,6 +1491,53 @@ function cityUpgradeCost(buildingKey, level) {
   };
 }
 
+function cityBonusesFromLevels(levels) {
+  return {
+    baseMetalFlat: levels.government * 3 + Math.floor(levels.housing * 0.8),
+    baseFuelFlat: levels.government * 2 + Math.floor(levels.research_lab * 0.6),
+    colonyCap: 2 + levels.government * 2,
+    researchCap: 2 + levels.research_lab * 2,
+    populationCap: 40 + levels.housing * 24,
+    buildLines: 1 + Math.floor((levels.shipyard - 1) / 2),
+    buildTimeMultiplier: Math.max(0.2, 1 - levels.shipyard * 0.1),
+    buildCostMultiplier: Math.max(0.45, 1 - levels.shipyard * 0.02),
+    combatBonus: levels.tactical_center * 0.08,
+    movementBonus: levels.tactical_center * 0.03,
+    fleetSlotLimit: Math.min(5, 3 + Math.floor((levels.tactical_center - 1) / 2))
+  };
+}
+
+function cityBuildingEffectSummary(key, levels, bonuses, nextBonuses) {
+  if (key === "shipyard") {
+    return {
+      current: `\uc81c\uc791\ub77c\uc778 ${bonuses.buildLines}, \uc81c\uc791\uc2dc\uac04 x${bonuses.buildTimeMultiplier.toFixed(2)}, \uc81c\uc791\ube44\uc6a9 x${bonuses.buildCostMultiplier.toFixed(2)}`,
+      next: `\uc81c\uc791\ub77c\uc778 ${nextBonuses.buildLines}, \uc81c\uc791\uc2dc\uac04 x${nextBonuses.buildTimeMultiplier.toFixed(2)}, \uc81c\uc791\ube44\uc6a9 x${nextBonuses.buildCostMultiplier.toFixed(2)}`
+    };
+  }
+  if (key === "government") {
+    return {
+      current: `\uae30\uc9c0\uc790\uc6d0 +\uae08\uc18d ${bonuses.baseMetalFlat} / +\uc5f0\ub8cc ${bonuses.baseFuelFlat}, \uc2dd\ubbfc\uc9c0 \uc0c1\ud55c ${bonuses.colonyCap}`,
+      next: `\uae30\uc9c0\uc790\uc6d0 +\uae08\uc18d ${nextBonuses.baseMetalFlat} / +\uc5f0\ub8cc ${nextBonuses.baseFuelFlat}, \uc2dd\ubbfc\uc9c0 \uc0c1\ud55c ${nextBonuses.colonyCap}`
+    };
+  }
+  if (key === "housing") {
+    return {
+      current: `\ud568\uc120 \ubcf4\uc720 \uc0c1\ud55c ${bonuses.populationCap}, \uae30\uc9c0 \uae08\uc18d +${bonuses.baseMetalFlat}`,
+      next: `\ud568\uc120 \ubcf4\uc720 \uc0c1\ud55c ${nextBonuses.populationCap}, \uae30\uc9c0 \uae08\uc18d +${nextBonuses.baseMetalFlat}`
+    };
+  }
+  if (key === "research_lab") {
+    return {
+      current: `\uc5f0\uad6c \uc0c1\ud55c ${bonuses.researchCap}, \uae30\uc9c0 \uc5f0\ub8cc +${bonuses.baseFuelFlat}`,
+      next: `\uc5f0\uad6c \uc0c1\ud55c ${nextBonuses.researchCap}, \uae30\uc9c0 \uc5f0\ub8cc +${nextBonuses.baseFuelFlat}`
+    };
+  }
+  return {
+    current: `\uc804\ud22c +${Math.round(bonuses.combatBonus * 100)}%, \uc774\ub3d9 +${Math.round(bonuses.movementBonus * 100)}%, \ud568\ub300\uc2ac\ub86f ${bonuses.fleetSlotLimit}`,
+    next: `\uc804\ud22c +${Math.round(nextBonuses.combatBonus * 100)}%, \uc774\ub3d9 +${Math.round(nextBonuses.movementBonus * 100)}%, \ud568\ub300\uc2ac\ub86f ${nextBonuses.fleetSlotLimit}`
+  };
+}
+
 async function getCityState(userId) {
   let row = await get(
     "SELECT shipyard_level, government_level, housing_level, research_lab_level, tactical_center_level FROM city_buildings WHERE user_id = ?",
@@ -1382,31 +1564,26 @@ async function getCityState(userId) {
     research_lab: Math.max(1, Number(row.research_lab_level || 1)),
     tactical_center: Math.max(1, Number(row.tactical_center_level || 1))
   };
-  const bonuses = {
-    baseMetalFlat: levels.government * 3 + Math.floor(levels.housing * 0.8),
-    baseFuelFlat: levels.government * 2 + Math.floor(levels.research_lab * 0.6),
-    colonyCap: 2 + levels.government * 2,
-    researchCap: 2 + levels.research_lab * 2,
-    populationCap: 40 + levels.housing * 24,
-    buildLines: 1 + Math.floor((levels.shipyard - 1) / 2),
-    buildTimeMultiplier: Math.max(0.2, 1 - levels.shipyard * 0.1),
-    buildCostMultiplier: Math.max(0.45, 1 - levels.shipyard * 0.02),
-    combatBonus: levels.tactical_center * 0.08,
-    movementBonus: levels.tactical_center * 0.03,
-    fleetSlotLimit: Math.min(5, 3 + Math.floor((levels.tactical_center - 1) / 2))
-  };
+  const bonuses = cityBonusesFromLevels(levels);
+  const colonyRow = await get("SELECT COUNT(*) AS cnt FROM occupied_zones WHERE user_id = ?", [userId]);
+  const colonyCount = Number(colonyRow?.cnt || 0);
   const buildingList = Object.values(CITY_BUILDINGS).map((item) => {
     const level = levels[item.key];
+    const nextLevels = { ...levels, [item.key]: level + 1 };
+    const nextBonuses = cityBonusesFromLevels(nextLevels);
+    const effect = cityBuildingEffectSummary(item.key, levels, bonuses, nextBonuses);
     return {
       key: item.key,
       name: item.name,
       description: item.description,
       level,
+      currentEffect: effect.current,
+      nextEffect: effect.next,
       nextCost: cityUpgradeCost(item.key, level + 1)
     };
   });
 
-  return { levels, bonuses, buildings: buildingList };
+  return { levels, bonuses, colonyCount, buildings: buildingList };
 }
 
 async function ensureFleetGroups(userId) {
@@ -1603,20 +1780,140 @@ async function getProductionRates(userId) {
 }
 
 async function getResearch(userId) {
-  let row = await get("SELECT * FROM research WHERE user_id = ?", [userId]);
-  if (!row) {
-    await run(
-      "INSERT INTO research (user_id, resource_level, logistics_level, tactics_level) VALUES (?, 0, 0, 0)",
-      [userId]
-    );
-    row = await get("SELECT * FROM research WHERE user_id = ?", [userId]);
+  await processTechQueueForUser(userId);
+  const city = await getCityState(userId);
+  const govLevel = Number(city?.levels?.government || 1);
+  const techRows = await all("SELECT tech_key FROM user_tech WHERE user_id = ?", [userId]);
+  const techKeys = techRows.map((row) => String(row.tech_key || ""));
+  return {
+    resource: govLevel,
+    logistics: govLevel,
+    tactics: govLevel,
+    labLevel: Number(city?.levels?.research_lab || 1),
+    techKeys
+  };
+}
+
+async function processTechQueueForUser(userId) {
+  const now = Date.now();
+  const due = await all(
+    "SELECT id, tech_key FROM tech_queue WHERE user_id = ? AND status = 'researching' AND end_time <= ? ORDER BY id ASC",
+    [userId, now]
+  );
+  for (const row of due) {
+    await run("BEGIN TRANSACTION");
+    try {
+      await run(
+        "INSERT OR IGNORE INTO user_tech (user_id, tech_key, researched_at) VALUES (?, ?, ?)",
+        [userId, row.tech_key, now]
+      );
+      await run("UPDATE tech_queue SET status = 'completed' WHERE id = ?", [row.id]);
+      await run("COMMIT");
+    } catch (err) {
+      await run("ROLLBACK");
+      throw err;
+    }
   }
+}
+
+async function getTechTreeState(userId) {
+  await processTechQueueForUser(userId);
+  const city = await getCityState(userId);
+  const labLevel = Number(city?.levels?.research_lab || 1);
+  const nodes = await all("SELECT * FROM tech_nodes ORDER BY tier ASC, id ASC");
+  const researchedRows = await all("SELECT tech_key FROM user_tech WHERE user_id = ?", [userId]);
+  const researchedSet = new Set(researchedRows.map((row) => String(row.tech_key || "")));
+  const active = await get(
+    "SELECT tech_key, start_time, end_time, status FROM tech_queue WHERE user_id = ? AND status = 'researching' ORDER BY id DESC LIMIT 1",
+    [userId]
+  );
+  const activeKey = active ? String(active.tech_key || "") : null;
+  const now = Date.now();
+
+  const parsedNodes = nodes.map((node) => {
+    let requires = [];
+    try {
+      requires = Array.isArray(JSON.parse(node.requires_json || "[]")) ? JSON.parse(node.requires_json || "[]") : [];
+    } catch (err) {
+      requires = [];
+    }
+    const isResearched = researchedSet.has(String(node.key));
+    const requirementMet = requires.every((key) => researchedSet.has(String(key)));
+    const sameBranchLocked = String(node.exclusive_group || "") && nodes.some((other) =>
+      String(other.exclusive_group || "") === String(node.exclusive_group || "") &&
+      String(other.key || "") !== String(node.key || "") &&
+      researchedSet.has(String(other.key || ""))
+    );
+    const tierUnlocked = labLevel >= Number(node.tier || 1);
+    const available = !isResearched && !sameBranchLocked && requirementMet && tierUnlocked && !activeKey;
+
+    return {
+      key: String(node.key),
+      name: String(node.name),
+      tier: Number(node.tier || 1),
+      category: String(node.category || ""),
+      description: String(node.description || ""),
+      cost: { metal: Number(node.metal_cost || 0), fuel: Number(node.fuel_cost || 0) },
+      researchTime: Number(node.research_time || 0),
+      requires: requires.map((key) => String(key)),
+      exclusiveGroup: String(node.exclusive_group || ""),
+      effectType: String(node.effect_type || ""),
+      effectValue: Number(node.effect_value || 0),
+      unlockKey: String(node.unlock_key || ""),
+      researched: isResearched,
+      lockedByBranch: sameBranchLocked,
+      available
+    };
+  });
 
   return {
-    resource: Number(row.resource_level || 0),
-    logistics: Number(row.logistics_level || 0),
-    tactics: Number(row.tactics_level || 0)
+    labLevel,
+    labTierUnlocked: Math.max(1, Math.min(4, labLevel)),
+    nodes: parsedNodes,
+    researchedKeys: Array.from(researchedSet),
+    activeResearch: active
+      ? {
+          key: String(active.tech_key || ""),
+          startTime: Number(active.start_time || 0),
+          endTime: Number(active.end_time || 0),
+          remainingSeconds: Math.max(0, Math.ceil((Number(active.end_time || 0) - now) / 1000))
+        }
+      : null
   };
+}
+
+async function getTechEffects(userId) {
+  await processTechQueueForUser(userId);
+  const rows = await all(
+    `
+      SELECT tn.effect_type, tn.effect_value, tn.unlock_key
+      FROM user_tech ut
+      JOIN tech_nodes tn ON tn.key = ut.tech_key
+      WHERE ut.user_id = ?
+    `,
+    [userId]
+  );
+  const effect = {
+    resourcePct: 0,
+    movementPct: 0,
+    combatPct: 0,
+    defensePct: 0,
+    buildCostPct: 0,
+    hulls: new Set(),
+    components: new Set()
+  };
+  for (const row of rows) {
+    const type = String(row.effect_type || "");
+    const value = Number(row.effect_value || 0);
+    if (type === "buff_resource_pct") effect.resourcePct += value;
+    if (type === "buff_movement_pct") effect.movementPct += value;
+    if (type === "buff_combat_pct") effect.combatPct += value;
+    if (type === "buff_defense_pct") effect.defensePct += value;
+    if (type === "buff_build_cost_pct") effect.buildCostPct += value;
+    if (type === "unlock_hull" && row.unlock_key) effect.hulls.add(String(row.unlock_key));
+    if (type === "unlock_component" && row.unlock_key) effect.components.add(String(row.unlock_key));
+  }
+  return effect;
 }
 
 async function getAssignedAdmiral(userId) {
@@ -1666,29 +1963,40 @@ async function addCommanderXp(userId, amount) {
 
 async function getPlayerBonuses(userId) {
   const research = await getResearch(userId);
+  const techEffects = await getTechEffects(userId);
   const admiral = await getAssignedAdmiral(userId);
   const commander = await getCommanderProgress(userId);
   const city = await getCityState(userId);
+  const govLevel = Number(city?.levels?.government || 1);
   const commanderResource = commander.level * 0.03;
   const commanderCost = commander.level * 0.015;
   const commanderCombat = commander.level * 0.04;
   const commanderMove = commander.level * 0.03;
+  const policyResource = govLevel * 0.04;
+  const policyCost = govLevel * 0.025;
+  const policyCombat = govLevel * 0.03;
+  const policyMovement = govLevel * 0.02;
   const resourceBonus =
-    research.resource * RESEARCH.resource.effectPerLevel +
+    policyResource +
+    techEffects.resourcePct +
     Number(admiral?.resourceBonus || 0) +
     commanderResource;
   const costBonus =
-    research.logistics * RESEARCH.logistics.effectPerLevel +
+    policyCost +
+    techEffects.buildCostPct +
     Number(admiral?.costBonus || 0) +
     commanderCost +
     Number(city.bonuses.buildCostMultiplier ? 1 - city.bonuses.buildCostMultiplier : 0);
   const combatBonus =
-    research.tactics * RESEARCH.tactics.effectPerLevel +
+    policyCombat +
+    techEffects.combatPct +
+    techEffects.defensePct * 0.35 +
     Number(admiral?.combatBonus || 0) +
     commanderCombat +
     Number(city.bonuses.combatBonus || 0);
   const movementBonus =
-    research.logistics * 0.05 +
+    policyMovement +
+    techEffects.movementPct +
     Number(admiral?.combatBonus || 0) * 0.5 +
     Number(admiral?.resourceBonus || 0) * 0.25 +
     commanderMove +
@@ -1701,6 +2009,15 @@ async function getPlayerBonuses(userId) {
     movementMultiplier: 1 + movementBonus,
     commander,
     research,
+    techEffects: {
+      resourcePct: techEffects.resourcePct,
+      movementPct: techEffects.movementPct,
+      combatPct: techEffects.combatPct,
+      defensePct: techEffects.defensePct,
+      buildCostPct: techEffects.buildCostPct,
+      unlockedHulls: Array.from(techEffects.hulls),
+      unlockedComponents: Array.from(techEffects.components)
+    },
     admiral: admiral || null,
     city
   };
@@ -1729,6 +2046,8 @@ function formatResearchState(research) {
 }
 
 function formatRequirementText(requirement) {
+  if (String(requirement?.type || "") === "tech") return `tech:${requirement.key}`;
+  if (String(requirement?.type || "") === "lab") return `lab Lv.${requirement.level}`;
   return `${requirement.type} Lv.${requirement.level}`;
 }
 
@@ -2037,7 +2356,7 @@ async function getOwnedShips(userId) {
       SELECT os.quantity, d.*
       FROM owned_ships os
       JOIN ship_designs d ON d.id = os.design_id
-      WHERE os.user_id = ?
+      WHERE os.user_id = ? AND os.quantity > 0
       ORDER BY os.id DESC
     `,
     [userId]
@@ -2651,6 +2970,55 @@ async function resolveMission(mission) {
       result: battle.result,
       title: `${zone.name} ${owner ? "\ud0c8\ucde8" : "\uc810\ub839"}`,
       log
+    };
+  }
+
+  if (mission.mission_type === "garrison") {
+    const zone = await get("SELECT id, name FROM neutral_zones WHERE id = ?", [mission.target_zone_id]);
+    if (!zone) {
+      return {
+        result: "failed",
+        title: "\uc8fc\ub454 \uc2e4\ud328",
+        log: ["[\uc8fc\ub454 \uc2e4\ud328] \ub300\uc0c1 \uac70\uc810\uc744 \ucc3e\uc744 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4."]
+      };
+    }
+    const owner = await get("SELECT user_id FROM occupied_zones WHERE zone_id = ?", [zone.id]);
+    if (!owner || Number(owner.user_id) !== Number(mission.user_id)) {
+      return {
+        result: "failed",
+        title: `${zone.name} \uc8fc\ub454`,
+        log: ["[\uc8fc\ub454 \uc2e4\ud328] \ud574\ub2f9 \uac70\uc810\uc740 \ub0b4 \uc810\ub839\uc9c0\uac00 \uc544\ub2d9\ub2c8\ub2e4."]
+      };
+    }
+
+    let fleet = [];
+    try {
+      fleet = cloneDesignFleet(JSON.parse(mission.attacker_fleet_json || "[]"));
+    } catch (err) {
+      fleet = [];
+    }
+    if (!hasDesignShips(fleet)) {
+      return {
+        result: "failed",
+        title: `${zone.name} \uc8fc\ub454`,
+        log: ["[\uc8fc\ub454 \uc2e4\ud328] \uc8fc\ub454 \ubaa9\ub85d\uc744 \ubc88\uc5ed\ud558\uc9c0 \ubabb\ud588\uc2b5\ub2c8\ub2e4."]
+      };
+    }
+
+    const compactShips = fleet.map((ship) => ({
+      designId: Number(ship.designId),
+      quantity: Number(ship.quantity || 0)
+    })).filter((ship) => Number.isInteger(ship.designId) && ship.designId > 0 && ship.quantity > 0);
+
+    await run(
+      "INSERT INTO zone_garrisons (user_id, zone_id, ship_plan_json, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(user_id, zone_id) DO UPDATE SET ship_plan_json = excluded.ship_plan_json, updated_at = excluded.updated_at",
+      [mission.user_id, zone.id, JSON.stringify(compactShips), Date.now()]
+    );
+
+    return {
+      result: "success",
+      title: `${zone.name} \uc8fc\ub454`,
+      log: [`[\uc8fc\ub454 \uc644\ub8cc] ${zone.name}\uc5d0 \ud568\ub300 \uc8fc\ub454 \ubc30\uce58\uac00 \uc644\ub8cc\ub418\uc5c8\uc2b5\ub2c8\ub2e4.`]
     };
   }
 
@@ -3729,6 +4097,80 @@ app.get("/zones/:id/garrison", requireAuth, async (req, res) => {
   }
 });
 
+app.post("/zones/:id/garrison/dispatch", requireAuth, async (req, res) => {
+  try {
+    const zoneId = Number.parseInt(req.params.id, 10);
+    const zone = await get("SELECT id, name, map_x, map_y FROM neutral_zones WHERE id = ?", [zoneId]);
+    if (!zone) return res.status(404).json({ error: "\uac70\uc810\uc744 \ucc3e\uc744 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4." });
+
+    const owner = await get("SELECT user_id FROM occupied_zones WHERE zone_id = ?", [zoneId]);
+    if (!owner || Number(owner.user_id) !== Number(req.user.id)) {
+      return res.status(403).json({ error: "\ub0b4 \uc810\ub839\uc9c0\uc5d0\ub9cc \uc8fc\ub454 \ucd9c\uaca9 \uac00\ub2a5\ud569\ub2c8\ub2e4." });
+    }
+    const activeMission = await get("SELECT id FROM missions WHERE user_id = ? AND status = 'traveling' LIMIT 1", [req.user.id]);
+    if (activeMission) {
+      return res.status(400).json({ error: "\uc774\ubbf8 \uc9c4\ud589 \uc911\uc778 \uc774\ub3d9/\ucd9c\uaca9 \uc784\ubb34\uac00 \uc788\uc2b5\ub2c8\ub2e4." });
+    }
+
+    const slot = Number.parseInt(req.body.fleetSlot, 10) || 1;
+    const bonuses = await getPlayerBonuses(req.user.id);
+    if (slot > Number(bonuses.city?.bonuses?.fleetSlotLimit || 3)) {
+      return res.status(400).json({ error: `\ud568\ub300 \uc2ac\ub86f ${slot}\uc740 \ud604\uc7ac \uc0ac\uc6a9 \ubd88\uac00\ud569\ub2c8\ub2e4.` });
+    }
+
+    const launch = await getLaunchFleetFromSlot(req.user.id, slot);
+    if (!hasDesignShips(launch.fleet)) {
+      return res.status(400).json({ error: "\ud574\ub2f9 \ud568\ub300\uc5d0 \uc8fc\ub454 \ucd9c\uaca9 \uac00\ub2a5\ud55c \ud568\uc120\uc774 \uc5c6\uc2b5\ub2c8\ub2e4." });
+    }
+
+    const compactShips = launch.fleet
+      .map((ship) => ({ designId: Number(ship.designId), quantity: Number(ship.quantity || 0) }))
+      .filter((ship) => Number.isInteger(ship.designId) && ship.designId > 0 && ship.quantity > 0);
+    const from = await ensureBase(req.user.id);
+    const to = { x: Number(zone.map_x), y: Number(zone.map_y) };
+    const fleetMoveMultiplier = 1 + Number(launch.admiral?.resourceBonus || 0) * 0.45;
+    const travelSeconds = travelTimeSecondsForDesignFleet(from, to, launch.fleet, {
+      movementMultiplier: bonuses.movementMultiplier * fleetMoveMultiplier
+    });
+    const attackerShipCount = launch.fleet.reduce((sum, ship) => sum + Number(ship.quantity || 0), 0);
+    const attackerPower = Math.floor(designFleetPower(launch.fleet) * bonuses.combatMultiplier * (1 + Number(launch.admiral?.combatBonus || 0) * 0.9));
+    const now = Date.now();
+    await run(
+      `
+        INSERT INTO missions
+          (user_id, mission_type, target_zone_id, target_name, from_x, from_y, to_x, to_y,
+           started_at, arrive_at, status, attacker_power, attacker_ship_count,
+           attacker_fleet_json, attacker_fleet_slot, attacker_admiral_id)
+        VALUES (?, 'garrison', ?, ?, ?, ?, ?, ?, ?, ?, 'traveling', ?, ?, ?, ?, ?)
+      `,
+      [
+        req.user.id,
+        zone.id,
+        `${zone.name} \uc8fc\ub454`,
+        from.x,
+        from.y,
+        to.x,
+        to.y,
+        now,
+        now + (travelSeconds * 1000),
+        attackerPower,
+        attackerShipCount,
+        JSON.stringify(compactShips),
+        slot,
+        launch.admiral?.id || null
+      ]
+    );
+
+    return res.json({
+      message: `${zone.name} \uc8fc\ub454 \ucd9c\ubc1c. \uc608\uc0c1 \uc774\ub3d9 ${travelSeconds}\ucd08`,
+      activeMissions: await getActiveMissions(req.user.id)
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "\uc8fc\ub454 \ucd9c\uaca9 \ucc98\ub9ac \uc911 \uc624\ub958\uac00 \ubc1c\uc0dd\ud588\uc2b5\ub2c8\ub2e4." });
+  }
+});
+
 app.post("/zones/:id/garrison", requireAuth, async (req, res) => {
   try {
     const zoneId = Number.parseInt(req.params.id, 10);
@@ -3931,6 +4373,113 @@ app.post("/research/:type/upgrade", requireAuth, async (req, res) => {
   } catch (err) {
     console.error(err);
     return res.status(500).json({ error: "\uc5f0\uad6c \uc5c5\uadf8\ub808\uc774\ub4dc \uc911 \uc624\ub958\uac00 \ubc1c\uc0dd\ud588\uc2b5\ub2c8\ub2e4." });
+  }
+});
+
+app.get("/tech-tree", requireAuth, async (req, res) => {
+  try {
+    const tree = await getTechTreeState(req.user.id);
+    const bonuses = await getPlayerBonuses(req.user.id);
+    return res.json({
+      mode: "tech_tree",
+      labLevel: tree.labLevel,
+      labTierUnlocked: tree.labTierUnlocked,
+      activeResearch: tree.activeResearch,
+      nodes: tree.nodes,
+      policies: {
+        source: "government",
+        governmentLevel: Number(bonuses.city?.levels?.government || 1),
+        resourceMultiplier: bonuses.resourceMultiplier,
+        buildCostMultiplier: bonuses.buildCostMultiplier,
+        combatMultiplier: bonuses.combatMultiplier,
+        movementMultiplier: bonuses.movementMultiplier
+      }
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "\ud14c\ud06c\ud2b8\ub9ac \uc870\ud68c \uc911 \uc624\ub958\uac00 \ubc1c\uc0dd\ud588\uc2b5\ub2c8\ub2e4." });
+  }
+});
+
+app.post("/tech-tree/:key/start", requireAuth, async (req, res) => {
+  try {
+    const key = String(req.params.key || "").trim();
+    const node = await get("SELECT * FROM tech_nodes WHERE key = ?", [key]);
+    if (!node) return res.status(404).json({ error: "\uae30\uc220 \ub178\ub4dc\ub97c \ucc3e\uc744 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4." });
+
+    const tree = await getTechTreeState(req.user.id);
+    if (tree.activeResearch) {
+      return res.status(400).json({ error: "\uc774\ubbf8 \uc9c4\ud589 \uc911\uc778 \uc5f0\uad6c\uac00 \uc788\uc2b5\ub2c8\ub2e4." });
+    }
+    if (Number(tree.labLevel || 1) < Number(node.tier || 1)) {
+      return res.status(400).json({ error: `\uc5f0\uad6c\uc18c Lv.${Number(node.tier || 1)} \uc774\uc0c1\uc5d0\uc11c\ub9cc \uc2dc\uc791 \uac00\ub2a5\ud569\ub2c8\ub2e4.` });
+    }
+    if ((tree.researchedKeys || []).includes(key)) {
+      return res.status(400).json({ error: "\uc774\ubbf8 \uc644\ub8cc\ub41c \uae30\uc220\uc785\ub2c8\ub2e4." });
+    }
+    const requires = (() => {
+      try {
+        const parsed = JSON.parse(node.requires_json || "[]");
+        return Array.isArray(parsed) ? parsed.map((v) => String(v)) : [];
+      } catch (err) {
+        return [];
+      }
+    })();
+    if (!requires.every((reqKey) => (tree.researchedKeys || []).includes(reqKey))) {
+      return res.status(400).json({ error: "\uc120\ud589 \uae30\uc220\uc774 \ucda9\uc871\ub418\uc9c0 \uc54a\uc558\uc2b5\ub2c8\ub2e4." });
+    }
+    if (String(node.exclusive_group || "")) {
+      const sameGroup = await all("SELECT key FROM tech_nodes WHERE exclusive_group = ? AND key != ?", [String(node.exclusive_group), key]);
+      if (sameGroup.some((item) => (tree.researchedKeys || []).includes(String(item.key)))) {
+        return res.status(400).json({ error: "\ud574\ub2f9 \ubd84\uae30\uc5d0\uc11c\ub294 \ub2e4\ub978 \uae30\uc220\uc744 \uc774\ubbf8 \uc120\ud0dd\ud588\uc2b5\ub2c8\ub2e4." });
+      }
+    }
+
+    const cost = { metal: Number(node.metal_cost || 0), fuel: Number(node.fuel_cost || 0) };
+    const state = await getUpdatedResources(req.user.id);
+    if (Number(state.resources.metal || 0) < cost.metal || Number(state.resources.fuel || 0) < cost.fuel) {
+      return res.status(400).json({ error: `\uc790\uc6d0\uc774 \ubd80\uc871\ud569\ub2c8\ub2e4. \ud544\uc694: \uae08\uc18d ${cost.metal}, \uc5f0\ub8cc ${cost.fuel}` });
+    }
+
+    const now = Date.now();
+    const end = now + (Math.max(30, Number(node.research_time || 60)) * 1000);
+    await run("BEGIN TRANSACTION");
+    try {
+      await run("UPDATE resources SET metal = metal - ?, fuel = fuel - ? WHERE user_id = ?", [cost.metal, cost.fuel, req.user.id]);
+      await run(
+        "INSERT INTO tech_queue (user_id, tech_key, start_time, end_time, status) VALUES (?, ?, ?, ?, 'researching')",
+        [req.user.id, key, now, end]
+      );
+      await run("COMMIT");
+    } catch (err) {
+      await run("ROLLBACK");
+      throw err;
+    }
+
+    const treeAfter = await getTechTreeState(req.user.id);
+    const nextState = await getUpdatedResources(req.user.id);
+    return res.json({
+      message: `${node.name} \uc5f0\uad6c\ub97c \uc2dc\uc791\ud588\uc2b5\ub2c8\ub2e4.`,
+      mode: "tech_tree",
+      labLevel: treeAfter.labLevel,
+      labTierUnlocked: treeAfter.labTierUnlocked,
+      activeResearch: treeAfter.activeResearch,
+      nodes: treeAfter.nodes,
+      resources: {
+        metal: nextState.resources.metal,
+        fuel: nextState.resources.fuel,
+        production: {
+          metalPerSecond: nextState.rates.metal,
+          fuelPerSecond: nextState.rates.fuel,
+          base: nextState.rates.base,
+          zones: nextState.rates.zones,
+          multiplier: nextState.rates.multiplier
+        }
+      }
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "\ud14c\ud06c\ud2b8\ub9ac \uc5f0\uad6c \uc2dc\uc791 \uc911 \uc624\ub958\uac00 \ubc1c\uc0dd\ud588\uc2b5\ub2c8\ub2e4." });
   }
 });
 
@@ -4206,6 +4755,33 @@ app.post("/admirals/:id/revive", requireAuth, async (req, res) => {
   } catch (err) {
     console.error(err);
     return res.status(500).json({ error: "제독 부활 중 오류가 발생했습니다." });
+  }
+});
+
+app.post("/admirals/:id/exile", requireAuth, async (req, res) => {
+  try {
+    const admiralId = Number.parseInt(req.params.id, 10);
+    const admiral = await get("SELECT id FROM admirals WHERE id = ? AND user_id = ?", [admiralId, req.user.id]);
+    if (!admiral) {
+      return res.status(404).json({ error: "\uc81c\ub3c5\uc744 \ucc3e\uc744 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4." });
+    }
+    await run("BEGIN TRANSACTION");
+    try {
+      await run("UPDATE fleet_groups SET admiral_id = NULL WHERE user_id = ? AND admiral_id = ?", [req.user.id, admiralId]);
+      await run("DELETE FROM admirals WHERE id = ? AND user_id = ?", [admiralId, req.user.id]);
+      await run("COMMIT");
+    } catch (err) {
+      await run("ROLLBACK");
+      throw err;
+    }
+    const admirals = await all(
+      "SELECT id, name, rarity, combat_bonus AS combatBonus, resource_bonus AS resourceBonus, cost_bonus AS costBonus, assigned, status, dead_at AS deadAt FROM admirals WHERE user_id = ? ORDER BY assigned DESC, status ASC, id DESC",
+      [req.user.id]
+    );
+    return res.json({ message: "\uc81c\ub3c5\uc744 \ucd94\ubc29\ud588\uc2b5\ub2c8\ub2e4.", admirals });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "\uc81c\ub3c5 \ucd94\ubc29 \ucc98\ub9ac \uc911 \uc624\ub958\uac00 \ubc1c\uc0dd\ud588\uc2b5\ub2c8\ub2e4." });
   }
 });
 

@@ -613,7 +613,7 @@ function renderResources(resources) {
 
   elements.productionView.textContent =
     `\ucd08\ub2f9 \uc0dd\uc0b0: \uae08\uc18d ${Number(production.metalPerSecond || base.metal)}, \uc5f0\ub8cc ${Number(production.fuelPerSecond || base.fuel)} ` +
-    `(\uae30\uc9c0 ${base.metal}/${base.fuel}, \uc810\ub839\uc9c0 ${zones.metal}/${zones.fuel}, \ubc30\uc728 x${Number(production.multiplier || 1).toFixed(2)})`;
+    `(\uae30\uc9c0 ${base.metal}/${base.fuel}, \uc810\ub839\uc9c0 ${zones.metal}/${zones.fuel}, \ubc30\uc728 x${Number(production.multiplier || 1).toFixed(2)}, \uc0dd\uc0b0\ub77c\uc778 ${Number(currentRatesState?.city?.bonuses?.buildLines || 1)})`;
   renderHud();
   startResourceRealtimeTick();
   renderIncomingAlerts(safeResources.incomingAlerts);
@@ -903,7 +903,7 @@ function getDesignById(id) {
 function renderSelectedProductionDesign() {
   const design = getDesignById(elements.productionDesignSelect.value);
   if (!design) {
-    elements.productionDesignDetail.textContent = "\uc124\uacc4\uc548\uc744 \uc120\ud0dd\ud558\uc138\uc694.";
+    elements.productionDesignDetail.textContent = `\uc124\uacc4\uc548\uc744 \uc120\ud0dd\ud558\uc138\uc694. (\uc0dd\uc0b0\ub77c\uc778 ${Number(cityState?.bonuses?.buildLines || 1)})`;
     elements.startProductionButton.disabled = true;
     return;
   }
@@ -919,6 +919,7 @@ function renderSelectedProductionDesign() {
       <span>\uae08\uc18d ${design.totalMetalCost}</span>
       <span>\uc5f0\ub8cc ${design.totalFuelCost}</span>
       <span>\uc0dd\uc0b0\uc2dc\uac04 ${formatBuildHours(design.totalBuildTime)}</span>
+      <span>\ud65c\uc131 \uc0dd\uc0b0\ub77c\uc778 ${Number(cityState?.bonuses?.buildLines || 1)}</span>
     </div>
   `;
 }
@@ -1137,6 +1138,58 @@ function renderResearch(data) {
   });
 }
 
+function renderResearchV2(data) {
+  const nodes = Array.isArray(data?.nodes) ? data.nodes : [];
+  if (!nodes.length) {
+    elements.researchView.textContent = "테크트리 정보를 불러오지 못했습니다.";
+    researchButtons = [];
+    return;
+  }
+  const active = data?.activeResearch;
+  const policy = data?.policies || {};
+  const tiers = [1, 2, 3, 4];
+  elements.researchView.innerHTML = `
+    <div class="growth-item">
+      <div>
+        <strong>정책(중앙정부 연동)</strong>
+        <span>중앙정부 Lv.${Number(policy.governmentLevel || 1)} / 자원 x${Number(policy.resourceMultiplier || 1).toFixed(2)} / 생산비 x${Number(policy.buildCostMultiplier || 1).toFixed(2)}</span>
+        <span>전투 x${Number(policy.combatMultiplier || 1).toFixed(2)} / 이동 x${Number(policy.movementMultiplier || 1).toFixed(2)}</span>
+        <span>연구소 Lv.${Number(data?.labLevel || 1)} (해금 티어 ${Number(data?.labTierUnlocked || 1)})</span>
+        <span>${active ? `진행중 연구: ${active.key} / 남은 ${formatSeconds(active.remainingSeconds || 0)}` : "진행중 연구 없음"}</span>
+      </div>
+    </div>
+    ${tiers.map((tier) => `
+      <div class="growth-item">
+        <div><strong>Tier ${tier}</strong></div>
+        <div class="tech-tree">
+          ${nodes.filter((node) => Number(node.tier) === tier).map((node) => {
+            const state = node.researched ? "완료" : node.lockedByBranch ? "분기잠금" : node.available ? "연구 가능" : "잠김";
+            const disabled = node.available ? "" : "disabled";
+            return `
+              <div class="tech-node level-${Math.min(5, tier + 1)}">
+                <div>
+                  <strong>${node.name}</strong>
+                  <p>${node.description}</p>
+                  <span>상태: ${state}</span>
+                  <span>비용: 금속 ${Number(node.cost?.metal || 0).toLocaleString()}, 연료 ${Number(node.cost?.fuel || 0).toLocaleString()}</span>
+                  <span>시간: ${formatSeconds(Number(node.researchTime || 0))}</span>
+                  <span>선행: ${(node.requires || []).length ? node.requires.join(", ") : "없음"}</span>
+                </div>
+                <button type="button" data-tech-start="${node.key}" ${disabled}>연구 시작</button>
+              </div>
+            `;
+          }).join("")}
+        </div>
+      </div>
+    `).join("")}
+  `;
+
+  researchButtons = Array.from(document.querySelectorAll("[data-tech-start]"));
+  researchButtons.forEach((button) => {
+    button.addEventListener("click", () => upgradeResearch(button.dataset.techStart));
+  });
+}
+
 function renderAdmirals(data) {
   const admirals = Array.isArray(data?.admirals) ? data.admirals : [];
   if (data?.settings?.admiralPolicy && elements.admiralPolicySelect) {
@@ -1162,6 +1215,7 @@ function renderAdmirals(data) {
           <div class="button-row">
             <button type="button" data-assign-admiral="${admiral.id}" ${assigned || isDead ? "disabled" : ""}>\ubc30\uce58</button>
             <button type="button" data-revive-admiral="${admiral.id}" ${isDead ? "" : "disabled"}>\ubd80\ud65c</button>
+            <button type="button" data-exile-admiral="${admiral.id}" ${assigned ? "disabled" : ""}>\ucd94\ubc29</button>
           </div>
         </div>
       `;
@@ -1174,6 +1228,9 @@ function renderAdmirals(data) {
   });
   Array.from(document.querySelectorAll("[data-revive-admiral]")).forEach((button) => {
     button.addEventListener("click", () => reviveAdmiral(button.dataset.reviveAdmiral));
+  });
+  Array.from(document.querySelectorAll("[data-exile-admiral]")).forEach((button) => {
+    button.addEventListener("click", () => exileAdmiral(button.dataset.exileAdmiral));
   });
 }
 
@@ -2323,8 +2380,45 @@ function renderCity(data) {
   });
 }
 
+function renderCityV2(data) {
+  cityState = data || null;
+  if (!elements.cityView) return;
+  const buildings = Array.isArray(data?.buildings) ? data.buildings : [];
+  const bonuses = data?.bonuses || {};
+  elements.cityView.innerHTML = buildings.length
+    ? buildings.map((item) => `
+      <div class="growth-item">
+        <div>
+          <strong>${item.name} Lv.${item.level}</strong>
+          <span>${item.description}</span>
+          <span>현재 효과: ${item.currentEffect || "-"}</span>
+          <span>다음 레벨 효과: ${item.nextEffect || "-"}</span>
+          <span>다음 업그레이드 비용: 금속 ${Number(item.nextCost?.metal || 0).toLocaleString()}, 연료 ${Number(item.nextCost?.fuel || 0).toLocaleString()}</span>
+        </div>
+        <button type="button" data-upgrade-city="${item.key}">업그레이드</button>
+      </div>
+    `).join("")
+    : `<div class="growth-item"><div>도시 정보를 불러오지 못했습니다.</div></div>`;
+
+  elements.cityView.insertAdjacentHTML("beforeend", `
+    <div class="growth-item">
+      <div>
+        <strong>도시 종합 현황</strong>
+        <span>기지 자원 보너스: +금속 ${Number(bonuses.baseMetalFlat || 0)} / +연료 ${Number(bonuses.baseFuelFlat || 0)}</span>
+        <span>전투 보너스 +${Math.round(Number(bonuses.combatBonus || 0) * 100)}%, 이동 보너스 +${Math.round(Number(bonuses.movementBonus || 0) * 100)}%</span>
+        <span>식민지(점령지): ${Number(data?.colonyCount || 0)} / ${Number(bonuses.colonyCap || 0)}</span>
+        <span>연구 상한 ${Number(bonuses.researchCap || 0)} / 함선 보유 상한 ${Number(bonuses.populationCap || 0)}</span>
+        <span>생산 라인 ${Number(bonuses.buildLines || 1)} / 생산 시간 계수 x${Number(bonuses.buildTimeMultiplier || 1).toFixed(2)}</span>
+      </div>
+    </div>
+  `);
+  Array.from(elements.cityView.querySelectorAll("[data-upgrade-city]")).forEach((button) => {
+    button.addEventListener("click", () => upgradeCityBuilding(button.dataset.upgradeCity));
+  });
+}
+
 async function loadCity() {
-  renderCity(await api("/city"));
+  renderCityV2(await api("/city"));
 }
 
 async function upgradeCityBuilding(key) {
@@ -2346,7 +2440,7 @@ async function upgradeCityBuilding(key) {
         incomingAlerts
       });
     }
-    renderCity(data.city);
+    renderCityV2(data.city);
     setStatus(data.message);
   } catch (err) {
     handleAuthError(err);
@@ -2359,11 +2453,16 @@ async function assignZoneGarrison(zoneId, fleetSlot) {
   clearMessages();
   setBusy(true);
   try {
-    const data = await api(`/zones/${zoneId}/garrison`, {
+    const data = await api(`/zones/${zoneId}/garrison/dispatch`, {
       method: "POST",
       body: JSON.stringify({ fleetSlot })
     });
     setStatus(data.message);
+    if (Array.isArray(data.activeMissions)) {
+      activeMissions = data.activeMissions;
+      renderMissionRoute();
+      startMissionPolling();
+    }
     await loadZones();
   } catch (err) {
     handleAuthError(err);
@@ -2532,10 +2631,10 @@ async function loadGarrisonOverview() {
 
 async function loadGrowth() {
   const [research, admirals] = await Promise.all([
-    api("/research"),
+    api("/tech-tree"),
     api("/admirals")
   ]);
-  renderResearch(research);
+  renderResearchV2(research);
   renderAdmirals(admirals);
 }
 
@@ -2556,8 +2655,8 @@ async function upgradeResearch(type) {
   clearMessages();
   setBusy(true);
   try {
-    const data = await api(`/research/${type}/upgrade`, { method: "POST" });
-    renderResearch(data);
+    const data = await api(`/tech-tree/${type}/start`, { method: "POST" });
+    renderResearchV2(data);
     renderResources(data.resources);
     await loadShipyard();
     setStatus(data.message);
@@ -2607,6 +2706,21 @@ async function reviveAdmiral(id) {
     renderAdmirals(data);
     await loadResources();
     setStatus(data.message);
+  } catch (err) {
+    handleAuthError(err);
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function exileAdmiral(id) {
+  clearMessages();
+  setBusy(true);
+  try {
+    const data = await api(`/admirals/${id}/exile`, { method: "POST" });
+    renderAdmirals(data);
+    await loadFleetGroups();
+    setStatus(data.message || "\uc81c\ub3c5\uc744 \ucd94\ubc29\ud588\uc2b5\ub2c8\ub2e4.");
   } catch (err) {
     handleAuthError(err);
   } finally {
@@ -2876,7 +2990,7 @@ async function refreshAll() {
     api("/fleet"),
     api("/map"),
     api("/empire"),
-    api("/research"),
+    api("/tech-tree"),
     api("/admirals"),
     api("/players"),
     api("/shipyard/options"),
@@ -2895,8 +3009,8 @@ async function refreshAll() {
   renderFleet(fleet);
   renderMap(map);
   renderEmpire(empire);
-  renderResearch(research);
-  renderCity(city);
+  renderResearchV2(research);
+  renderCityV2(city);
   renderAdmirals(admirals);
   renderPlayers(players);
   renderFleetGroupsV2(fleetGroups);
