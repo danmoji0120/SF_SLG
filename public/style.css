@@ -324,7 +324,7 @@ body:has(#gamePanel:not(.hidden)) {
   z-index: 50;
   display: grid;
   width: min(760px, calc(100vw - 28px));
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(84px, 1fr));
   gap: 8px;
   margin: 0;
   padding: 6px;
@@ -949,6 +949,20 @@ body:has(#gamePanel:not(.hidden)) {
   gap: 14px;
 }
 
+.research-grid {
+  grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
+}
+
+.policy-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.research-tree-card #researchView {
+  max-height: calc(100vh - 260px);
+  overflow: auto;
+  padding-right: 6px;
+}
+
 .tech-tree::before {
   content: "";
   position: absolute;
@@ -1207,9 +1221,11 @@ pre {
   }
 
   .grid,
+  .research-grid,
   .cost-list,
   .ship-grid,
   .design-grid,
+  .policy-grid,
   .slot-groups,
   .tech-tree,
   .stat-grid,

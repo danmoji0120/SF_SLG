@@ -342,6 +342,50 @@ const TECH_TREE_NODES = [
   { key: "unlock_titan", name: "타이탄 프로젝트", tier: 4, category: "special", description: "타이탄 선체 해금", metalCost: 18000, fuelCost: 13000, researchTime: 5200, requires: ["unlock_dreadnought"], exclusiveGroup: "", effectType: "unlock_hull", effectValue: 0, unlockKey: "titan" }
 ];
 
+const ACTIVE_TECH_TREE_NODES = [
+  { key: "engine_1", name: "엔진 I", tier: 1, category: "engine", description: "기본 추진 최적화. 이동 +8%", metalCost: 1800, fuelCost: 900, researchTime: 600, requires: [], exclusiveGroup: "", effectType: "buff_movement_pct", effectValue: 0.08 },
+  { key: "armor_1", name: "장갑 I", tier: 1, category: "defense", description: "기본 선체 안정화. 방어 +8%", metalCost: 1800, fuelCost: 900, researchTime: 600, requires: [], exclusiveGroup: "", effectType: "buff_defense_pct", effectValue: 0.08 },
+  { key: "industry_1", name: "산업 I", tier: 1, category: "industry", description: "기지 자동화 공정. 자원 +10%", metalCost: 1700, fuelCost: 800, researchTime: 600, requires: [], exclusiveGroup: "", effectType: "buff_resource_pct", effectValue: 0.1 },
+  { key: "rail_mk2", name: "레일건 개량", tier: 1, category: "weapon", description: "중형 레일 계열 해금", metalCost: 2000, fuelCost: 950, researchTime: 680, requires: [], exclusiveGroup: "", effectType: "unlock_component", effectValue: 0, unlockKey: "gauss_battery" },
+  { key: "engine_overdrive", name: "고출력 엔진", tier: 2, category: "engine", description: "순항 속도 강화. 이동 +15%", metalCost: 3600, fuelCost: 1900, researchTime: 1200, requires: ["engine_1"], exclusiveGroup: "engine_t2", effectType: "buff_movement_pct", effectValue: 0.15 },
+  { key: "engine_efficiency", name: "효율 엔진", tier: 2, category: "engine", description: "연료 소모 절감. 생산 연료비 절감", metalCost: 3400, fuelCost: 1700, researchTime: 1200, requires: ["engine_1"], exclusiveGroup: "engine_t2", effectType: "buff_build_cost_pct", effectValue: 0.06 },
+  { key: "armor_fort", name: "강화 장갑", tier: 2, category: "defense", description: "중장갑 운용 교리. 방어 +14%", metalCost: 3800, fuelCost: 1800, researchTime: 1200, requires: ["armor_1"], exclusiveGroup: "defense_t2", effectType: "buff_defense_pct", effectValue: 0.14 },
+  { key: "shield_system", name: "실드 시스템", tier: 2, category: "defense", description: "실드 제어 기술. 실드 발생기 해금", metalCost: 3800, fuelCost: 2100, researchTime: 1200, requires: ["armor_1"], exclusiveGroup: "defense_t2", effectType: "unlock_component", effectValue: 0, unlockKey: "shield_generator" },
+  { key: "destroyer_blueprint", name: "구축함 설계", tier: 2, category: "hull", description: "구축함 선체 해금", metalCost: 3900, fuelCost: 2200, researchTime: 1400, requires: ["rail_mk2"], exclusiveGroup: "", effectType: "unlock_hull", effectValue: 0, unlockKey: "destroyer" },
+  { key: "cruiser_command", name: "순양함 지휘", tier: 3, category: "hull", description: "순양함 선체 해금", metalCost: 6200, fuelCost: 3600, researchTime: 2200, requires: ["destroyer_blueprint"], exclusiveGroup: "", effectType: "unlock_hull", effectValue: 0, unlockKey: "cruiser" },
+  { key: "tactical_computer", name: "전술 컴퓨터", tier: 3, category: "utility", description: "고급 전술 지원 모듈 해금", metalCost: 5800, fuelCost: 3300, researchTime: 2100, requires: ["engine_overdrive"], exclusiveGroup: "utility_t3", effectType: "unlock_component", effectValue: 0, unlockKey: "battle_computer" },
+  { key: "reactor_control", name: "원자로 제어", tier: 3, category: "utility", description: "전력 확장 모듈 해금", metalCost: 5900, fuelCost: 3400, researchTime: 2100, requires: ["engine_efficiency"], exclusiveGroup: "utility_t3", effectType: "unlock_component", effectValue: 0, unlockKey: "reactor_boost" },
+  { key: "doctrine_siege", name: "공성 교리", tier: 3, category: "weapon", description: "중화력 운용. 전투 +16%", metalCost: 7000, fuelCost: 4200, researchTime: 2400, requires: ["armor_fort"], exclusiveGroup: "siege_t3", effectType: "buff_combat_pct", effectValue: 0.16 },
+  { key: "doctrine_guard", name: "방어 교리", tier: 3, category: "defense", description: "지구전 특화. 방어 +20%", metalCost: 6800, fuelCost: 3900, researchTime: 2400, requires: ["shield_system"], exclusiveGroup: "siege_t3", effectType: "buff_defense_pct", effectValue: 0.2 },
+  { key: "unlock_monitor", name: "모니터함 설계", tier: 4, category: "special", description: "방어 특화 모니터함 해금", metalCost: 11000, fuelCost: 6800, researchTime: 3600, requires: ["doctrine_guard"], exclusiveGroup: "", effectType: "unlock_hull", effectValue: 0, unlockKey: "monitor" },
+  { key: "unlock_battleship", name: "전함 공학", tier: 4, category: "special", description: "전함 선체 해금", metalCost: 12000, fuelCost: 7600, researchTime: 3800, requires: ["doctrine_siege", "cruiser_command"], exclusiveGroup: "", effectType: "unlock_hull", effectValue: 0, unlockKey: "battleship" },
+  { key: "unlock_carrier", name: "항공모함 운용", tier: 4, category: "special", description: "항공모함 선체 해금", metalCost: 12000, fuelCost: 8200, researchTime: 3800, requires: ["tactical_computer", "cruiser_command"], exclusiveGroup: "", effectType: "unlock_hull", effectValue: 0, unlockKey: "carrier" },
+  { key: "unlock_dreadnought", name: "드레드노트 공학", tier: 4, category: "special", description: "드레드노트 선체 해금", metalCost: 14500, fuelCost: 9800, researchTime: 4200, requires: ["unlock_battleship"], exclusiveGroup: "", effectType: "unlock_hull", effectValue: 0, unlockKey: "dreadnought" },
+  { key: "unlock_titan", name: "타이탄 프로젝트", tier: 4, category: "special", description: "타이탄 선체 해금", metalCost: 18000, fuelCost: 13000, researchTime: 5200, requires: ["unlock_dreadnought"], exclusiveGroup: "", effectType: "unlock_hull", effectValue: 0, unlockKey: "titan" },
+  { key: "advanced_shield_module", name: "고급 실드 모듈", tier: 4, category: "special", description: "적응성 바리어 해금", metalCost: 10400, fuelCost: 7200, researchTime: 3600, requires: ["doctrine_guard"], exclusiveGroup: "", effectType: "unlock_component", effectValue: 0, unlockKey: "adaptive_barrier" },
+  { key: "siege_artillery_suite", name: "공성 병기 통합", tier: 4, category: "special", description: "시즈 포병 해금", metalCost: 9800, fuelCost: 6400, researchTime: 3500, requires: ["doctrine_siege"], exclusiveGroup: "", effectType: "unlock_component", effectValue: 0, unlockKey: "siege_artillery" }
+];
+
+const POLICY_LOCK_MS = 30 * 60 * 1000;
+const DEFAULT_POLICY_SELECTION = { economy: "civilian", industry: "infrastructure", military: "defense" };
+const STRATEGIC_POLICIES = {
+  economy: [
+    { key: "wartime", name: "전시경제", description: "생산 자원 소모 감소, 자원 획득 감소", effects: { buildCostPct: 0.18, resourcePct: -0.08, combatPct: 0.05 } },
+    { key: "civilian", name: "민간경제", description: "자원 획득 증가, 생산 비용 증가", effects: { resourcePct: 0.18, buildCostPct: -0.05 } },
+    { key: "balanced", name: "균형경제", description: "균형형 성장", effects: { resourcePct: 0.08, buildCostPct: 0.04 } }
+  ],
+  industry: [
+    { key: "mobilization", name: "총동원", description: "이동 속도 및 전투 상승, 자원 획득 감소", effects: { movementPct: 0.14, combatPct: 0.06, resourcePct: -0.06 } },
+    { key: "infrastructure", name: "인프라 투자", description: "자원/이동 균형 강화", effects: { resourcePct: 0.09, movementPct: 0.06 } },
+    { key: "fortress", name: "요새화", description: "전투/방어 강화, 이동 감소", effects: { combatPct: 0.12, defensePct: 0.08, movementPct: -0.05 } }
+  ],
+  military: [
+    { key: "assault", name: "공세교리", description: "공격력 중심 운용", effects: { combatPct: 0.16, movementPct: 0.03, buildCostPct: -0.03 } },
+    { key: "defense", name: "방어교리", description: "안정형 운용", effects: { combatPct: 0.08, defensePct: 0.1 } },
+    { key: "logistics", name: "기동교리", description: "이동/보급 중심 운용", effects: { movementPct: 0.18, resourcePct: 0.03, combatPct: -0.05 } }
+  ]
+};
+
 const CITY_BUILDINGS = {
   shipyard: {
     key: "shipyard",
@@ -784,7 +828,12 @@ async function seedShipyardData() {
 }
 
 async function seedTechTreeData() {
-  for (const node of TECH_TREE_NODES) {
+  const activeKeys = ACTIVE_TECH_TREE_NODES.map((node) => String(node.key));
+  if (activeKeys.length) {
+    const placeholders = activeKeys.map(() => "?").join(", ");
+    await run(`DELETE FROM tech_nodes WHERE key NOT IN (${placeholders})`, activeKeys);
+  }
+  for (const node of ACTIVE_TECH_TREE_NODES) {
     await run(
       `
         INSERT OR IGNORE INTO tech_nodes
@@ -1102,6 +1151,10 @@ async function initDb() {
       FOREIGN KEY (user_id) REFERENCES users(id)
     )
   `);
+  await ensureColumn("user_settings", "economy_policy", "TEXT NOT NULL DEFAULT 'civilian'");
+  await ensureColumn("user_settings", "industry_policy", "TEXT NOT NULL DEFAULT 'infrastructure'");
+  await ensureColumn("user_settings", "military_policy", "TEXT NOT NULL DEFAULT 'defense'");
+  await ensureColumn("user_settings", "policy_locked_until", "INTEGER NOT NULL DEFAULT 0");
   await run(`
     CREATE TABLE IF NOT EXISTS speedup_usage (
       user_id INTEGER NOT NULL,
@@ -1317,16 +1370,84 @@ function requireAdmin(req, res, next) {
   }
 }
 
-async function getUserSettings(userId) {
-  let row = await get("SELECT admiral_policy FROM user_settings WHERE user_id = ?", [userId]);
-  if (!row) {
-    await run("INSERT INTO user_settings (user_id, admiral_policy) VALUES (?, 'capture')", [userId]);
-    row = { admiral_policy: "capture" };
+function policyOptionKeys(category) {
+  return (Array.isArray(STRATEGIC_POLICIES[category]) ? STRATEGIC_POLICIES[category] : []).map((item) => String(item.key));
+}
+
+function normalizePolicySelection(row = {}) {
+  const economyKeys = policyOptionKeys("economy");
+  const industryKeys = policyOptionKeys("industry");
+  const militaryKeys = policyOptionKeys("military");
+  return {
+    economy: economyKeys.includes(String(row.economy_policy || "")) ? String(row.economy_policy) : DEFAULT_POLICY_SELECTION.economy,
+    industry: industryKeys.includes(String(row.industry_policy || "")) ? String(row.industry_policy) : DEFAULT_POLICY_SELECTION.industry,
+    military: militaryKeys.includes(String(row.military_policy || "")) ? String(row.military_policy) : DEFAULT_POLICY_SELECTION.military
+  };
+}
+
+function getStrategicPolicyOptions() {
+  return Object.entries(STRATEGIC_POLICIES).reduce((acc, [category, options]) => {
+    acc[category] = (Array.isArray(options) ? options : []).map((item) => ({
+      key: String(item.key),
+      name: String(item.name),
+      description: String(item.description || ""),
+      effects: item.effects || {}
+    }));
+    return acc;
+  }, {});
+}
+
+function getStrategicPolicyEffects(selection) {
+  const normalized = normalizePolicySelection({
+    economy_policy: selection?.economy,
+    industry_policy: selection?.industry,
+    military_policy: selection?.military
+  });
+  const result = { resourcePct: 0, buildCostPct: 0, combatPct: 0, movementPct: 0, defensePct: 0 };
+  for (const [category, key] of Object.entries(normalized)) {
+    const found = (STRATEGIC_POLICIES[category] || []).find((item) => String(item.key) === String(key));
+    const effects = found?.effects || {};
+    result.resourcePct += Number(effects.resourcePct || 0);
+    result.buildCostPct += Number(effects.buildCostPct || 0);
+    result.combatPct += Number(effects.combatPct || 0);
+    result.movementPct += Number(effects.movementPct || 0);
+    result.defensePct += Number(effects.defensePct || 0);
   }
-  const policy = ["capture", "kill", "release"].includes(String(row.admiral_policy || "capture"))
+  return result;
+}
+
+async function getUserSettings(userId) {
+  let row = await get(
+    "SELECT admiral_policy, economy_policy, industry_policy, military_policy, policy_locked_until FROM user_settings WHERE user_id = ?",
+    [userId]
+  );
+  if (!row) {
+    await run(
+      "INSERT INTO user_settings (user_id, admiral_policy, economy_policy, industry_policy, military_policy, policy_locked_until) VALUES (?, 'capture', ?, ?, ?, 0)",
+      [userId, DEFAULT_POLICY_SELECTION.economy, DEFAULT_POLICY_SELECTION.industry, DEFAULT_POLICY_SELECTION.military]
+    );
+    row = {
+      admiral_policy: "capture",
+      economy_policy: DEFAULT_POLICY_SELECTION.economy,
+      industry_policy: DEFAULT_POLICY_SELECTION.industry,
+      military_policy: DEFAULT_POLICY_SELECTION.military,
+      policy_locked_until: 0
+    };
+  }
+  const admiralPolicy = ["capture", "kill", "release"].includes(String(row.admiral_policy || "capture"))
     ? String(row.admiral_policy)
     : "capture";
-  return { admiralPolicy: policy };
+  const policies = normalizePolicySelection(row);
+  const policyEffects = getStrategicPolicyEffects(policies);
+  const policyLockedUntil = Number(row.policy_locked_until || 0);
+  return {
+    admiralPolicy,
+    policies,
+    policyEffects,
+    policyLockedUntil,
+    policyLockedRemainingSeconds: Math.max(0, Math.ceil((policyLockedUntil - Date.now()) / 1000)),
+    policyOptions: getStrategicPolicyOptions()
+  };
 }
 
 function ownerColorHex(ownerId) {
@@ -1612,9 +1733,31 @@ function normalizeShipPlan(plan) {
 
 async function getFleetGroups(userId) {
   await ensureFleetGroups(userId);
+  const owned = await all(
+    `
+      SELECT os.design_id, os.quantity, d.name, d.final_hp, d.final_attack, d.final_defense, d.final_speed
+      FROM owned_ships os
+      JOIN ship_designs d ON d.id = os.design_id
+      WHERE os.user_id = ? AND os.quantity > 0
+    `,
+    [userId]
+  );
+  const ownedByDesign = new Map();
+  for (const row of owned) {
+    ownedByDesign.set(Number(row.design_id), {
+      quantity: Number(row.quantity || 0),
+      name: row.name,
+      finalHp: Number(row.final_hp || 0),
+      finalAttack: Number(row.final_attack || 0),
+      finalDefense: Number(row.final_defense || 0),
+      finalSpeed: Number(row.final_speed || 0)
+    });
+  }
+
   const rows = await all(
     `
-      SELECT fg.slot_index, fg.name, fg.admiral_id, fg.ship_plan_json, a.name AS admiral_name, a.rarity AS admiral_rarity
+      SELECT fg.slot_index, fg.name, fg.admiral_id, fg.ship_plan_json,
+             a.name AS admiral_name, a.rarity AS admiral_rarity, a.combat_bonus AS admiral_combat
       FROM fleet_groups fg
       LEFT JOIN admirals a ON a.id = fg.admiral_id AND a.user_id = fg.user_id
       WHERE fg.user_id = ?
@@ -1629,12 +1772,35 @@ async function getFleetGroups(userId) {
     } catch (err) {
       plan = [];
     }
+    const cappedFleet = [];
+    for (const ship of plan) {
+      const ownedShip = ownedByDesign.get(Number(ship.designId));
+      if (!ownedShip) continue;
+      const qty = Math.min(Number(ownedShip.quantity || 0), Number(ship.quantity || 0));
+      if (qty <= 0) continue;
+      cappedFleet.push({
+        designId: Number(ship.designId),
+        name: ownedShip.name,
+        quantity: qty,
+        finalHp: ownedShip.finalHp,
+        finalAttack: ownedShip.finalAttack,
+        finalDefense: ownedShip.finalDefense,
+        finalSpeed: ownedShip.finalSpeed
+      });
+    }
+    const basePower = Math.floor(designFleetPower(cappedFleet));
+    const admiralCombatBonus = Number(row.admiral_combat || 0);
+    const fleetCombatPower = Math.floor(basePower * (1 + admiralCombatBonus * 0.9));
     return {
       slot: Number(row.slot_index || 0),
       name: String(row.name || ""),
       admiralId: row.admiral_id ? Number(row.admiral_id) : null,
       admiralName: row.admiral_name || null,
       admiralRarity: row.admiral_rarity || null,
+      admiralCombatBonus,
+      basePower,
+      fleetCombatPower,
+      totalShips: cappedFleet.reduce((sum, ship) => sum + Number(ship.quantity || 0), 0),
       ships: plan
     };
   });
@@ -1967,6 +2133,8 @@ async function getPlayerBonuses(userId) {
   const admiral = await getAssignedAdmiral(userId);
   const commander = await getCommanderProgress(userId);
   const city = await getCityState(userId);
+  const settings = await getUserSettings(userId);
+  const strategicPolicy = settings.policyEffects || { resourcePct: 0, buildCostPct: 0, combatPct: 0, movementPct: 0, defensePct: 0 };
   const govLevel = Number(city?.levels?.government || 1);
   const commanderResource = commander.level * 0.03;
   const commanderCost = commander.level * 0.015;
@@ -1978,24 +2146,28 @@ async function getPlayerBonuses(userId) {
   const policyMovement = govLevel * 0.02;
   const resourceBonus =
     policyResource +
+    Number(strategicPolicy.resourcePct || 0) +
     techEffects.resourcePct +
     Number(admiral?.resourceBonus || 0) +
     commanderResource;
   const costBonus =
     policyCost +
+    Number(strategicPolicy.buildCostPct || 0) +
     techEffects.buildCostPct +
     Number(admiral?.costBonus || 0) +
     commanderCost +
     Number(city.bonuses.buildCostMultiplier ? 1 - city.bonuses.buildCostMultiplier : 0);
   const combatBonus =
     policyCombat +
+    Number(strategicPolicy.combatPct || 0) +
     techEffects.combatPct +
-    techEffects.defensePct * 0.35 +
+    (techEffects.defensePct + Number(strategicPolicy.defensePct || 0)) * 0.35 +
     Number(admiral?.combatBonus || 0) +
     commanderCombat +
     Number(city.bonuses.combatBonus || 0);
   const movementBonus =
     policyMovement +
+    Number(strategicPolicy.movementPct || 0) +
     techEffects.movementPct +
     Number(admiral?.combatBonus || 0) * 0.5 +
     Number(admiral?.resourceBonus || 0) * 0.25 +
@@ -2009,6 +2181,7 @@ async function getPlayerBonuses(userId) {
     movementMultiplier: 1 + movementBonus,
     commander,
     research,
+    settings,
     techEffects: {
       resourcePct: techEffects.resourcePct,
       movementPct: techEffects.movementPct,
@@ -4380,6 +4553,7 @@ app.get("/tech-tree", requireAuth, async (req, res) => {
   try {
     const tree = await getTechTreeState(req.user.id);
     const bonuses = await getPlayerBonuses(req.user.id);
+    const settings = bonuses.settings || await getUserSettings(req.user.id);
     return res.json({
       mode: "tech_tree",
       labLevel: tree.labLevel,
@@ -4387,8 +4561,16 @@ app.get("/tech-tree", requireAuth, async (req, res) => {
       activeResearch: tree.activeResearch,
       nodes: tree.nodes,
       policies: {
-        source: "government",
+        source: "government+strategic",
         governmentLevel: Number(bonuses.city?.levels?.government || 1),
+        selection: settings.policies,
+        options: settings.policyOptions,
+        lock: {
+          lockedUntil: Number(settings.policyLockedUntil || 0),
+          remainingSeconds: Number(settings.policyLockedRemainingSeconds || 0),
+          lockMinutes: Math.floor(POLICY_LOCK_MS / 60000)
+        },
+        effects: settings.policyEffects,
         resourceMultiplier: bonuses.resourceMultiplier,
         buildCostMultiplier: bonuses.buildCostMultiplier,
         combatMultiplier: bonuses.combatMultiplier,
@@ -4458,6 +4640,8 @@ app.post("/tech-tree/:key/start", requireAuth, async (req, res) => {
 
     const treeAfter = await getTechTreeState(req.user.id);
     const nextState = await getUpdatedResources(req.user.id);
+    const bonuses = await getPlayerBonuses(req.user.id);
+    const settings = bonuses.settings || await getUserSettings(req.user.id);
     return res.json({
       message: `${node.name} \uc5f0\uad6c\ub97c \uc2dc\uc791\ud588\uc2b5\ub2c8\ub2e4.`,
       mode: "tech_tree",
@@ -4475,6 +4659,22 @@ app.post("/tech-tree/:key/start", requireAuth, async (req, res) => {
           zones: nextState.rates.zones,
           multiplier: nextState.rates.multiplier
         }
+      },
+      policies: {
+        source: "government+strategic",
+        governmentLevel: Number(bonuses.city?.levels?.government || 1),
+        selection: settings.policies,
+        options: settings.policyOptions,
+        lock: {
+          lockedUntil: Number(settings.policyLockedUntil || 0),
+          remainingSeconds: Number(settings.policyLockedRemainingSeconds || 0),
+          lockMinutes: Math.floor(POLICY_LOCK_MS / 60000)
+        },
+        effects: settings.policyEffects,
+        resourceMultiplier: bonuses.resourceMultiplier,
+        buildCostMultiplier: bonuses.buildCostMultiplier,
+        combatMultiplier: bonuses.combatMultiplier,
+        movementMultiplier: bonuses.movementMultiplier
       }
     });
   } catch (err) {
@@ -4593,7 +4793,12 @@ app.put("/fleet-groups/:slot", requireAuth, async (req, res) => {
       "INSERT INTO fleet_groups (user_id, slot_index, name, admiral_id, ship_plan_json) VALUES (?, ?, ?, ?, ?) ON CONFLICT(user_id, slot_index) DO UPDATE SET name = excluded.name, admiral_id = excluded.admiral_id, ship_plan_json = excluded.ship_plan_json",
       [req.user.id, slot, name, admiralId, JSON.stringify(ships)]
     );
-    return res.json({ message: `함대 ${slot} 편성을 저장했습니다.`, groups: await getFleetGroups(req.user.id) });
+    const groups = await getFleetGroups(req.user.id);
+    const saved = groups.find((item) => Number(item.slot) === slot);
+    return res.json({
+      message: `함대 ${slot} 저장 완료. 전투력 ${Number(saved?.fleetCombatPower || 0).toLocaleString()}`,
+      groups
+    });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ error: "함대 편성 저장 중 오류가 발생했습니다." });
@@ -4782,6 +4987,95 @@ app.post("/admirals/:id/exile", requireAuth, async (req, res) => {
   } catch (err) {
     console.error(err);
     return res.status(500).json({ error: "\uc81c\ub3c5 \ucd94\ubc29 \ucc98\ub9ac \uc911 \uc624\ub958\uac00 \ubc1c\uc0dd\ud588\uc2b5\ub2c8\ub2e4." });
+  }
+});
+
+app.get("/policies", requireAuth, async (req, res) => {
+  try {
+    const settings = await getUserSettings(req.user.id);
+    return res.json({
+      policies: settings.policies,
+      options: settings.policyOptions,
+      effects: settings.policyEffects,
+      lock: {
+        lockedUntil: Number(settings.policyLockedUntil || 0),
+        remainingSeconds: Number(settings.policyLockedRemainingSeconds || 0),
+        lockMinutes: Math.floor(POLICY_LOCK_MS / 60000)
+      }
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "정책 정보를 불러오지 못했습니다." });
+  }
+});
+
+app.post("/policies", requireAuth, async (req, res) => {
+  try {
+    const current = await getUserSettings(req.user.id);
+    const now = Date.now();
+    if (Number(current.policyLockedUntil || 0) > now) {
+      return res.status(400).json({
+        error: `정책 변경 대기 중입니다. ${Math.max(1, Number(current.policyLockedRemainingSeconds || 0))}초 후 변경 가능합니다.`
+      });
+    }
+
+    const next = {
+      economy: String(req.body.economy || current.policies.economy),
+      industry: String(req.body.industry || current.policies.industry),
+      military: String(req.body.military || current.policies.military)
+    };
+    const normalized = normalizePolicySelection({
+      economy_policy: next.economy,
+      industry_policy: next.industry,
+      military_policy: next.military
+    });
+
+    const changed =
+      normalized.economy !== current.policies.economy ||
+      normalized.industry !== current.policies.industry ||
+      normalized.military !== current.policies.military;
+    if (!changed) {
+      return res.json({
+        message: "현재 정책과 동일합니다.",
+        policies: current.policies,
+        effects: current.policyEffects,
+        lock: {
+          lockedUntil: Number(current.policyLockedUntil || 0),
+          remainingSeconds: Number(current.policyLockedRemainingSeconds || 0),
+          lockMinutes: Math.floor(POLICY_LOCK_MS / 60000)
+        }
+      });
+    }
+
+    const lockedUntil = now + POLICY_LOCK_MS;
+    await run(
+      `
+        INSERT INTO user_settings (user_id, admiral_policy, economy_policy, industry_policy, military_policy, policy_locked_until)
+        VALUES (?, 'capture', ?, ?, ?, ?)
+        ON CONFLICT(user_id) DO UPDATE SET
+          economy_policy = excluded.economy_policy,
+          industry_policy = excluded.industry_policy,
+          military_policy = excluded.military_policy,
+          policy_locked_until = excluded.policy_locked_until
+      `,
+      [req.user.id, normalized.economy, normalized.industry, normalized.military, lockedUntil]
+    );
+
+    const updated = await getUserSettings(req.user.id);
+    return res.json({
+      message: `정책을 변경했습니다. ${Math.floor(POLICY_LOCK_MS / 60000)}분 동안 고정됩니다.`,
+      policies: updated.policies,
+      options: updated.policyOptions,
+      effects: updated.policyEffects,
+      lock: {
+        lockedUntil: Number(updated.policyLockedUntil || 0),
+        remainingSeconds: Number(updated.policyLockedRemainingSeconds || 0),
+        lockMinutes: Math.floor(POLICY_LOCK_MS / 60000)
+      }
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "정책 변경 중 오류가 발생했습니다." });
   }
 });
 

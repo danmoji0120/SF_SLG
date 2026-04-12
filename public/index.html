@@ -87,6 +87,7 @@
       <nav class="tab-nav" aria-label="game sections">
         <button type="button" class="tab-button" data-tab="main">&#47700;&#51064;</button>
         <button type="button" class="tab-button active" data-tab="map">&#51648;&#46020;</button>
+        <button type="button" class="tab-button" data-tab="research">&#50672;&#44396;</button>
         <button type="button" class="tab-button" data-tab="city">&#46020;&#49884;</button>
         <button type="button" class="tab-button" data-tab="production">&#49373;&#49328;</button>
         <button type="button" class="tab-button" data-tab="growth">&#49457;&#51109;</button>
@@ -274,11 +275,6 @@
       <section class="tab-panel" data-tab-panel="growth">
         <div class="grid">
           <article class="card">
-            <h3>&#50672;&#44396;</h3>
-            <div id="researchView" class="growth-list">&#48520;&#47084;&#50724;&#45716; &#51473;...</div>
-          </article>
-
-          <article class="card">
             <h3>&#51228;&#46021;</h3>
             <p class="hint">&#51228;&#46021; &#50689;&#51077; &#48708;&#50857;: &#44552;&#49549; 600, &#50672;&#47308; 300</p>
             <div class="speedup-controls">
@@ -291,6 +287,37 @@
             </div>
             <button id="drawAdmiralButton" type="button" class="primary">&#51228;&#46021; &#50689;&#51077;</button>
             <div id="admiralView" class="growth-list">&#48372;&#50976; &#51228;&#46021;&#51060; &#50630;&#49845;&#45768;&#45796;.</div>
+          </article>
+        </div>
+      </section>
+
+      <section class="tab-panel" data-tab-panel="research">
+        <div class="grid research-grid">
+          <article class="card research-policy-card">
+            <h3>&#51221;&#52293;</h3>
+            <div class="design-grid policy-grid">
+              <div>
+                <label for="economyPolicySelect">&#44221;&#51228; &#51221;&#52293;</label>
+                <select id="economyPolicySelect"></select>
+              </div>
+              <div>
+                <label for="industryPolicySelect">&#49328;&#50629; &#51221;&#52293;</label>
+                <select id="industryPolicySelect"></select>
+              </div>
+              <div>
+                <label for="militaryPolicySelect">&#44368;&#49324; &#51221;&#52293;</label>
+                <select id="militaryPolicySelect"></select>
+              </div>
+            </div>
+            <div class="button-row">
+              <button id="savePolicyButton" type="button" class="primary">&#51221;&#52293; &#51200;&#51109;</button>
+            </div>
+            <div id="policyLockInfo" class="hint"></div>
+            <div id="policyEffectInfo" class="hint"></div>
+          </article>
+          <article class="card research-tree-card">
+            <h3>&#53580;&#53356; &#53944;&#47532;</h3>
+            <div id="researchView" class="growth-list">&#48520;&#47084;&#50724;&#45716; &#51473;...</div>
           </article>
         </div>
       </section>
