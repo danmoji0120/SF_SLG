@@ -5328,7 +5328,8 @@ app.post("/city/:key/upgrade", requireAuth, async (req, res) => {
     if (!CITY_BUILDINGS[key]) {
       return res.status(400).json({ error: "업그레이드할 수 없는 건물입니다." });
     }
-    const city = await getCityState(req.user.id);
+    const playerBonuses = await getPlayerBonuses(req.user.id);
+    const city = playerBonuses.city;
     const level = Number(city.levels[key] || 1);
     if (level >= 30) {
       return res.status(400).json({ error: "해당 건물은 최대 레벨입니다." });
@@ -6142,6 +6143,7 @@ app.post("/build", requireAuth, async (req, res) => {
 
 app.post("/battle", requireAuth, async (req, res) => {
   try {
+    const playerBonuses = await getPlayerBonuses(req.user.id);
     const fleet = await getOwnedShipFleet(req.user.id);
     if (!hasDesignShips(fleet)) {
       return res.status(400).json({ error: "\ucd9c\uaca9 \uac00\ub2a5\ud55c \uc124\uacc4 \ud568\uc120\uc774 \uc5c6\uc2b5\ub2c8\ub2e4." });
@@ -6167,6 +6169,7 @@ app.post("/battle", requireAuth, async (req, res) => {
 app.post("/zones/:id/capture", requireAuth, async (req, res) => {
   try {
     await processMissionQueueForUser(req.user.id);
+    const playerBonuses = await getPlayerBonuses(req.user.id);
     const zoneId = Number.parseInt(req.params.id, 10);
     const zone = await get("SELECT * FROM neutral_zones WHERE id = ?", [zoneId]);
     if (!zone) {
@@ -6185,7 +6188,7 @@ app.post("/zones/:id/capture", requireAuth, async (req, res) => {
     if (owner?.user_id === req.user.id) {
       return res.status(400).json({ error: "\uc774\ubbf8 \uc810\ub839\ud55c \uad6c\uc5ed\uc785\ub2c8\ub2e4." });
     }
-    const city = await getCityState(req.user.id);
+    const city = playerBonuses.city;
     const occupiedCount = await get("SELECT COUNT(*) AS cnt FROM occupied_zones WHERE user_id = ?", [req.user.id]);
     if (Number(occupiedCount?.cnt || 0) >= Number(city.bonuses.colonyCap || 0)) {
       return res.status(400).json({ error: `식민지 상한(${city.bonuses.colonyCap})에 도달해 추가 점령이 불가능합니다.` });
