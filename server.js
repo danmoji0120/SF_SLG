@@ -1613,13 +1613,24 @@ function speedupPenaltyMultiplier(streak) {
   return 1.0;
 }
 
+function speedupResourcePerSecondFor(category, streak) {
+  const key = String(category || "").trim().toLowerCase();
+  const s = Math.max(0, Number(streak || 0));
+  if (key === "research") {
+    // research: 50 resource = 1 sec, penalty rises up to 100 resource = 1 sec
+    return Math.min(100, 50 + (s * 5));
+  }
+  const multiplier = speedupPenaltyMultiplier(s);
+  return Math.max(1, Math.ceil(SPEEDUP_RESOURCE_PER_SECOND * multiplier));
+}
+
 async function consumeSpeedup(userId, category, amount) {
   const state = await getSpeedupState(userId, category);
   const now = Date.now();
   const resetWindowMs = 10 * 60 * 1000;
   const activeStreak = now - state.lastUsedAt > resetWindowMs ? 0 : state.streak;
-  const multiplier = speedupPenaltyMultiplier(activeStreak);
-  const resourcePerSecond = Math.max(1, Math.ceil(SPEEDUP_RESOURCE_PER_SECOND * multiplier));
+  const resourcePerSecond = speedupResourcePerSecondFor(category, activeStreak);
+  const multiplier = Number((resourcePerSecond / Math.max(1, SPEEDUP_RESOURCE_PER_SECOND)).toFixed(3));
   const reducedSeconds = Math.floor(Number(amount || 0) / resourcePerSecond);
   if (reducedSeconds < 1) {
     return {
@@ -4728,6 +4739,85 @@ app.post("/tech-tree/:key/start", requireAuth, async (req, res) => {
   } catch (err) {
     console.error(err);
     return res.status(500).json({ error: "\ud14c\ud06c\ud2b8\ub9ac \uc5f0\uad6c \uc2dc\uc791 \uc911 \uc624\ub958\uac00 \ubc1c\uc0dd\ud588\uc2b5\ub2c8\ub2e4." });
+  }
+});
+
+app.post("/tech-tree/speedup", requireAuth, async (req, res) => {
+  try {
+    await processTechQueueForUser(req.user.id);
+    const queue = await get(
+      "SELECT id, tech_key, end_time FROM tech_queue WHERE user_id = ? AND status = 'researching' ORDER BY id DESC LIMIT 1",
+      [req.user.id]
+    );
+    if (!queue) {
+      return res.status(404).json({ error: "가속할 연구가 없습니다." });
+    }
+    const resourceType = String(req.body.resourceType || "fuel").toLowerCase() === "metal" ? "metal" : "fuel";
+    const amount = Math.max(1, Math.min(30000, Number.parseInt(req.body.amount, 10) || 500));
+    const state = await getUpdatedResources(req.user.id);
+    if (Number(state.resources[resourceType] || 0) < amount) {
+      return res.status(400).json({ error: `가속에 필요한 ${resourceType} 자원이 부족합니다. 필요: ${amount}` });
+    }
+    const speed = await consumeSpeedup(req.user.id, "research", amount);
+    if (!speed.ok) {
+      return res.status(400).json({
+        error: `가속 효율 저하 단계입니다. 현재 1초 단축에 ${speed.resourcePerSecond} 재화가 필요합니다.`
+      });
+    }
+    const reducedMs = speed.reducedSeconds * 1000;
+    const nextEnd = Math.max(Date.now() + 1000, Number(queue.end_time || 0) - reducedMs);
+    await run("BEGIN TRANSACTION");
+    try {
+      await run(`UPDATE resources SET ${resourceType} = ${resourceType} - ? WHERE user_id = ?`, [amount, req.user.id]);
+      await run("UPDATE tech_queue SET end_time = ? WHERE id = ?", [nextEnd, queue.id]);
+      await run("COMMIT");
+    } catch (err) {
+      await run("ROLLBACK");
+      throw err;
+    }
+
+    const tree = await getTechTreeState(req.user.id);
+    const bonuses = await getPlayerBonuses(req.user.id);
+    const settings = bonuses.settings || await getUserSettings(req.user.id);
+    const nextState = await getUpdatedResources(req.user.id);
+    return res.json({
+      message: `${resourceType} ${amount} 사용: 연구 ${speed.reducedSeconds}초 단축 (현재 1초=${speed.resourcePerSecond} 재화)`,
+      mode: "tech_tree",
+      labLevel: tree.labLevel,
+      labTierUnlocked: tree.labTierUnlocked,
+      activeResearch: tree.activeResearch,
+      nodes: tree.nodes,
+      resources: {
+        metal: nextState.resources.metal,
+        fuel: nextState.resources.fuel,
+        production: {
+          metalPerSecond: nextState.rates.metal,
+          fuelPerSecond: nextState.rates.fuel,
+          base: nextState.rates.base,
+          zones: nextState.rates.zones,
+          multiplier: nextState.rates.multiplier
+        }
+      },
+      policies: {
+        source: "government+strategic",
+        governmentLevel: Number(bonuses.city?.levels?.government || 1),
+        selection: settings.policies,
+        options: settings.policyOptions,
+        lock: {
+          lockedUntil: Number(settings.policyLockedUntil || 0),
+          remainingSeconds: Number(settings.policyLockedRemainingSeconds || 0),
+          lockMinutes: Math.floor(POLICY_LOCK_MS / 60000)
+        },
+        effects: settings.policyEffects,
+        resourceMultiplier: bonuses.resourceMultiplier,
+        buildCostMultiplier: bonuses.buildCostMultiplier,
+        combatMultiplier: bonuses.combatMultiplier,
+        movementMultiplier: bonuses.movementMultiplier
+      }
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "연구 가속 처리 중 오류가 발생했습니다." });
   }
 });
 

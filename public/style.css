@@ -992,6 +992,94 @@ body:has(#gamePanel:not(.hidden)) {
   gap: 10px;
 }
 
+.tech-graph {
+  position: relative;
+  width: 100%;
+  overflow: auto;
+  padding: 8px;
+}
+
+.tech-columns {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(240px, 1fr));
+  gap: 14px;
+  min-width: 980px;
+}
+
+.tech-column {
+  display: grid;
+  gap: 8px;
+}
+
+.tech-column h4 {
+  margin: 0;
+  padding: 6px 8px;
+  background: rgba(12, 23, 31, 0.8);
+  border: 1px solid #355066;
+  border-radius: 8px;
+}
+
+.tech-column-list {
+  display: grid;
+  gap: 8px;
+}
+
+.tech-edge-layer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.tech-edge {
+  stroke: #81c7bd;
+  stroke-width: 2;
+  opacity: 0.75;
+}
+
+.tech-graph-node {
+  position: relative;
+  z-index: 3;
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  background: rgba(8, 13, 17, 0.86);
+  border: 1px solid #355066;
+  border-radius: 8px;
+}
+
+.tech-node-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  min-height: 36px;
+  padding: 6px 10px;
+  text-align: left;
+  background: rgba(38, 55, 70, 0.7);
+  border: 1px solid #496579;
+  border-radius: 8px;
+}
+
+.tech-node-body {
+  display: none;
+  gap: 6px;
+}
+
+.tech-graph-node.expanded .tech-node-body {
+  display: grid;
+}
+
+.research-speedup-controls {
+  display: grid;
+  gap: 6px;
+  justify-items: end;
+}
+
 .research-grid {
   grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
 }
@@ -1339,6 +1427,15 @@ pre {
   .tab-nav {
     bottom: 10px;
     grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .tech-columns {
+    min-width: 0;
+    grid-template-columns: 1fr;
+  }
+
+  .research-speedup-controls {
+    justify-items: start;
   }
 
   #gamePanel .tab-panel:not(.map-panel) {

@@ -48,6 +48,9 @@ let garrisonOverviewState = null;
 let garrisonZoneFilterId = null;
 let policyState = null;
 let researchCategoryFilter = "all";
+let researchExpandedKeys = new Set();
+let researchHubState = null;
+let researchTickTimer = null;
 
 const elements = {
   authPanel: document.getElementById("authPanel"),
@@ -1052,6 +1055,10 @@ function clearRealtimeTimers() {
   if (alertPoller) {
     clearInterval(alertPoller);
     alertPoller = null;
+  }
+  if (researchTickTimer) {
+    clearInterval(researchTickTimer);
+    researchTickTimer = null;
   }
   clearRoute();
 }
@@ -2903,8 +2910,220 @@ async function loadGarrisonOverview() {
   renderGarrisonOverviewV2(await api("/garrison/overview"));
 }
 
+function shouldShowResearchNode(node) {
+  if (researchCategoryFilter === "all") return true;
+  const cat = String(node?.category || "");
+  return cat === researchCategoryFilter;
+}
+
+function drawTechGraphEdges() {
+  const graph = elements.researchView?.querySelector(".tech-graph");
+  const svg = elements.researchView?.querySelector(".tech-edge-layer");
+  if (!graph || !svg) return;
+  const nodeEls = Array.from(graph.querySelectorAll(".tech-graph-node[data-node-key]"));
+  const byKey = new Map(nodeEls.map((el) => [String(el.dataset.nodeKey), el]));
+  const width = graph.clientWidth;
+  const height = graph.clientHeight;
+  svg.setAttribute("viewBox", `0 0 ${Math.max(1, width)} ${Math.max(1, height)}`);
+  svg.innerHTML = `<defs><marker id="techArrowHead" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#81c7bd"></path></marker></defs>`;
+
+  const makeLine = (x1, y1, x2, y2) => {
+    const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+    line.setAttribute("x1", String(x1));
+    line.setAttribute("y1", String(y1));
+    line.setAttribute("x2", String(x2));
+    line.setAttribute("y2", String(y2));
+    line.setAttribute("class", "tech-edge");
+    line.setAttribute("marker-end", "url(#techArrowHead)");
+    return line;
+  };
+
+  const graphRect = graph.getBoundingClientRect();
+  nodeEls.forEach((el) => {
+    const requiresRaw = String(el.dataset.requires || "");
+    const requires = requiresRaw ? requiresRaw.split(",").map((v) => v.trim()).filter(Boolean) : [];
+    if (!requires.length) return;
+    const toRect = el.getBoundingClientRect();
+    const toX = toRect.left - graphRect.left + (toRect.width / 2);
+    const toY = toRect.top - graphRect.top + 4;
+    requires.forEach((req) => {
+      const fromEl = byKey.get(req);
+      if (!fromEl) return;
+      const fromRect = fromEl.getBoundingClientRect();
+      const fromX = fromRect.left - graphRect.left + (fromRect.width / 2);
+      const fromY = fromRect.bottom - graphRect.top - 4;
+      svg.appendChild(makeLine(fromX, fromY, toX, toY));
+    });
+  });
+}
+
+function startResearchRealtimeTick() {
+  if (researchTickTimer) {
+    clearInterval(researchTickTimer);
+    researchTickTimer = null;
+  }
+  if (!researchHubState?.activeResearch) return;
+  researchTickTimer = setInterval(async () => {
+    if (!researchHubState?.activeResearch) {
+      clearInterval(researchTickTimer);
+      researchTickTimer = null;
+      return;
+    }
+    const remain = Math.max(0, Number(researchHubState.activeResearch.remainingSeconds || 0) - 1);
+    researchHubState.activeResearch.remainingSeconds = remain;
+    const remainNode = document.getElementById("researchActiveRemaining");
+    if (remainNode) remainNode.textContent = formatSeconds(remain);
+    if (remain <= 0) {
+      clearInterval(researchTickTimer);
+      researchTickTimer = null;
+      try {
+        await loadResearchHub();
+        await loadShipyard();
+      } catch (err) {
+        // ignore transient polling error
+      }
+    }
+  }, 1000);
+}
+
+function renderResearchHubV3(data) {
+  researchHubState = JSON.parse(JSON.stringify(data || {}));
+  const nodes = Array.isArray(data?.nodes) ? data.nodes : [];
+  if (!nodes.length) {
+    elements.researchView.textContent = "테크트리 정보를 불러오지 못했습니다.";
+    researchButtons = [];
+    return;
+  }
+  const active = data?.activeResearch;
+  const policy = data?.policies || {};
+  const filterOptions = [
+    { key: "all", label: "전체" },
+    { key: "engine", label: "엔진" },
+    { key: "weapon", label: "무기" },
+    { key: "defense", label: "방어" },
+    { key: "utility", label: "보조" }
+  ];
+  if (!filterOptions.some((item) => item.key === researchCategoryFilter)) researchCategoryFilter = "all";
+  const groupedByTier = [1, 2, 3, 4].map((tier) => ({
+    tier,
+    nodes: nodes.filter((node) => Number(node.tier || 1) === tier).filter((node) => shouldShowResearchNode(node))
+  }));
+
+  const renderNode = (node) => {
+    const key = String(node.key || "");
+    const expanded = researchExpandedKeys.has(key);
+    const state = node.researched ? "완료" : node.lockedByBranch ? "분기잠금" : node.available ? "연구 가능" : "잠김";
+    const disabled = node.available ? "" : "disabled";
+    const req = Array.isArray(node.requires) ? node.requires.join(",") : "";
+    return `
+      <article class="tech-graph-node ${expanded ? "expanded" : ""}" data-node-key="${key}" data-requires="${req}">
+        <button type="button" class="tech-node-head" data-node-toggle="${key}">
+          <strong>${node.name}</strong>
+          <span>${state}</span>
+        </button>
+        <div class="tech-node-body">
+          <p>${node.description || ""}</p>
+          <span>비용: 금속 ${Number(node.cost?.metal || 0).toLocaleString()}, 연료 ${Number(node.cost?.fuel || 0).toLocaleString()}</span>
+          <span>시간: ${formatSeconds(Number(node.researchTime || 0))}</span>
+          <span>선행: ${(node.requires || []).length ? node.requires.join(", ") : "없음"}</span>
+          <button type="button" data-tech-start="${node.key}" ${disabled}>연구 시작</button>
+        </div>
+      </article>
+    `;
+  };
+
+  elements.researchView.innerHTML = `
+    <div class="growth-item">
+      <div>
+        <strong>연구 현황</strong>
+        <span>중앙정부 Lv.${Number(policy.governmentLevel || 1)} / 연구소 Lv.${Number(data?.labLevel || 1)} (해금 티어 ${Number(data?.labTierUnlocked || 1)})</span>
+        <span>진행 중 연구: ${active ? `${active.key} / 남은 ` : "없음"}</span>
+        ${active ? `<span id="researchActiveRemaining">${formatSeconds(Number(active.remainingSeconds || 0))}</span>` : ""}
+      </div>
+      <div class="research-speedup-controls">
+        <div class="speedup-controls">
+          <select id="researchSpeedupResource">
+            <option value="fuel">연료</option>
+            <option value="metal">금속</option>
+          </select>
+          <input id="researchSpeedupAmount" type="number" min="1" value="500">
+          <button type="button" id="speedupResearchButton" ${active ? "" : "disabled"}>연구 가속</button>
+        </div>
+        <span class="hint">기본 50재화=1초, 연속 가속 시 최대 100재화=1초</span>
+      </div>
+    </div>
+    <div class="growth-item">
+      <div class="tech-filter-bar">
+        ${filterOptions.map((item) => `<button type="button" class="tech-filter-button ${researchCategoryFilter === item.key ? "active" : ""}" data-tech-filter="${item.key}">${item.label}</button>`).join("")}
+      </div>
+    </div>
+    <div class="tech-graph">
+      <svg class="tech-edge-layer"></svg>
+      <div class="tech-columns">
+        ${groupedByTier.map((col) => `
+          <section class="tech-column">
+            <h4>Tier ${col.tier}</h4>
+            <div class="tech-column-list">
+              ${col.nodes.length ? col.nodes.map(renderNode).join("") : `<div class="hint">표시할 노드 없음</div>`}
+            </div>
+          </section>
+        `).join("")}
+      </div>
+    </div>
+  `;
+
+  researchButtons = Array.from(document.querySelectorAll("[data-tech-start]"));
+  researchButtons.forEach((button) => button.addEventListener("click", () => upgradeResearch(button.dataset.techStart)));
+  Array.from(document.querySelectorAll("[data-tech-filter]")).forEach((button) => {
+    button.addEventListener("click", () => {
+      researchCategoryFilter = String(button.dataset.techFilter || "all");
+      renderResearchHubV3(researchHubState || data);
+    });
+  });
+  Array.from(document.querySelectorAll("[data-node-toggle]")).forEach((button) => {
+    button.addEventListener("click", () => {
+      const key = String(button.dataset.nodeToggle || "");
+      if (!key) return;
+      if (researchExpandedKeys.has(key)) researchExpandedKeys.delete(key);
+      else researchExpandedKeys.add(key);
+      renderResearchHubV3(researchHubState || data);
+    });
+  });
+  document.getElementById("speedupResearchButton")?.addEventListener("click", speedupResearch);
+  requestAnimationFrame(() => drawTechGraphEdges());
+  startResearchRealtimeTick();
+}
+
+async function speedupResearch() {
+  clearMessages();
+  setBusy(true);
+  try {
+    const resourceType = String(document.getElementById("researchSpeedupResource")?.value || "fuel");
+    const amount = Number(document.getElementById("researchSpeedupAmount")?.value || 0);
+    const data = await api("/tech-tree/speedup", {
+      method: "POST",
+      body: JSON.stringify({ resourceType, amount })
+    });
+    if (data.resources) {
+      renderResources({
+        ...data.resources,
+        incomingAlerts,
+        commander: currentRatesState?.commander || null,
+        city: currentRatesState?.city || null
+      });
+    }
+    renderResearchHubV3(data);
+    await loadShipyard();
+    setStatus(data.message || "연구 가속을 적용했습니다.");
+  } catch (err) {
+    handleAuthError(err);
+  } finally {
+    setBusy(false);
+  }
+}
+
 async function loadResearchHub() {
-  renderResearchHub(await api("/tech-tree"));
+  renderResearchHubV3(await api("/tech-tree"));
 }
 
 async function loadGrowth() {
@@ -2934,7 +3153,7 @@ async function upgradeResearch(type) {
   setBusy(true);
   try {
     const data = await api(`/tech-tree/${type}/start`, { method: "POST" });
-    renderResearchHub(data);
+    renderResearchHubV3(data);
     renderResources(data.resources);
     await loadShipyard();
     setStatus(data.message);
@@ -3310,7 +3529,7 @@ async function refreshAll() {
   renderFleet(fleet);
   renderMap(map);
   renderEmpire(empire);
-  renderResearchHub(research);
+  renderResearchHubV3(research);
   renderCityV2(city);
   renderAdmirals(admirals);
   renderPolicyPanel(policies);
