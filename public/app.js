@@ -51,6 +51,7 @@ let researchCategoryFilter = "all";
 let researchExpandedKeys = new Set();
 let researchHubState = null;
 let researchTickTimer = null;
+let techGraphView = { scale: 0.85, x: 90, y: 70 };
 
 const elements = {
   authPanel: document.getElementById("authPanel"),
@@ -2917,44 +2918,120 @@ function shouldShowResearchNode(node) {
 }
 
 function drawTechGraphEdges() {
-  const graph = elements.researchView?.querySelector(".tech-graph");
+  const canvas = elements.researchView?.querySelector(".tech-graph-canvas");
   const svg = elements.researchView?.querySelector(".tech-edge-layer");
-  if (!graph || !svg) return;
-  const nodeEls = Array.from(graph.querySelectorAll(".tech-graph-node[data-node-key]"));
-  const byKey = new Map(nodeEls.map((el) => [String(el.dataset.nodeKey), el]));
-  const width = graph.clientWidth;
-  const height = graph.clientHeight;
+  if (!canvas || !svg) return;
+  const nodes = Array.from(canvas.querySelectorAll(".tech-graph-node[data-node-key]"));
+  const byKey = new Map();
+  nodes.forEach((node) => {
+    const key = String(node.dataset.nodeKey || "");
+    const x = Number(node.dataset.cx || 0);
+    const y = Number(node.dataset.cy || 0);
+    byKey.set(key, { x, y });
+  });
+  const width = Number(canvas.dataset.canvasWidth || 3200);
+  const height = Number(canvas.dataset.canvasHeight || 2400);
+  svg.setAttribute("width", String(width));
+  svg.setAttribute("height", String(height));
   svg.setAttribute("viewBox", `0 0 ${Math.max(1, width)} ${Math.max(1, height)}`);
-  svg.innerHTML = `<defs><marker id="techArrowHead" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#81c7bd"></path></marker></defs>`;
-
-  const makeLine = (x1, y1, x2, y2) => {
-    const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
-    line.setAttribute("x1", String(x1));
-    line.setAttribute("y1", String(y1));
-    line.setAttribute("x2", String(x2));
-    line.setAttribute("y2", String(y2));
-    line.setAttribute("class", "tech-edge");
-    line.setAttribute("marker-end", "url(#techArrowHead)");
-    return line;
-  };
-
-  const graphRect = graph.getBoundingClientRect();
-  nodeEls.forEach((el) => {
-    const requiresRaw = String(el.dataset.requires || "");
+  svg.innerHTML = `<defs><marker id="techArrowHead" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#8ff7e5"></path></marker></defs>`;
+  nodes.forEach((node) => {
+    const toKey = String(node.dataset.nodeKey || "");
+    const to = byKey.get(toKey);
+    if (!to) return;
+    const requiresRaw = String(node.dataset.requires || "");
     const requires = requiresRaw ? requiresRaw.split(",").map((v) => v.trim()).filter(Boolean) : [];
-    if (!requires.length) return;
-    const toRect = el.getBoundingClientRect();
-    const toX = toRect.left - graphRect.left + (toRect.width / 2);
-    const toY = toRect.top - graphRect.top + 4;
-    requires.forEach((req) => {
-      const fromEl = byKey.get(req);
-      if (!fromEl) return;
-      const fromRect = fromEl.getBoundingClientRect();
-      const fromX = fromRect.left - graphRect.left + (fromRect.width / 2);
-      const fromY = fromRect.bottom - graphRect.top - 4;
-      svg.appendChild(makeLine(fromX, fromY, toX, toY));
+    requires.forEach((reqKey) => {
+      const from = byKey.get(reqKey);
+      if (!from) return;
+      const midX = (from.x + to.x) / 2;
+      const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      path.setAttribute("d", `M ${from.x} ${from.y} C ${midX} ${from.y}, ${midX} ${to.y}, ${to.x} ${to.y}`);
+      path.setAttribute("class", "tech-edge");
+      path.setAttribute("marker-end", "url(#techArrowHead)");
+      svg.appendChild(path);
     });
   });
+}
+
+function applyTechGraphTransform() {
+  const canvas = document.getElementById("techGraphCanvas");
+  const zoomLabel = document.getElementById("techGraphZoomLabel");
+  if (!canvas) return;
+  const scale = Number(techGraphView.scale || 1);
+  const x = Number(techGraphView.x || 0);
+  const y = Number(techGraphView.y || 0);
+  canvas.style.transform = `translate(${x}px, ${y}px) scale(${scale})`;
+  if (zoomLabel) zoomLabel.textContent = `${Math.round(scale * 100)}%`;
+}
+
+function setupTechGraphInteraction() {
+  const viewport = document.getElementById("techGraphViewport");
+  const canvas = document.getElementById("techGraphCanvas");
+  if (!viewport || !canvas) return;
+  let drag = null;
+  const minScale = 0.4;
+  const maxScale = 2.2;
+
+  viewport.onwheel = (event) => {
+    event.preventDefault();
+    const rect = viewport.getBoundingClientRect();
+    const localX = event.clientX - rect.left;
+    const localY = event.clientY - rect.top;
+    const prev = Number(techGraphView.scale || 1);
+    const next = Math.max(minScale, Math.min(maxScale, prev + (event.deltaY < 0 ? 0.12 : -0.12)));
+    if (Math.abs(next - prev) < 0.0001) return;
+    const worldX = (localX - Number(techGraphView.x || 0)) / prev;
+    const worldY = (localY - Number(techGraphView.y || 0)) / prev;
+    techGraphView.scale = next;
+    techGraphView.x = localX - (worldX * next);
+    techGraphView.y = localY - (worldY * next);
+    applyTechGraphTransform();
+  };
+
+  viewport.onpointerdown = (event) => {
+    if (event.target.closest(".tech-graph-node")) return;
+    drag = {
+      id: event.pointerId,
+      x: event.clientX,
+      y: event.clientY,
+      ox: Number(techGraphView.x || 0),
+      oy: Number(techGraphView.y || 0)
+    };
+    viewport.setPointerCapture(event.pointerId);
+    viewport.classList.add("dragging");
+  };
+  viewport.onpointermove = (event) => {
+    if (!drag || drag.id !== event.pointerId) return;
+    techGraphView.x = drag.ox + (event.clientX - drag.x);
+    techGraphView.y = drag.oy + (event.clientY - drag.y);
+    applyTechGraphTransform();
+  };
+  viewport.onpointerup = (event) => {
+    if (!drag || drag.id !== event.pointerId) return;
+    drag = null;
+    viewport.classList.remove("dragging");
+  };
+  viewport.onpointercancel = () => {
+    drag = null;
+    viewport.classList.remove("dragging");
+  };
+
+  document.getElementById("techGraphZoomIn")?.addEventListener("click", () => {
+    techGraphView.scale = Math.min(maxScale, Number(techGraphView.scale || 1) + 0.12);
+    applyTechGraphTransform();
+  });
+  document.getElementById("techGraphZoomOut")?.addEventListener("click", () => {
+    techGraphView.scale = Math.max(minScale, Number(techGraphView.scale || 1) - 0.12);
+    applyTechGraphTransform();
+  });
+  document.getElementById("techGraphCenter")?.addEventListener("click", () => {
+    techGraphView.scale = 0.85;
+    techGraphView.x = 80;
+    techGraphView.y = 60;
+    applyTechGraphTransform();
+  });
+  applyTechGraphTransform();
 }
 
 function startResearchRealtimeTick() {
@@ -3094,6 +3171,225 @@ function renderResearchHubV3(data) {
   startResearchRealtimeTick();
 }
 
+function renderResearchHubV4(data) {
+  researchHubState = JSON.parse(JSON.stringify(data || {}));
+  const nodes = Array.isArray(data?.nodes) ? data.nodes : [];
+  if (!nodes.length) {
+    elements.researchView.textContent = "테크트리 정보를 불러오지 못했습니다.";
+    researchButtons = [];
+    return;
+  }
+
+  const active = data?.activeResearch;
+  const policy = data?.policies || {};
+  const filterOptions = [
+    { key: "all", label: "전체" },
+    { key: "engine", label: "엔진" },
+    { key: "weapon", label: "무기" },
+    { key: "defense", label: "방어" },
+    { key: "utility", label: "보조" }
+  ];
+  if (!filterOptions.some((item) => item.key === researchCategoryFilter)) researchCategoryFilter = "all";
+
+  const visibleNodes = nodes
+    .filter((node) => shouldShowResearchNode(node))
+    .slice()
+    .sort((a, b) => {
+      const tierDiff = Number(a.tier || 1) - Number(b.tier || 1);
+      if (tierDiff) return tierDiff;
+      const catDiff = String(a.category || "").localeCompare(String(b.category || ""));
+      if (catDiff) return catDiff;
+      return String(a.name || a.key || "").localeCompare(String(b.name || b.key || ""));
+    });
+
+  if (!visibleNodes.length) {
+    elements.researchView.innerHTML = `
+      <div class="growth-item"><strong>현재 필터에서 표시할 연구가 없습니다.</strong></div>
+      <div class="growth-item">
+        <div class="tech-filter-bar">
+          ${filterOptions.map((item) => `<button type="button" class="tech-filter-button ${researchCategoryFilter === item.key ? "active" : ""}" data-tech-filter="${item.key}">${item.label}</button>`).join("")}
+        </div>
+      </div>
+    `;
+    Array.from(document.querySelectorAll("[data-tech-filter]")).forEach((button) => {
+      button.addEventListener("click", () => {
+        researchCategoryFilter = String(button.dataset.techFilter || "all");
+        renderResearchHubV4(researchHubState || data);
+      });
+    });
+    return;
+  }
+
+  const preferredLaneOrder = ["engine", "weapon", "defense", "utility", "industry", "special", "hull"];
+  const foundLaneSet = new Set(visibleNodes.map((node) => String(node.category || "special")));
+  const orderedLanes = preferredLaneOrder.filter((cat) => foundLaneSet.has(cat));
+  Array.from(foundLaneSet)
+    .filter((cat) => !orderedLanes.includes(cat))
+    .sort((a, b) => a.localeCompare(b))
+    .forEach((cat) => orderedLanes.push(cat));
+
+  const laneMap = new Map();
+  orderedLanes.forEach((lane, laneIdx) => laneMap.set(lane, laneIdx));
+  const tierMap = new Map();
+  visibleNodes.forEach((node) => {
+    const tier = Number(node.tier || 1);
+    const lane = String(node.category || "special");
+    if (!tierMap.has(tier)) tierMap.set(tier, new Map());
+    const catMap = tierMap.get(tier);
+    if (!catMap.has(lane)) catMap.set(lane, []);
+    catMap.get(lane).push(node);
+  });
+
+  const nodeWidth = 300;
+  const nodeHeight = 130;
+  const tierGap = 560;
+  const laneGap = 360;
+  const stackGap = 170;
+  const baseX = 140;
+  const baseY = 110;
+
+  const placed = [];
+  for (let tier = 1; tier <= 4; tier += 1) {
+    const catMap = tierMap.get(tier) || new Map();
+    orderedLanes.forEach((lane) => {
+      const laneNodes = (catMap.get(lane) || []).slice();
+      laneNodes.forEach((node, index) => {
+        const laneIndex = Number(laneMap.get(lane) || 0);
+        const x = baseX + ((tier - 1) * tierGap) + ((index % 2) * 156);
+        const y = baseY + (laneIndex * laneGap) + (Math.floor(index / 2) * stackGap);
+        placed.push({
+          node,
+          x,
+          y,
+          cx: x + (nodeWidth / 2),
+          cy: y + 34
+        });
+      });
+    });
+  }
+
+  const maxX = Math.max(...placed.map((item) => item.x + nodeWidth), 2000);
+  const maxY = Math.max(...placed.map((item) => item.y + nodeHeight), 1400);
+  const canvasWidth = maxX + 260;
+  const canvasHeight = maxY + 220;
+  const byKey = new Map(placed.map((item) => [String(item.node.key || ""), item]));
+
+  const renderNode = (node) => {
+    const key = String(node?.key || "");
+    const place = byKey.get(key);
+    if (!place) return "";
+    const expanded = researchExpandedKeys.has(key);
+    const stateClass = node.researched
+      ? "state-completed"
+      : node.lockedByBranch
+        ? "state-branch-locked"
+        : node.available
+          ? "state-available"
+          : "state-locked";
+    const stateText = node.researched
+      ? "완료"
+      : node.lockedByBranch
+        ? "분기 잠금"
+        : node.available
+          ? "연구 가능"
+          : "잠김";
+    const researchingClass = active?.key === key ? "state-researching" : "";
+    const disabled = node.available ? "" : "disabled";
+    const req = Array.isArray(node.requires) ? node.requires.join(",") : "";
+    return `
+      <article
+        class="tech-graph-node ${expanded ? "expanded" : ""} ${stateClass} ${researchingClass}"
+        data-node-key="${key}"
+        data-requires="${req}"
+        data-cx="${place.cx}"
+        data-cy="${place.cy}"
+        style="left:${place.x}px;top:${place.y}px;width:${nodeWidth}px;"
+      >
+        <button type="button" class="tech-node-head" data-node-toggle="${key}">
+          <strong>${node.name}</strong>
+          <span>${stateText}</span>
+        </button>
+        <div class="tech-node-body">
+          <p>${node.description || ""}</p>
+          <span>비용: 금속 ${Number(node.cost?.metal || 0).toLocaleString()} / 연료 ${Number(node.cost?.fuel || 0).toLocaleString()}</span>
+          <span>시간: ${formatSeconds(Number(node.researchTime || 0))}</span>
+          <span>선행: ${(node.requires || []).length ? node.requires.join(", ") : "없음"}</span>
+          <button type="button" data-tech-start="${node.key}" ${disabled}>연구 시작</button>
+        </div>
+      </article>
+    `;
+  };
+
+  elements.researchView.innerHTML = `
+    <div class="growth-item">
+      <div>
+        <strong>연구 현황</strong>
+        <span>중앙정부 Lv.${Number(policy.governmentLevel || 1)} / 연구소 Lv.${Number(data?.labLevel || 1)} (해금 티어 ${Number(data?.labTierUnlocked || 1)})</span>
+        <span>진행 중 연구: ${active ? `${active.key} / 진행 중` : "없음"}</span>
+        ${active ? `<span id="researchActiveRemaining">${formatSeconds(Number(active.remainingSeconds || 0))}</span>` : ""}
+      </div>
+      <div class="research-speedup-controls">
+        <div class="speedup-controls">
+          <select id="researchSpeedupResource">
+            <option value="fuel">연료</option>
+            <option value="metal">금속</option>
+          </select>
+          <input id="researchSpeedupAmount" type="number" min="1" value="500">
+          <button type="button" id="speedupResearchButton" ${active ? "" : "disabled"}>연구 가속</button>
+        </div>
+        <span class="hint">기본 50 자원 = 1초, 연속 가속 디버프 시 최대 100 자원 = 1초</span>
+      </div>
+    </div>
+    <div class="growth-item">
+      <div class="tech-filter-bar">
+        ${filterOptions.map((item) => `<button type="button" class="tech-filter-button ${researchCategoryFilter === item.key ? "active" : ""}" data-tech-filter="${item.key}">${item.label}</button>`).join("")}
+      </div>
+    </div>
+    <div class="tech-graph-toolbar">
+      <div class="left">
+        <strong>테크 지도</strong>
+        <span class="hint">드래그로 이동, 휠로 확대/축소</span>
+      </div>
+      <div class="right">
+        <button type="button" id="techGraphZoomOut">-</button>
+        <button type="button" id="techGraphZoomIn">+</button>
+        <button type="button" id="techGraphCenter">중앙</button>
+        <span id="techGraphZoomLabel">100%</span>
+      </div>
+    </div>
+    <div id="techGraphViewport" class="tech-graph-viewport">
+      <div id="techGraphCanvas" class="tech-graph-canvas" data-canvas-width="${canvasWidth}" data-canvas-height="${canvasHeight}" style="width:${canvasWidth}px;height:${canvasHeight}px;">
+        <svg class="tech-edge-layer"></svg>
+        ${placed.map((item) => renderNode(item.node)).join("")}
+      </div>
+    </div>
+  `;
+
+  researchButtons = Array.from(document.querySelectorAll("[data-tech-start]"));
+  researchButtons.forEach((button) => button.addEventListener("click", () => upgradeResearch(button.dataset.techStart)));
+  Array.from(document.querySelectorAll("[data-tech-filter]")).forEach((button) => {
+    button.addEventListener("click", () => {
+      researchCategoryFilter = String(button.dataset.techFilter || "all");
+      renderResearchHubV4(researchHubState || data);
+    });
+  });
+  Array.from(document.querySelectorAll("[data-node-toggle]")).forEach((button) => {
+    button.addEventListener("click", () => {
+      const key = String(button.dataset.nodeToggle || "");
+      if (!key) return;
+      if (researchExpandedKeys.has(key)) researchExpandedKeys.delete(key);
+      else researchExpandedKeys.add(key);
+      renderResearchHubV4(researchHubState || data);
+    });
+  });
+  document.getElementById("speedupResearchButton")?.addEventListener("click", speedupResearch);
+  requestAnimationFrame(() => {
+    drawTechGraphEdges();
+    setupTechGraphInteraction();
+  });
+  startResearchRealtimeTick();
+}
+
 async function speedupResearch() {
   clearMessages();
   setBusy(true);
@@ -3112,7 +3408,7 @@ async function speedupResearch() {
         city: currentRatesState?.city || null
       });
     }
-    renderResearchHubV3(data);
+    renderResearchHubV4(data);
     await loadShipyard();
     setStatus(data.message || "연구 가속을 적용했습니다.");
   } catch (err) {
@@ -3123,7 +3419,7 @@ async function speedupResearch() {
 }
 
 async function loadResearchHub() {
-  renderResearchHubV3(await api("/tech-tree"));
+  renderResearchHubV4(await api("/tech-tree"));
 }
 
 async function loadGrowth() {
@@ -3153,7 +3449,7 @@ async function upgradeResearch(type) {
   setBusy(true);
   try {
     const data = await api(`/tech-tree/${type}/start`, { method: "POST" });
-    renderResearchHubV3(data);
+    renderResearchHubV4(data);
     renderResources(data.resources);
     await loadShipyard();
     setStatus(data.message);
@@ -3529,7 +3825,7 @@ async function refreshAll() {
   renderFleet(fleet);
   renderMap(map);
   renderEmpire(empire);
-  renderResearchHubV3(research);
+  renderResearchHubV4(research);
   renderCityV2(city);
   renderAdmirals(admirals);
   renderPolicyPanel(policies);

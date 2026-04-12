@@ -995,61 +995,93 @@ body:has(#gamePanel:not(.hidden)) {
 .tech-graph {
   position: relative;
   width: 100%;
-  overflow: auto;
-  padding: 8px;
+  padding: 0;
 }
 
-.tech-columns {
-  position: relative;
-  z-index: 2;
-  display: grid;
-  grid-template-columns: repeat(4, minmax(240px, 1fr));
-  gap: 14px;
-  min-width: 980px;
-}
-
-.tech-column {
-  display: grid;
-  gap: 8px;
-}
-
-.tech-column h4 {
-  margin: 0;
-  padding: 6px 8px;
-  background: rgba(12, 23, 31, 0.8);
-  border: 1px solid #355066;
+.tech-graph-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  margin-top: 10px;
+  margin-bottom: 8px;
+  background: rgba(8, 13, 17, 0.74);
+  border: 1px solid #263746;
   border-radius: 8px;
 }
 
-.tech-column-list {
-  display: grid;
+.tech-graph-toolbar .left,
+.tech-graph-toolbar .right {
+  display: flex;
+  align-items: center;
   gap: 8px;
+}
+
+.tech-graph-toolbar .right button {
+  min-width: 34px;
+  min-height: 34px;
+  padding: 6px 10px;
+}
+
+.tech-graph-viewport {
+  position: relative;
+  width: 100%;
+  min-height: 62vh;
+  max-height: calc(100vh - 355px);
+  overflow: hidden;
+  background:
+    linear-gradient(rgba(56, 94, 118, 0.22) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(56, 94, 118, 0.22) 1px, transparent 1px),
+    radial-gradient(circle at 20% 18%, rgba(115, 207, 255, 0.14), transparent 48%),
+    radial-gradient(circle at 82% 72%, rgba(183, 129, 255, 0.16), transparent 48%),
+    #05080f;
+  background-size: 52px 52px, 52px 52px, auto, auto, auto;
+  border: 1px solid #2f4b63;
+  border-radius: 8px;
+  cursor: grab;
+}
+
+.tech-graph-viewport.dragging {
+  cursor: grabbing;
+}
+
+.tech-graph-canvas {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+  will-change: transform;
 }
 
 .tech-edge-layer {
   position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
+  left: 0;
+  top: 0;
+  width: 1000px;
+  height: 1000px;
   z-index: 1;
   pointer-events: none;
 }
 
 .tech-edge {
-  stroke: #81c7bd;
-  stroke-width: 2;
-  opacity: 0.75;
+  stroke: #9df7ec;
+  stroke-width: 3;
+  opacity: 0.95;
+  fill: none;
+  filter: drop-shadow(0 0 4px rgba(111, 248, 227, 0.42));
 }
 
 .tech-graph-node {
-  position: relative;
+  position: absolute;
   z-index: 3;
   display: grid;
   gap: 6px;
   padding: 10px;
-  background: rgba(8, 13, 17, 0.86);
-  border: 1px solid #355066;
+  background: rgba(9, 15, 23, 0.95);
+  border: 2px solid #4f6f84;
   border-radius: 8px;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.4);
 }
 
 .tech-node-head {
@@ -1060,8 +1092,8 @@ body:has(#gamePanel:not(.hidden)) {
   min-height: 36px;
   padding: 6px 10px;
   text-align: left;
-  background: rgba(38, 55, 70, 0.7);
-  border: 1px solid #496579;
+  background: rgba(27, 41, 54, 0.95);
+  border: 1px solid #6d8fa7;
   border-radius: 8px;
 }
 
@@ -1072,6 +1104,50 @@ body:has(#gamePanel:not(.hidden)) {
 
 .tech-graph-node.expanded .tech-node-body {
   display: grid;
+}
+
+.tech-graph-node.state-locked {
+  border-color: #64748b;
+  background: rgba(29, 35, 43, 0.95);
+}
+
+.tech-graph-node.state-locked .tech-node-head {
+  background: rgba(51, 65, 85, 0.88);
+  border-color: #94a3b8;
+}
+
+.tech-graph-node.state-available {
+  border-color: #22d3ee;
+  background: rgba(4, 36, 45, 0.94);
+}
+
+.tech-graph-node.state-available .tech-node-head {
+  background: rgba(8, 80, 104, 0.92);
+  border-color: #67e8f9;
+}
+
+.tech-graph-node.state-completed {
+  border-color: #22c55e;
+  background: rgba(6, 48, 22, 0.95);
+}
+
+.tech-graph-node.state-completed .tech-node-head {
+  background: rgba(21, 120, 67, 0.92);
+  border-color: #86efac;
+}
+
+.tech-graph-node.state-branch-locked {
+  border-color: #f97316;
+  background: rgba(61, 33, 13, 0.95);
+}
+
+.tech-graph-node.state-branch-locked .tech-node-head {
+  background: rgba(124, 45, 18, 0.92);
+  border-color: #fdba74;
+}
+
+.tech-graph-node.state-researching {
+  box-shadow: 0 0 0 2px #fef08a, 0 0 14px rgba(250, 204, 21, 0.62), 0 10px 24px rgba(0, 0, 0, 0.45);
 }
 
 .research-speedup-controls {
@@ -1429,9 +1505,14 @@ pre {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
-  .tech-columns {
-    min-width: 0;
-    grid-template-columns: 1fr;
+  .tech-graph-toolbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .tech-graph-viewport {
+    min-height: 52vh;
+    max-height: calc(100vh - 410px);
   }
 
   .research-speedup-controls {
