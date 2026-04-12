@@ -386,6 +386,141 @@ const STRATEGIC_POLICIES = {
   ]
 };
 
+const TECH_NODE_KEY_OVERRIDES = {
+  unlock_monitor: {
+    tier: 5,
+    requires: ["doctrine_guard", "cruiser_command"],
+    metalCost: 21000,
+    fuelCost: 12600,
+    researchTime: 6200
+  },
+  advanced_shield_module: {
+    tier: 5,
+    requires: ["unlock_monitor", "doctrine_guard"],
+    metalCost: 18800,
+    fuelCost: 11900,
+    researchTime: 5800
+  },
+  unlock_battleship: {
+    tier: 6,
+    requires: ["unlock_monitor", "doctrine_siege"],
+    metalCost: 26000,
+    fuelCost: 16400,
+    researchTime: 7400
+  },
+  siege_artillery_suite: {
+    tier: 6,
+    requires: ["unlock_battleship", "doctrine_siege"],
+    metalCost: 23600,
+    fuelCost: 15200,
+    researchTime: 7100
+  },
+  unlock_carrier: {
+    tier: 7,
+    requires: ["unlock_battleship", "tactical_computer"],
+    metalCost: 32400,
+    fuelCost: 21600,
+    researchTime: 8600
+  },
+  unlock_dreadnought: {
+    tier: 8,
+    requires: ["unlock_battleship", "unlock_carrier"],
+    metalCost: 42000,
+    fuelCost: 28600,
+    researchTime: 9800
+  },
+  unlock_titan: {
+    tier: 10,
+    requires: ["titan_war_forge", "unlock_dreadnought"],
+    metalCost: 74000,
+    fuelCost: 52000,
+    researchTime: 13200
+  }
+};
+
+const EXTRA_TECH_TREE_NODES = [
+  {
+    key: "supercapital_logistics",
+    name: "Supercapital Logistics",
+    tier: 8,
+    category: "industry",
+    description: "Supercapital upkeep and assembly optimization. Build cost reduced further.",
+    metalCost: 38800,
+    fuelCost: 25200,
+    researchTime: 9300,
+    requires: ["unlock_carrier", "unlock_battleship"],
+    exclusiveGroup: "",
+    effectType: "buff_build_cost_pct",
+    effectValue: 0.12
+  },
+  {
+    key: "dreadnought_command_matrix",
+    name: "Dreadnought Command Matrix",
+    tier: 9,
+    category: "tactics",
+    description: "Heavy fleet command uplink. Combat bonus increases sharply.",
+    metalCost: 52000,
+    fuelCost: 35600,
+    researchTime: 11200,
+    requires: ["unlock_dreadnought"],
+    exclusiveGroup: "",
+    effectType: "buff_combat_pct",
+    effectValue: 0.22
+  },
+  {
+    key: "titan_war_forge",
+    name: "Titan War Forge",
+    tier: 9,
+    category: "special",
+    description: "Enables extreme-grade modules and titan-scale production systems.",
+    metalCost: 57000,
+    fuelCost: 39000,
+    researchTime: 11800,
+    requires: ["unlock_dreadnought", "supercapital_logistics"],
+    exclusiveGroup: "",
+    effectType: "unlock_component",
+    effectValue: 0,
+    unlockKey: "citadel_armor"
+  },
+  {
+    key: "omega_reactor_theory",
+    name: "Omega Reactor Theory",
+    tier: 10,
+    category: "engine",
+    description: "Extreme power core theory. Unlocks titan-grade propulsion cores.",
+    metalCost: 69000,
+    fuelCost: 47000,
+    researchTime: 12800,
+    requires: ["titan_war_forge"],
+    exclusiveGroup: "",
+    effectType: "unlock_component",
+    effectValue: 0,
+    unlockKey: "titan_reactor_core"
+  },
+  {
+    key: "apex_fleet_doctrine",
+    name: "Apex Fleet Doctrine",
+    tier: 10,
+    category: "tactics",
+    description: "Final doctrine for end-game fleets. Strong global fleet combat increase.",
+    metalCost: 78000,
+    fuelCost: 56000,
+    researchTime: 13800,
+    requires: ["unlock_titan", "dreadnought_command_matrix"],
+    exclusiveGroup: "",
+    effectType: "buff_combat_pct",
+    effectValue: 0.35
+  }
+];
+
+function getBaseTechNodes() {
+  const tunedActive = ACTIVE_TECH_TREE_NODES.map((node) => {
+    const override = TECH_NODE_KEY_OVERRIDES[String(node.key || "")];
+    return override ? { ...node, ...override } : node;
+  });
+  return [...tunedActive, ...EXTRA_TECH_TREE_NODES];
+}
+
 function componentUnlockNodeKey(componentKey) {
   const fixed = {
     gauss_battery: "rail_mk2",
@@ -398,10 +533,19 @@ function componentUnlockNodeKey(componentKey) {
   return fixed[String(componentKey || "")] || `unlock_component_${String(componentKey || "")}`;
 }
 
+function stableKeySpread(value) {
+  const text = String(value || "");
+  let hash = 0;
+  for (let i = 0; i < text.length; i += 1) {
+    hash = ((hash << 5) - hash + text.charCodeAt(i)) | 0;
+  }
+  return Math.abs(hash % 3) - 1;
+}
+
 function buildAutoComponentTechNodes() {
   const basicKeys = new Set(["standard_engine", "light_railgun", "reinforced_armor", "cargo_module"]);
   const reserved = new Set(
-    ACTIVE_TECH_TREE_NODES
+    getBaseTechNodes()
       .filter((node) => String(node.effectType || "") === "unlock_component" && String(node.unlockKey || ""))
       .map((node) => String(node.unlockKey))
   );
@@ -418,13 +562,18 @@ function buildAutoComponentTechNodes() {
     .map((component) => {
       const power = Number(component.power || 0);
       const baseTier = componentTierByPower(power);
-      const tier = Math.max(2, Math.min(4, baseTier));
+      const tier = Math.max(2, Math.min(10, baseTier + stableKeySpread(component.key)));
       const requires = [String(categoryRoot[String(component.category || "")] || "industry_1")];
       if (tier >= 3) requires.push("destroyer_blueprint");
       if (tier >= 4) requires.push("cruiser_command");
-      const metal = Math.max(1800, Math.floor(Number(component.metal || 0) * (6 + tier * 0.6)));
-      const fuel = Math.max(900, Math.floor(Number(component.fuel || 0) * (6 + tier * 0.6)));
-      const researchTime = Math.max(700, Math.floor((power * 25) + (tier * 260)));
+      if (tier >= 5) requires.push("unlock_monitor");
+      if (tier >= 6) requires.push("unlock_battleship");
+      if (tier >= 7) requires.push("unlock_carrier");
+      if (tier >= 8) requires.push("unlock_dreadnought");
+      if (tier >= 10) requires.push("unlock_titan");
+      const metal = Math.max(1800, Math.floor(Number(component.metal || 0) * (6 + tier * 1.2)));
+      const fuel = Math.max(900, Math.floor(Number(component.fuel || 0) * (6 + tier * 1.1)));
+      const researchTime = Math.max(700, Math.floor((power * 40) + (tier * 520)));
       return {
         key: componentUnlockNodeKey(component.key),
         name: `${component.name} 설계`,
@@ -839,6 +988,7 @@ async function seedShipyardData() {
   }
 
   for (const component of DEFAULT_COMPONENTS) {
+    const tuned = tunedComponentForTier(component);
     await run(
       `
         INSERT OR IGNORE INTO components
@@ -847,17 +997,17 @@ async function seedShipyardData() {
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '')
       `,
       [
-        component.key,
-        component.name,
-        component.category,
-        component.hp,
-        component.attack,
-        component.defense,
-        component.speed,
-        component.power,
-        component.powerBonus || 0,
-        component.metal,
-        component.fuel
+        tuned.key,
+        tuned.name,
+        tuned.category,
+        tuned.hp,
+        tuned.attack,
+        tuned.defense,
+        tuned.speed,
+        tuned.power,
+        tuned.powerBonus || 0,
+        tuned.metal,
+        tuned.fuel
       ]
     );
     await run(
@@ -868,17 +1018,17 @@ async function seedShipyardData() {
         WHERE key = ?
       `,
       [
-        component.name,
-        component.category,
-        component.hp,
-        component.attack,
-        component.defense,
-        component.speed,
-        component.power,
-        component.powerBonus || 0,
-        component.metal,
-        component.fuel,
-        component.key
+        tuned.name,
+        tuned.category,
+        tuned.hp,
+        tuned.attack,
+        tuned.defense,
+        tuned.speed,
+        tuned.power,
+        tuned.powerBonus || 0,
+        tuned.metal,
+        tuned.fuel,
+        tuned.key
       ]
     );
   }
@@ -886,7 +1036,7 @@ async function seedShipyardData() {
 
 async function seedTechTreeData() {
   const generatedNodes = buildAutoComponentTechNodes();
-  const allTechNodes = [...ACTIVE_TECH_TREE_NODES, ...generatedNodes];
+  const allTechNodes = [...getBaseTechNodes(), ...generatedNodes];
   const activeKeys = allTechNodes.map((node) => String(node.key));
   if (activeKeys.length) {
     const placeholders = activeKeys.map(() => "?").join(", ");
@@ -1518,10 +1668,10 @@ function ownerColorHex(ownerId) {
 function hullUnlockRequirement(hullKey) {
   const map = {
     corvette: { type: "lab", level: 1 },
-    destroyer: { type: "lab", level: 2 },
-    cruiser: { type: "lab", level: 3 },
+    destroyer: { type: "tech", key: "destroyer_blueprint" },
+    cruiser: { type: "tech", key: "cruiser_command" },
     monitor: { type: "tech", key: "unlock_monitor" },
-    battleship: { type: "tech", key: "doctrine_siege" },
+    battleship: { type: "tech", key: "unlock_battleship" },
     carrier: { type: "tech", key: "unlock_carrier" },
     dreadnought: { type: "tech", key: "unlock_dreadnought" },
     titan: { type: "tech", key: "unlock_titan" }
@@ -1531,10 +1681,39 @@ function hullUnlockRequirement(hullKey) {
 
 function componentTierByPower(powerCost) {
   const power = Number(powerCost || 0);
-  if (power <= 30) return 1;
-  if (power <= 60) return 2;
-  if (power <= 90) return 3;
-  return 4;
+  if (power <= 14) return 1;
+  if (power <= 20) return 2;
+  if (power <= 28) return 3;
+  if (power <= 36) return 4;
+  if (power <= 46) return 5;
+  if (power <= 58) return 6;
+  if (power <= 72) return 7;
+  if (power <= 90) return 8;
+  if (power <= 115) return 9;
+  return 10;
+}
+
+function tunedComponentForTier(baseComponent) {
+  const component = { ...baseComponent };
+  const tier = componentTierByPower(component.power);
+  if (tier <= 5) return component;
+  const growth = tier - 5;
+  const statMult = 1 + (growth * 0.13);
+  const speedMult = 1 + (growth * 0.06);
+  const costMult = 1 + (growth * 0.11);
+  const powerMult = 1 + (growth * 0.05);
+  component.hp = Math.round(Number(component.hp || 0) * statMult);
+  component.attack = Math.round(Number(component.attack || 0) * statMult);
+  component.defense = Math.round(Number(component.defense || 0) * statMult);
+  const speed = Number(component.speed || 0);
+  component.speed = speed >= 0
+    ? Math.round(speed * speedMult)
+    : Math.round(speed * (1 + ((speedMult - 1) * 0.5)));
+  component.power = Math.max(1, Math.round(Number(component.power || 0) * powerMult));
+  component.powerBonus = Math.round(Number(component.powerBonus || 0) * statMult);
+  component.metal = Math.max(1, Math.round(Number(component.metal || 0) * costMult));
+  component.fuel = Math.max(1, Math.round(Number(component.fuel || 0) * costMult));
+  return component;
 }
 
 function componentUnlockRequirement(component) {
@@ -2084,10 +2263,13 @@ async function getTechTreeState(userId) {
       available
     };
   });
+  const maxTier = parsedNodes.length
+    ? Math.max(...parsedNodes.map((node) => Number(node.tier || 1)))
+    : 1;
 
   return {
     labLevel,
-    labTierUnlocked: Math.max(1, Math.min(4, labLevel)),
+    labTierUnlocked: Math.max(1, Math.min(maxTier, labLevel)),
     nodes: parsedNodes,
     researchedKeys: Array.from(researchedSet),
     activeResearch: active

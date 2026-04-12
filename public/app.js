@@ -51,7 +51,7 @@ let researchCategoryFilter = "all";
 let researchExpandedKeys = new Set();
 let researchHubState = null;
 let researchTickTimer = null;
-let techGraphView = { scale: 0.85, x: 90, y: 70 };
+let techGraphView = { scale: 1, x: 40, y: 40 };
 
 const elements = {
   authPanel: document.getElementById("authPanel"),
@@ -2925,9 +2925,12 @@ function drawTechGraphEdges() {
   const byKey = new Map();
   nodes.forEach((node) => {
     const key = String(node.dataset.nodeKey || "");
-    const x = Number(node.dataset.cx || 0);
-    const y = Number(node.dataset.cy || 0);
-    byKey.set(key, { x, y });
+    byKey.set(key, {
+      x: Number(node.offsetLeft || 0),
+      y: Number(node.offsetTop || 0),
+      w: Number(node.offsetWidth || 0),
+      h: Number(node.offsetHeight || 0)
+    });
   });
   const width = Number(canvas.dataset.canvasWidth || 3200);
   const height = Number(canvas.dataset.canvasHeight || 2400);
@@ -2944,9 +2947,14 @@ function drawTechGraphEdges() {
     requires.forEach((reqKey) => {
       const from = byKey.get(reqKey);
       if (!from) return;
-      const midX = (from.x + to.x) / 2;
+      const forward = to.x >= from.x;
+      const fromX = forward ? (from.x + from.w - 6) : (from.x + 6);
+      const toX = forward ? (to.x + 6) : (to.x + to.w - 6);
+      const fromY = from.y + (from.h / 2);
+      const toY = to.y + (to.h / 2);
+      const midX = (fromX + toX) / 2;
       const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-      path.setAttribute("d", `M ${from.x} ${from.y} C ${midX} ${from.y}, ${midX} ${to.y}, ${to.x} ${to.y}`);
+      path.setAttribute("d", `M ${fromX} ${fromY} C ${midX} ${fromY}, ${midX} ${toY}, ${toX} ${toY}`);
       path.setAttribute("class", "tech-edge");
       path.setAttribute("marker-end", "url(#techArrowHead)");
       svg.appendChild(path);
@@ -3026,9 +3034,9 @@ function setupTechGraphInteraction() {
     applyTechGraphTransform();
   });
   document.getElementById("techGraphCenter")?.addEventListener("click", () => {
-    techGraphView.scale = 0.85;
-    techGraphView.x = 80;
-    techGraphView.y = 60;
+    techGraphView.scale = 1;
+    techGraphView.x = 40;
+    techGraphView.y = 40;
     applyTechGraphTransform();
   });
   applyTechGraphTransform();
@@ -3239,34 +3247,49 @@ function renderResearchHubV4(data) {
     if (!catMap.has(lane)) catMap.set(lane, []);
     catMap.get(lane).push(node);
   });
+  const tierValues = Array.from(new Set(visibleNodes.map((node) => Number(node.tier || 1)))).sort((a, b) => a - b);
+  const firstTier = tierValues.length ? tierValues[0] : 1;
 
-  const nodeWidth = 300;
-  const nodeHeight = 130;
-  const tierGap = 560;
-  const laneGap = 360;
-  const stackGap = 170;
-  const baseX = 140;
-  const baseY = 110;
+  const nodeWidth = 340;
+  const nodeHeight = 200;
+  const tierGap = 760;
+  const stackGap = 300;
+  const baseX = 160;
+  const baseY = 140;
+
+  const laneOffsets = new Map();
+  let laneCursorY = baseY;
+  orderedLanes.forEach((lane) => {
+    let maxCountInLane = 1;
+    tierValues.forEach((tier) => {
+      const inTier = (tierMap.get(Number(tier))?.get(lane) || []).length;
+      if (inTier > maxCountInLane) maxCountInLane = inTier;
+    });
+    const laneBandHeight = ((maxCountInLane - 1) * stackGap) + nodeHeight + 180;
+    laneOffsets.set(lane, laneCursorY);
+    laneCursorY += laneBandHeight;
+  });
 
   const placed = [];
-  for (let tier = 1; tier <= 4; tier += 1) {
+  tierValues.forEach((tier) => {
     const catMap = tierMap.get(tier) || new Map();
     orderedLanes.forEach((lane) => {
       const laneNodes = (catMap.get(lane) || []).slice();
       laneNodes.forEach((node, index) => {
         const laneIndex = Number(laneMap.get(lane) || 0);
-        const x = baseX + ((tier - 1) * tierGap) + ((index % 2) * 156);
-        const y = baseY + (laneIndex * laneGap) + (Math.floor(index / 2) * stackGap);
+        const laneBaseY = Number(laneOffsets.get(lane) || (baseY + (laneIndex * (nodeHeight + 180))));
+        const x = baseX + ((Number(tier) - firstTier) * tierGap);
+        const y = laneBaseY + (index * stackGap);
         placed.push({
           node,
           x,
           y,
           cx: x + (nodeWidth / 2),
-          cy: y + 34
+          cy: y + (nodeHeight / 2)
         });
       });
     });
-  }
+  });
 
   const maxX = Math.max(...placed.map((item) => item.x + nodeWidth), 2000);
   const maxY = Math.max(...placed.map((item) => item.y + nodeHeight), 1400);

@@ -1027,8 +1027,8 @@ body:has(#gamePanel:not(.hidden)) {
 .tech-graph-viewport {
   position: relative;
   width: 100%;
-  min-height: 62vh;
-  max-height: calc(100vh - 355px);
+  min-height: 70vh;
+  max-height: calc(100vh - 300px);
   overflow: hidden;
   background:
     linear-gradient(rgba(56, 94, 118, 0.22) 1px, transparent 1px),
@@ -1058,8 +1058,8 @@ body:has(#gamePanel:not(.hidden)) {
   position: absolute;
   left: 0;
   top: 0;
-  width: 1000px;
-  height: 1000px;
+  width: 100%;
+  height: 100%;
   z-index: 1;
   pointer-events: none;
 }
@@ -1078,6 +1078,7 @@ body:has(#gamePanel:not(.hidden)) {
   display: grid;
   gap: 6px;
   padding: 10px;
+  min-height: 172px;
   background: rgba(9, 15, 23, 0.95);
   border: 2px solid #4f6f84;
   border-radius: 8px;
@@ -1100,6 +1101,8 @@ body:has(#gamePanel:not(.hidden)) {
 .tech-node-body {
   display: none;
   gap: 6px;
+  max-height: 124px;
+  overflow: auto;
 }
 
 .tech-graph-node.expanded .tech-node-body {
@@ -1511,8 +1514,8 @@ pre {
   }
 
   .tech-graph-viewport {
-    min-height: 52vh;
-    max-height: calc(100vh - 410px);
+    min-height: 58vh;
+    max-height: calc(100vh - 360px);
   }
 
   .research-speedup-controls {
