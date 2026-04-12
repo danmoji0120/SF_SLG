@@ -79,11 +79,11 @@ const MAP_MAX_Y = 2000;
 const MAP_DISTANCE_UNIT = 20;
 const SPEEDUP_RESOURCE_PER_SECOND = 100;
 const ZONE_TARGET_POWER_BY_LEVEL = {
-  1: 500,
-  2: 3000,
-  3: 12000,
-  4: 28000,
-  5: 50000
+  1: 750,
+  2: 4600,
+  3: 16500,
+  4: 36000,
+  5: 68000
 };
 
 const DEFAULT_ZONES = [
@@ -2083,9 +2083,11 @@ async function consumeSpeedup(userId, category, amount) {
 
 function cityUpgradeCost(buildingKey, level) {
   const building = CITY_BUILDINGS[buildingKey];
+  const stage = Math.max(0, Number(level || 1) - 1);
+  const difficulty = 1.4 + Math.pow(stage, 1.28) * 0.5;
   return {
-    metal: Math.floor(building.baseMetal * Math.pow(building.metalGrowth, Math.max(0, level - 1))),
-    fuel: Math.floor(building.baseFuel * Math.pow(building.fuelGrowth, Math.max(0, level - 1)))
+    metal: Math.floor(building.baseMetal * Math.pow(building.metalGrowth, stage) * difficulty),
+    fuel: Math.floor(building.baseFuel * Math.pow(building.fuelGrowth, stage) * difficulty)
   };
 }
 
@@ -2359,6 +2361,15 @@ async function getLaunchFleetFromSlot(userId, slot) {
   return { slot: slotNumber, fleet, admiral };
 }
 
+async function getActiveTravelingMissionForSlot(userId, slot) {
+  const slotNumber = Number.parseInt(slot, 10);
+  if (!Number.isInteger(slotNumber) || slotNumber < 1) return null;
+  return get(
+    "SELECT id, mission_type, target_name FROM missions WHERE user_id = ? AND status = 'traveling' AND attacker_fleet_slot = ? ORDER BY id DESC LIMIT 1",
+    [userId, slotNumber]
+  );
+}
+
 async function getTotalShipCount(userId) {
   const owned = await get("SELECT COALESCE(SUM(quantity), 0) AS cnt FROM owned_ships WHERE user_id = ?", [userId]);
   const queued = await get("SELECT COALESCE(SUM(quantity), 0) AS cnt FROM production_queue WHERE user_id = ? AND status = 'building'", [userId]);
@@ -2394,8 +2405,8 @@ async function getProductionRates(userId) {
   const bonus = await get(
     `
       SELECT
-        COALESCE(SUM(z.metal_rate), 0) AS metal,
-        COALESCE(SUM(z.fuel_rate), 0) AS fuel
+        COALESCE(SUM(CASE WHEN z.level <= 1 THEN z.metal_rate * 0.18 ELSE z.metal_rate * 0.3 END), 0) AS metal,
+        COALESCE(SUM(CASE WHEN z.level <= 1 THEN z.fuel_rate * 0.18 ELSE z.fuel_rate * 0.3 END), 0) AS fuel
       FROM occupied_zones oz
       JOIN neutral_zones z ON z.id = oz.zone_id
       WHERE oz.user_id = ?
@@ -2482,13 +2493,9 @@ async function getTechTreeState(userId) {
     }
     const isResearched = researchedSet.has(String(node.key));
     const requirementMet = requires.every((key) => researchedSet.has(String(key)));
-    const sameBranchLocked = String(node.exclusive_group || "") && nodes.some((other) =>
-      String(other.exclusive_group || "") === String(node.exclusive_group || "") &&
-      String(other.key || "") !== String(node.key || "") &&
-      researchedSet.has(String(other.key || ""))
-    );
+    const sameBranchLocked = false;
     const tierUnlocked = labLevel >= Number(node.tier || 1);
-    const available = !isResearched && !sameBranchLocked && requirementMet && tierUnlocked && !activeKey;
+    const available = !isResearched && requirementMet && tierUnlocked && !activeKey;
 
     return {
       key: String(node.key),
@@ -3589,7 +3596,12 @@ async function resolveMission(mission) {
     }
     const attackerCombatMultiplier =
       playerBonuses.combatMultiplier * (1 + Number(fleetAdmiral?.combatBonus || 0) * 0.9);
-    const defenderBonuses = owner ? await getPlayerBonuses(owner.user_id) : { combatMultiplier: 1 };
+    const neutralDefenseMultiplier = 1
+      + Math.max(0, Number(zone.level || 1) - 1) * 0.14
+      + (String(zone.faction || "neutral") === "third_empire" ? 0.28 : 0.1);
+    const defenderBonuses = owner
+      ? await getPlayerBonuses(owner.user_id)
+      : { combatMultiplier: neutralDefenseMultiplier };
     const travelSeconds = Math.max(10, Math.ceil((mission.arrive_at - mission.started_at) / 1000));
     const battle = simulateDesignBattle(
       fleet,
@@ -4829,7 +4841,7 @@ app.post("/zones/:id/garrison/dispatch", requireAuth, async (req, res) => {
     if (!owner || Number(owner.user_id) !== Number(req.user.id)) {
       return res.status(403).json({ error: "\ub0b4 \uc810\ub839\uc9c0\uc5d0\ub9cc \uc8fc\ub454 \ucd9c\uaca9 \uac00\ub2a5\ud569\ub2c8\ub2e4." });
     }
-    const activeMission = await get("SELECT id FROM missions WHERE user_id = ? AND status = 'traveling' LIMIT 1", [req.user.id]);
+    const activeMission = await get("SELECT id FROM missions WHERE user_id = ? AND status = 'traveling' AND 1 = 0 LIMIT 1", [req.user.id]);
     if (activeMission) {
       return res.status(400).json({ error: "\uc774\ubbf8 \uc9c4\ud589 \uc911\uc778 \uc774\ub3d9/\ucd9c\uaca9 \uc784\ubb34\uac00 \uc788\uc2b5\ub2c8\ub2e4." });
     }
@@ -4840,6 +4852,10 @@ app.post("/zones/:id/garrison/dispatch", requireAuth, async (req, res) => {
       return res.status(400).json({ error: `\ud568\ub300 \uc2ac\ub86f ${slot}\uc740 \ud604\uc7ac \uc0ac\uc6a9 \ubd88\uac00\ud569\ub2c8\ub2e4.` });
     }
 
+    const activeMissionBySlot = await getActiveTravelingMissionForSlot(req.user.id, slot);
+    if (activeMissionBySlot) {
+      return res.status(400).json({ error: `함대 슬롯 ${slot}은 이미 출격 중입니다. 다른 슬롯을 사용하거나 기존 임무를 취소하세요.` });
+    }
     const launch = await getLaunchFleetFromSlot(req.user.id, slot);
     if (!hasDesignShips(launch.fleet)) {
       return res.status(400).json({ error: "\ud574\ub2f9 \ud568\ub300\uc5d0 \uc8fc\ub454 \ucd9c\uaca9 \uac00\ub2a5\ud55c \ud568\uc120\uc774 \uc5c6\uc2b5\ub2c8\ub2e4." });
@@ -5160,13 +5176,6 @@ app.post("/tech-tree/:key/start", requireAuth, async (req, res) => {
     if (!requires.every((reqKey) => (tree.researchedKeys || []).includes(reqKey))) {
       return res.status(400).json({ error: "\uc120\ud589 \uae30\uc220\uc774 \ucda9\uc871\ub418\uc9c0 \uc54a\uc558\uc2b5\ub2c8\ub2e4." });
     }
-    if (String(node.exclusive_group || "")) {
-      const sameGroup = await all("SELECT key FROM tech_nodes WHERE exclusive_group = ? AND key != ?", [String(node.exclusive_group), key]);
-      if (sameGroup.some((item) => (tree.researchedKeys || []).includes(String(item.key)))) {
-        return res.status(400).json({ error: "\ud574\ub2f9 \ubd84\uae30\uc5d0\uc11c\ub294 \ub2e4\ub978 \uae30\uc220\uc744 \uc774\ubbf8 \uc120\ud0dd\ud588\uc2b5\ub2c8\ub2e4." });
-      }
-    }
-
     const cost = { metal: Number(node.metal_cost || 0), fuel: Number(node.fuel_cost || 0) };
     const state = await getUpdatedResources(req.user.id);
     if (Number(state.resources.metal || 0) < cost.metal || Number(state.resources.fuel || 0) < cost.fuel) {
@@ -5400,12 +5409,39 @@ app.put("/fleet-groups/:slot", requireAuth, async (req, res) => {
     for (const row of ownedShips) {
       ownedMap.set(Number(row.design_id), Number(row.quantity || 0));
     }
+    const otherGroups = await all(
+      "SELECT ship_plan_json FROM fleet_groups WHERE user_id = ? AND slot_index != ?",
+      [req.user.id, slot]
+    );
+    const reservedByOthers = new Map();
+    for (const row of otherGroups) {
+      let reservedShips = [];
+      try {
+        reservedShips = normalizeShipPlan(JSON.parse(row.ship_plan_json || "[]"));
+      } catch (err) {
+        reservedShips = [];
+      }
+      for (const ship of reservedShips) {
+        const designId = Number(ship.designId);
+        const quantity = Number(ship.quantity || 0);
+        if (!Number.isInteger(designId) || quantity <= 0) continue;
+        reservedByOthers.set(designId, Number(reservedByOthers.get(designId) || 0) + quantity);
+      }
+    }
     for (const item of ships) {
       if (!ownedMap.has(item.designId)) {
         return res.status(400).json({ error: `보유하지 않은 설계안(${item.designId})은 편성할 수 없습니다.` });
       }
       if (item.quantity > Number(ownedMap.get(item.designId) || 0)) {
         return res.status(400).json({ error: `설계안 ${item.designId} 수량이 보유량을 초과합니다.` });
+      }
+      const reservedCount = Number(reservedByOthers.get(item.designId) || 0);
+      const ownedCount = Number(ownedMap.get(item.designId) || 0);
+      if (item.quantity + reservedCount > ownedCount) {
+        const available = Math.max(0, ownedCount - reservedCount);
+        return res.status(400).json({
+          error: `설계안 ${item.designId}은 다른 함대에 ${reservedCount}척 배치 중입니다. 이 함대에서는 최대 ${available}척까지 배치할 수 있습니다.`
+        });
       }
     }
 
@@ -6059,15 +6095,23 @@ app.post("/pvp/attack", requireAuth, async (req, res) => {
       return res.status(404).json({ error: "\ub300\uc0c1 \uc720\uc800\ub97c \ucc3e\uc744 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4." });
     }
 
-    const activeMission = await get("SELECT id FROM missions WHERE user_id = ? AND status = 'traveling' LIMIT 1", [req.user.id]);
+    const activeMission = await get("SELECT id FROM missions WHERE user_id = ? AND status = 'traveling' AND 1 = 0 LIMIT 1", [req.user.id]);
     if (activeMission) {
       return res.status(400).json({ error: "\uc774\ubbf8 \uc9c4\ud589 \uc911\uc778 \ucd9c\uaca9 \uc784\ubb34\uac00 \uc788\uc2b5\ub2c8\ub2e4." });
     }
 
     const attackerBonuses = await getPlayerBonuses(req.user.id);
     const requestedSlot = Number.parseInt(req.body.fleetSlot, 10) || 1;
+    let activeMissionBySlot = null;
     if (requestedSlot > Number(attackerBonuses.city?.bonuses?.fleetSlotLimit || 3)) {
       return res.status(400).json({ error: `현재 전술소 레벨로는 슬롯 ${requestedSlot}을 사용할 수 없습니다.` });
+    }
+    if (activeMissionBySlot) {
+      return res.status(400).json({ error: `함대 슬롯 ${requestedSlot}은 이미 출격 중입니다. 다른 슬롯을 사용하거나 기존 임무를 취소하세요.` });
+    }
+    activeMissionBySlot = await getActiveTravelingMissionForSlot(req.user.id, requestedSlot);
+    if (activeMissionBySlot) {
+      return res.status(400).json({ error: `함대 슬롯 ${requestedSlot}은 이미 출격 중입니다. 다른 슬롯을 사용하거나 기존 임무를 취소하세요.` });
     }
     const launch = await getLaunchFleetFromSlot(req.user.id, requestedSlot);
     const attackerFleet = launch.fleet;
@@ -6194,7 +6238,7 @@ app.post("/zones/:id/capture", requireAuth, async (req, res) => {
       return res.status(400).json({ error: `식민지 상한(${city.bonuses.colonyCap})에 도달해 추가 점령이 불가능합니다.` });
     }
 
-    const activeMission = await get("SELECT id FROM missions WHERE user_id = ? AND status = 'traveling' LIMIT 1", [req.user.id]);
+    const activeMission = await get("SELECT id FROM missions WHERE user_id = ? AND status = 'traveling' AND 1 = 0 LIMIT 1", [req.user.id]);
     if (activeMission) {
       return res.status(400).json({ error: "\uc774\ubbf8 \uc9c4\ud589 \uc911\uc778 \ucd9c\uaca9 \uc784\ubb34\uac00 \uc788\uc2b5\ub2c8\ub2e4." });
     }
@@ -6202,6 +6246,10 @@ app.post("/zones/:id/capture", requireAuth, async (req, res) => {
     const requestedSlot = Number.parseInt(req.body.fleetSlot, 10) || 1;
     if (requestedSlot > Number(playerBonuses.city?.bonuses?.fleetSlotLimit || 3)) {
       return res.status(400).json({ error: `현재 전술소 레벨로는 슬롯 ${requestedSlot}을 사용할 수 없습니다.` });
+    }
+    const activeMissionBySlot = await getActiveTravelingMissionForSlot(req.user.id, requestedSlot);
+    if (activeMissionBySlot) {
+      return res.status(400).json({ error: `함대 슬롯 ${requestedSlot}은 이미 출격 중입니다. 다른 슬롯을 사용하거나 기존 임무를 취소하세요.` });
     }
     const launch = await getLaunchFleetFromSlot(req.user.id, requestedSlot);
     const fleet = launch.fleet;

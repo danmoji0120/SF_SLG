@@ -1598,7 +1598,12 @@ function renderMissionRoute() {
   const mission = activeMissions[0];
   showRouteTo(mission.to, mission.remainingSeconds);
   elements.missionHud.classList.remove("hidden");
-  elements.missionHudText.textContent = `${mission.targetName} / \ub0a8\uc740 \uc774\ub3d9 ${formatSeconds(mission.remainingSeconds)}`;
+  elements.missionHudText.textContent = activeMissions
+    .map((item) => {
+      const slot = Number(item.fleetSlot || 1);
+      return `함대 ${slot}: ${item.targetName} / ${formatSeconds(Number(item.remainingSeconds || 0))}`;
+    })
+    .join(" | ");
   ensureMissionPolling();
 }
 
