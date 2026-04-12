@@ -1,0 +1,25 @@
+name: Ping Render
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Render Health Endpoint
+        env:
+          RENDER_PING_URL: ${{ secrets.RENDER_PING_URL }}
+        run: |
+          if [ -z "$RENDER_PING_URL" ]; then
+            echo "RENDER_PING_URL secret is not set"
+            exit 1
+          fi
+          if [[ "$RENDER_PING_URL" == *"/health" ]]; then
+            TARGET_URL="$RENDER_PING_URL"
+          else
+            TARGET_URL="${RENDER_PING_URL%/}/health"
+          fi
+          curl -fsS --max-time 20 --retry 2 "$TARGET_URL"

@@ -398,6 +398,38 @@ body:has(#gamePanel:not(.hidden)) {
   margin-right: auto;
 }
 
+#gamePanel .research-panel {
+  left: 10px;
+  right: 10px;
+  top: 104px;
+  bottom: 84px;
+  overflow: hidden;
+}
+
+#gamePanel .research-panel > .research-tree-card {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 8px;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+#gamePanel .research-panel #researchView {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  height: 100%;
+}
+
+#gamePanel .research-panel .tech-graph-viewport {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+}
+
 #gamePanel .map-panel {
   position: fixed;
   inset: 0;
@@ -1168,9 +1200,10 @@ body:has(#gamePanel:not(.hidden)) {
 }
 
 .research-tree-card #researchView {
-  max-height: calc(100vh - 260px);
-  overflow: auto;
-  padding-right: 6px;
+  height: 100%;
+  max-height: none;
+  overflow: hidden;
+  padding-right: 0;
 }
 
 .tech-tree::before {
@@ -1527,6 +1560,13 @@ pre {
     bottom: 132px;
     left: 10px;
     right: 10px;
+  }
+
+  #gamePanel .research-panel {
+    top: 170px;
+    bottom: 124px;
+    left: 8px;
+    right: 8px;
   }
 
   #gamePanel .map-panel > .map-canvas-card > h3 {

@@ -1348,7 +1348,11 @@ function renderResearchHub(data) {
     { key: "engine", label: "엔진" },
     { key: "weapon", label: "무기" },
     { key: "defense", label: "방어" },
-    { key: "utility", label: "보조" }
+    { key: "utility", label: "보조" },
+    { key: "industry", label: "산업" },
+    { key: "tactics", label: "전술" },
+    { key: "hull", label: "함급" },
+    { key: "special", label: "특수" }
   ];
   if (!filterOptions.some((item) => item.key === researchCategoryFilter)) {
     researchCategoryFilter = "all";

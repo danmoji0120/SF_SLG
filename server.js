@@ -440,11 +440,67 @@ const TECH_NODE_KEY_OVERRIDES = {
 
 const EXTRA_TECH_TREE_NODES = [
   {
+    key: "shipyard_parallel_1",
+    name: "조선소 병렬화 I",
+    tier: 4,
+    category: "industry",
+    description: "생산 공정을 병렬화해 제작 라인을 1개 추가합니다.",
+    metalCost: 12800,
+    fuelCost: 7800,
+    researchTime: 3600,
+    requires: ["cruiser_command", "industry_1"],
+    exclusiveGroup: "",
+    effectType: "buff_build_lines_flat",
+    effectValue: 1
+  },
+  {
+    key: "population_registry_1",
+    name: "정착민 등록망 I",
+    tier: 5,
+    category: "industry",
+    description: "함선 운용 인구를 확장해 함선 보유 상한을 늘립니다.",
+    metalCost: 19800,
+    fuelCost: 12100,
+    researchTime: 5200,
+    requires: ["shipyard_parallel_1", "unlock_monitor"],
+    exclusiveGroup: "",
+    effectType: "buff_population_cap_flat",
+    effectValue: 120
+  },
+  {
+    key: "resource_refinery_grid",
+    name: "자원 정제망",
+    tier: 6,
+    category: "industry",
+    description: "기지 및 점령지 자원 처리 효율을 높여 자원 획득량을 증가시킵니다.",
+    metalCost: 27600,
+    fuelCost: 16800,
+    researchTime: 6900,
+    requires: ["population_registry_1", "unlock_battleship"],
+    exclusiveGroup: "",
+    effectType: "buff_resource_pct",
+    effectValue: 0.14
+  },
+  {
+    key: "maneuver_warp_coordination",
+    name: "기동 워프 연동",
+    tier: 6,
+    category: "engine",
+    description: "대규모 함대의 이동 연동을 최적화해 이동 보너스를 제공합니다.",
+    metalCost: 26200,
+    fuelCost: 17200,
+    researchTime: 6800,
+    requires: ["unlock_battleship", "engine_overdrive"],
+    exclusiveGroup: "",
+    effectType: "buff_movement_pct",
+    effectValue: 0.13
+  },
+  {
     key: "supercapital_logistics",
-    name: "Supercapital Logistics",
+    name: "초주력 군수체계",
     tier: 8,
     category: "industry",
-    description: "Supercapital upkeep and assembly optimization. Build cost reduced further.",
+    description: "초대형 함대의 유지/정비 체계를 정립하여 생산 비용을 크게 낮춥니다.",
     metalCost: 38800,
     fuelCost: 25200,
     researchTime: 9300,
@@ -455,10 +511,10 @@ const EXTRA_TECH_TREE_NODES = [
   },
   {
     key: "dreadnought_command_matrix",
-    name: "Dreadnought Command Matrix",
+    name: "드레드노트 지휘행렬",
     tier: 9,
     category: "tactics",
-    description: "Heavy fleet command uplink. Combat bonus increases sharply.",
+    description: "중전력 함대 지휘 체계를 통합해 전투 보너스를 크게 올립니다.",
     metalCost: 52000,
     fuelCost: 35600,
     researchTime: 11200,
@@ -469,10 +525,10 @@ const EXTRA_TECH_TREE_NODES = [
   },
   {
     key: "titan_war_forge",
-    name: "Titan War Forge",
+    name: "타이탄 전쟁공방",
     tier: 9,
     category: "special",
-    description: "Enables extreme-grade modules and titan-scale production systems.",
+    description: "최상위 함선 생산 기술과 초고급 장갑 모듈 운용 체계를 해금합니다.",
     metalCost: 57000,
     fuelCost: 39000,
     researchTime: 11800,
@@ -484,10 +540,10 @@ const EXTRA_TECH_TREE_NODES = [
   },
   {
     key: "omega_reactor_theory",
-    name: "Omega Reactor Theory",
+    name: "오메가 반응로 이론",
     tier: 10,
     category: "engine",
-    description: "Extreme power core theory. Unlocks titan-grade propulsion cores.",
+    description: "타이탄급 동력 코어 이론을 완성해 최상위 엔진 모듈을 해금합니다.",
     metalCost: 69000,
     fuelCost: 47000,
     researchTime: 12800,
@@ -499,10 +555,10 @@ const EXTRA_TECH_TREE_NODES = [
   },
   {
     key: "apex_fleet_doctrine",
-    name: "Apex Fleet Doctrine",
+    name: "정점 함대 교리",
     tier: 10,
     category: "tactics",
-    description: "Final doctrine for end-game fleets. Strong global fleet combat increase.",
+    description: "종반 함대 운용의 최종 교리. 전체 함대 전투 보너스를 크게 제공합니다.",
     metalCost: 78000,
     fuelCost: 56000,
     researchTime: 13800,
@@ -513,12 +569,26 @@ const EXTRA_TECH_TREE_NODES = [
   }
 ];
 
+function normalizeTechNodeEconomy(node) {
+  const tier = Number(node.tier || 1);
+  const tuned = { ...node };
+  if (tier >= 8) {
+    const targetMetal = 52000 + (tier - 8) * 29000;
+    const targetFuel = 42000 + (tier - 8) * 30000;
+    const targetTime = 12000 + (tier - 8) * 3200;
+    tuned.metalCost = Math.max(Number(node.metalCost || 0), targetMetal);
+    tuned.fuelCost = Math.max(Number(node.fuelCost || 0), targetFuel);
+    tuned.researchTime = Math.max(Number(node.researchTime || 0), targetTime);
+  }
+  return tuned;
+}
+
 function getBaseTechNodes() {
   const tunedActive = ACTIVE_TECH_TREE_NODES.map((node) => {
     const override = TECH_NODE_KEY_OVERRIDES[String(node.key || "")];
-    return override ? { ...node, ...override } : node;
+    return normalizeTechNodeEconomy(override ? { ...node, ...override } : node);
   });
-  return [...tunedActive, ...EXTRA_TECH_TREE_NODES];
+  return [...tunedActive, ...EXTRA_TECH_TREE_NODES.map(normalizeTechNodeEconomy)];
 }
 
 function componentUnlockNodeKey(componentKey) {
@@ -883,6 +953,26 @@ async function ensureColumn(table, column, definition) {
 
 async function seedNeutralZones() {
   for (const zone of DEFAULT_ZONES) {
+    const isThirdEmpire = Number(zone.level || 1) >= 4 && Number(zone.id || 0) % 4 === 0;
+    const faction = isThirdEmpire ? "third_empire" : "neutral";
+    const baseGarrison = normalizeFleet(zone.garrison || {});
+    const powerScale = isThirdEmpire ? (1.65 + Number(zone.level || 1) * 0.18) : 1;
+    const boostedGarrison = isThirdEmpire
+      ? {
+          corvette: Math.max(0, Math.floor(Number(baseGarrison.corvette || 0) * powerScale) + 6),
+          destroyer: Math.max(0, Math.floor(Number(baseGarrison.destroyer || 0) * powerScale) + 2),
+          cruiser: Math.max(0, Math.floor(Number(baseGarrison.cruiser || 0) * powerScale) + 1),
+          battleship: Math.max(0, Math.floor(Number(baseGarrison.battleship || 0) * (powerScale * 0.9))),
+          carrier: Math.max(0, Math.floor(Number(baseGarrison.carrier || 0) * (powerScale * 0.8)))
+        }
+      : baseGarrison;
+    const recommendedPower = isThirdEmpire
+      ? Math.floor(Number(zone.recommendedPower || 0) * 2.2 + Number(zone.level || 1) * 850)
+      : zone.recommendedPower;
+    const zoneDescription = isThirdEmpire
+      ? `[제3제국] ${zone.description}`
+      : zone.description;
+
     await run(
       `
         INSERT OR IGNORE INTO neutral_zones
@@ -892,14 +982,14 @@ async function seedNeutralZones() {
       [
         zone.id,
         zone.name,
-        zone.description,
+        zoneDescription,
         zone.level,
         zone.x,
         zone.y,
         zone.metalRate,
         zone.fuelRate,
-        zone.recommendedPower,
-        JSON.stringify(zone.garrison)
+        recommendedPower,
+        JSON.stringify(boostedGarrison)
       ]
     );
 
@@ -907,19 +997,20 @@ async function seedNeutralZones() {
       `
         UPDATE neutral_zones
         SET name = ?, description = ?, level = ?, map_x = ?, map_y = ?,
-            metal_rate = ?, fuel_rate = ?, recommended_power = ?, garrison_json = ?
+            metal_rate = ?, fuel_rate = ?, recommended_power = ?, garrison_json = ?, faction = ?
         WHERE id = ?
       `,
       [
         zone.name,
-        zone.description,
+        zoneDescription,
         zone.level,
         zone.x,
         zone.y,
         zone.metalRate,
         zone.fuelRate,
-        zone.recommendedPower,
-        JSON.stringify(zone.garrison),
+        recommendedPower,
+        JSON.stringify(boostedGarrison),
+        faction,
         zone.id
       ]
     );
@@ -1504,6 +1595,7 @@ async function initDb() {
   await ensureColumn("neutral_zones", "map_x", "INTEGER NOT NULL DEFAULT 50");
   await ensureColumn("neutral_zones", "map_y", "INTEGER NOT NULL DEFAULT 50");
   await ensureColumn("neutral_zones", "recommended_power", "INTEGER NOT NULL DEFAULT 100");
+  await ensureColumn("neutral_zones", "faction", "TEXT NOT NULL DEFAULT 'neutral'");
   await ensureColumn("missions", "attacker_fleet_json", "TEXT NOT NULL DEFAULT '[]'");
   await ensureColumn("missions", "attacker_fleet_slot", "INTEGER NOT NULL DEFAULT 1");
   await ensureColumn("missions", "attacker_admiral_id", "INTEGER");
@@ -2300,6 +2392,9 @@ async function getTechEffects(userId) {
     combatPct: 0,
     defensePct: 0,
     buildCostPct: 0,
+    buildLinesFlat: 0,
+    populationCapFlat: 0,
+    colonyCapFlat: 0,
     hulls: new Set(),
     components: new Set()
   };
@@ -2311,6 +2406,9 @@ async function getTechEffects(userId) {
     if (type === "buff_combat_pct") effect.combatPct += value;
     if (type === "buff_defense_pct") effect.defensePct += value;
     if (type === "buff_build_cost_pct") effect.buildCostPct += value;
+    if (type === "buff_build_lines_flat") effect.buildLinesFlat += Math.floor(value);
+    if (type === "buff_population_cap_flat") effect.populationCapFlat += Math.floor(value);
+    if (type === "buff_colony_cap_flat") effect.colonyCapFlat += Math.floor(value);
     if (type === "unlock_hull" && row.unlock_key) effect.hulls.add(String(row.unlock_key));
     if (type === "unlock_component" && row.unlock_key) effect.components.add(String(row.unlock_key));
   }
@@ -2408,6 +2506,12 @@ async function getPlayerBonuses(userId) {
     Number(admiral?.resourceBonus || 0) * 0.25 +
     commanderMove +
     Number(city.bonuses.movementBonus || 0);
+  const effectiveCityBonuses = {
+    ...city.bonuses,
+    buildLines: Math.max(1, Number(city.bonuses.buildLines || 1) + Number(techEffects.buildLinesFlat || 0)),
+    populationCap: Math.max(1, Number(city.bonuses.populationCap || 0) + Number(techEffects.populationCapFlat || 0)),
+    colonyCap: Math.max(1, Number(city.bonuses.colonyCap || 0) + Number(techEffects.colonyCapFlat || 0))
+  };
 
   return {
     resourceMultiplier: 1 + resourceBonus,
@@ -2423,11 +2527,17 @@ async function getPlayerBonuses(userId) {
       combatPct: techEffects.combatPct,
       defensePct: techEffects.defensePct,
       buildCostPct: techEffects.buildCostPct,
+      buildLinesFlat: techEffects.buildLinesFlat,
+      populationCapFlat: techEffects.populationCapFlat,
+      colonyCapFlat: techEffects.colonyCapFlat,
       unlockedHulls: Array.from(techEffects.hulls),
       unlockedComponents: Array.from(techEffects.components)
     },
     admiral: admiral || null,
-    city
+    city: {
+      ...city,
+      bonuses: effectiveCityBonuses
+    }
   };
 }
 
@@ -3342,7 +3452,8 @@ async function resolveMission(mission) {
       if (owner) await applyFleetLosses(owner.user_id, enemy, battle.remainingEnemy);
       if (battle.result === "victory") {
         const occupiedCount = await get("SELECT COUNT(*) AS cnt FROM occupied_zones WHERE user_id = ?", [mission.user_id]);
-        const city = await getCityState(mission.user_id);
+        const ownerBonuses = await getPlayerBonuses(mission.user_id);
+        const city = ownerBonuses.city;
         if (Number(occupiedCount?.cnt || 0) >= Number(city.bonuses.colonyCap || 0)) {
           await run("COMMIT");
           return {
@@ -3653,12 +3764,14 @@ async function getPlayerTarget(userId, viewerId) {
   const admiral = await getAssignedAdmiral(userId);
   const commander = await getCommanderProgress(userId);
   const base = await ensureBase(userId);
+  const admiralCombat = Number(admiral?.combatBonus || 0);
+  const fleetPowerWithAdmiral = Math.floor(designFleetPower(fleet) * (1 + admiralCombat * 0.9));
 
   return {
     id: user.id,
     username: user.username,
     base,
-    fleetPower: Math.floor(designFleetPower(fleet)),
+    fleetPower: fleetPowerWithAdmiral,
     occupiedZones: Number(zones?.count || 0),
     estimatedMetal: userId === viewerId ? resources?.resources?.metal || 0 : Math.floor((resources?.resources?.metal || 0) * 0.5),
     estimatedFuel: userId === viewerId ? resources?.resources?.fuel || 0 : Math.floor((resources?.resources?.fuel || 0) * 0.5),
@@ -3700,6 +3813,8 @@ function formatZone(row) {
     y: row.map_y,
     metalRate: row.metal_rate,
     fuelRate: row.fuel_rate,
+    faction: String(row.faction || "neutral"),
+    isThirdEmpire: String(row.faction || "") === "third_empire",
     actualPower: Math.floor(designFleetPower(garrisonFleet)),
     garrison,
     ownerId: row.owner_id || null,
@@ -3711,10 +3826,7 @@ function formatZone(row) {
 }
 
 app.get("/health", (req, res) => {
-  return res.json({
-    ok: true,
-    time: Date.now()
-  });
+  return res.type("text/plain").send("ok");
 });
 
 app.post("/signup", async (req, res) => {
@@ -4094,7 +4206,8 @@ app.post("/production", requireAuth, async (req, res) => {
   try {
     await processProductionQueue(req.user.id);
 
-    const city = await getCityState(req.user.id);
+    const bonuses = await getPlayerBonuses(req.user.id);
+    const city = bonuses.city;
     const active = await get("SELECT COUNT(*) AS cnt FROM production_queue WHERE user_id = ? AND status = 'building'", [req.user.id]);
     if (Number(active?.cnt || 0) >= Number(city.bonuses.buildLines || 1)) {
       return res.status(400).json({ error: `생산 라인 제한(${city.bonuses.buildLines})을 초과했습니다.` });
@@ -4116,7 +4229,6 @@ app.post("/production", requireAuth, async (req, res) => {
     }
 
     const state = await getUpdatedResources(req.user.id);
-    const bonuses = await getPlayerBonuses(req.user.id);
     const metalCost = Math.floor(design.total_metal_cost * quantity * bonuses.buildCostMultiplier);
     const fuelCost = Math.floor(design.total_fuel_cost * quantity * bonuses.buildCostMultiplier);
 
@@ -4359,9 +4471,15 @@ app.get("/zones", requireAuth, async (req, res) => {
     );
 
     const base = await ensureBase(req.user.id);
+    const thirdEmpireCount = rows.filter((row) => String(row.faction || "neutral") === "third_empire").length;
     return res.json({
       base,
       zones: rows.map(formatZone),
+      thirdEmpire: {
+        active: true,
+        label: "제3제국",
+        strongholds: thirdEmpireCount
+      },
       mapConfig: { maxX: MAP_MAX_X, maxY: MAP_MAX_Y, distanceUnit: MAP_DISTANCE_UNIT }
     });
   } catch (err) {
@@ -4398,6 +4516,7 @@ app.get("/map", requireAuth, async (req, res) => {
     }
 
     const base = await ensureBase(req.user.id);
+    const thirdEmpireCount = rows.filter((row) => String(row.faction || "neutral") === "third_empire").length;
     const myFleet = await getOwnedShipFleet(req.user.id);
     const myBonuses = await getPlayerBonuses(req.user.id);
     const myZoneGarrisonRows = await all(
@@ -4448,6 +4567,12 @@ app.get("/map", requireAuth, async (req, res) => {
         return item;
       }),
       sectorCount: rows.length,
+      thirdEmpire: {
+        active: true,
+        label: "제3제국",
+        strongholds: thirdEmpireCount,
+        message: "제3제국 거점을 공격하면 PvP 외에도 성장 루트를 확보할 수 있습니다."
+      },
       players,
       activeMissions: await getActiveMissions(req.user.id),
       incomingAlerts: await getIncomingAlerts(req.user.id),
@@ -4487,6 +4612,36 @@ app.get("/empire", requireAuth, async (req, res) => {
   } catch (err) {
     console.error(err);
     return res.status(500).json({ error: "\uc810\ub839\uc9c0 \uc870\ud68c \uc911 \uc624\ub958\uac00 \ubc1c\uc0dd\ud588\uc2b5\ub2c8\ub2e4." });
+  }
+});
+
+app.get("/third-empire", requireAuth, async (req, res) => {
+  try {
+    await processMissionQueueForUser(req.user.id);
+    const zones = await all(
+      `
+        SELECT z.*, oz.user_id AS owner_id, u.username AS owner_username, oz.user_id = ? AS owned_by_me
+        FROM neutral_zones z
+        LEFT JOIN occupied_zones oz ON oz.zone_id = z.id
+        LEFT JOIN users u ON u.id = oz.user_id
+        WHERE z.faction = 'third_empire'
+        ORDER BY z.level DESC, z.id ASC
+      `,
+      [req.user.id]
+    );
+    const formatted = zones.map(formatZone);
+    const totalPower = formatted.reduce((sum, zone) => sum + Number(zone.actualPower || 0), 0);
+    return res.json({
+      faction: "third_empire",
+      label: "제3제국",
+      message: "공공의 적 거점을 공략해 PvP 의존 없이 성장할 수 있습니다.",
+      strongholds: formatted.length,
+      totalPower,
+      zones: formatted
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "제3제국 정보 조회 중 오류가 발생했습니다." });
   }
 });
 
@@ -4737,7 +4892,8 @@ app.post("/research/:type/upgrade", requireAuth, async (req, res) => {
 
     const research = await getResearch(req.user.id);
     const level = research[type] || 0;
-    const city = await getCityState(req.user.id);
+    const playerBonuses = await getPlayerBonuses(req.user.id);
+    const city = playerBonuses.city;
     if (level >= Number(city.bonuses.researchCap || 0)) {
       return res.status(400).json({ error: `연구소 레벨로 허용된 연구 상한(${city.bonuses.researchCap})에 도달했습니다.` });
     }
@@ -5005,8 +5161,8 @@ app.post("/tech-tree/speedup", requireAuth, async (req, res) => {
 
 app.get("/city", requireAuth, async (req, res) => {
   try {
-    const city = await getCityState(req.user.id);
-    return res.json(city);
+    const bonuses = await getPlayerBonuses(req.user.id);
+    return res.json(bonuses.city);
   } catch (err) {
     console.error(err);
     return res.status(500).json({ error: "도시 정보 조회 중 오류가 발생했습니다." });
@@ -5055,7 +5211,7 @@ app.get("/fleet-groups", requireAuth, async (req, res) => {
     const groups = await getFleetGroups(req.user.id);
     const ownedShips = await getOwnedShips(req.user.id);
     const admirals = await all(
-      "SELECT id, name, rarity, status FROM admirals WHERE user_id = ? ORDER BY assigned DESC, id DESC",
+      "SELECT id, name, rarity, status, combat_bonus AS combatBonus, resource_bonus AS resourceBonus, cost_bonus AS costBonus FROM admirals WHERE user_id = ? ORDER BY assigned DESC, id DESC",
       [req.user.id]
     );
     const bonuses = await getPlayerBonuses(req.user.id);
@@ -5887,7 +6043,6 @@ app.post("/zones/:id/capture", requireAuth, async (req, res) => {
       return res.status(400).json({ error: "\uc774\ubbf8 \uc9c4\ud589 \uc911\uc778 \ucd9c\uaca9 \uc784\ubb34\uac00 \uc788\uc2b5\ub2c8\ub2e4." });
     }
 
-    const playerBonuses = await getPlayerBonuses(req.user.id);
     const requestedSlot = Number.parseInt(req.body.fleetSlot, 10) || 1;
     if (requestedSlot > Number(playerBonuses.city?.bonuses?.fleetSlotLimit || 3)) {
       return res.status(400).json({ error: `현재 전술소 레벨로는 슬롯 ${requestedSlot}을 사용할 수 없습니다.` });
