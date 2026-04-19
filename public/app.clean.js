@@ -1,4 +1,6 @@
 (() => {
+  let recruitOverlayTimer = null;
+
   function hideLegacyGrowthAdmiralCard() {
     const admiralView = document.getElementById('admiralView');
     const drawButton = document.getElementById('drawAdmiralButton');
@@ -31,6 +33,102 @@
     if (!window.elements) return;
     ['admiralView', 'drawAdmiralButton', 'playerTargetView', 'refreshPlayersButton'].forEach((key) => {
       if (key in window.elements) window.elements[key] = null;
+    });
+  }
+
+  function ensureLobbyEnhancementShell() {
+    const lobbyPanel = elements.lobbyPanel;
+    if (!lobbyPanel) return;
+    if (!document.getElementById('creditShopCard')) {
+      const card = document.createElement('section');
+      card.id = 'creditShopCard';
+      card.className = 'card lobby-room-card';
+      card.innerHTML = `
+        <div class="panel-head">
+          <div>
+            <h3>Credit Shop</h3>
+            <p class="hint">크레딧으로 다음 세션 준비를 진행합니다.</p>
+          </div>
+        </div>
+        <div id="creditShopView" class="credit-shop-grid"></div>
+      `;
+      lobbyPanel.appendChild(card);
+    }
+    if (!document.getElementById('recruitOverlay')) {
+      const overlay = document.createElement('div');
+      overlay.id = 'recruitOverlay';
+      overlay.className = 'recruit-overlay hidden';
+      overlay.innerHTML = `
+        <div class="recruit-overlay-card">
+          <div class="eyebrow">ADMIRAL RECRUIT</div>
+          <h2 id="recruitOverlayTitle">신규 제독</h2>
+          <div id="recruitOverlayRarity" class="recruit-rarity">R</div>
+          <p id="recruitOverlayQuote" class="recruit-quote"></p>
+          <button type="button" id="closeRecruitOverlayButton" class="primary">확인</button>
+        </div>
+      `;
+      document.body.appendChild(overlay);
+      overlay.addEventListener('click', (event) => {
+        if (event.target === overlay) hideRecruitOverlay();
+      });
+      document.getElementById('closeRecruitOverlayButton')?.addEventListener('click', hideRecruitOverlay);
+    }
+  }
+
+  function hideRecruitOverlay() {
+    if (recruitOverlayTimer) {
+      clearTimeout(recruitOverlayTimer);
+      recruitOverlayTimer = null;
+    }
+    document.getElementById('recruitOverlay')?.classList.add('hidden');
+  }
+
+  function showRecruitOverlay(log) {
+    ensureLobbyEnhancementShell();
+    const overlay = document.getElementById('recruitOverlay');
+    if (!overlay || !log?.admiral) return;
+    document.getElementById('recruitOverlayTitle').textContent = log.admiral.name || '신규 제독';
+    const rarityNode = document.getElementById('recruitOverlayRarity');
+    rarityNode.textContent = log.admiral.rarity || 'R';
+    rarityNode.dataset.rarity = String(log.admiral.rarity || 'R').toUpperCase();
+    document.getElementById('recruitOverlayQuote').textContent = `${log.recruitType || 'Recruit'} / -${Number(log.costCredit || 0).toLocaleString()} credits`;
+    overlay.classList.remove('hidden');
+    recruitOverlayTimer = setTimeout(() => overlay.classList.add('hidden'), 3200);
+  }
+
+  function renderCreditShop(recruitTypes) {
+    ensureLobbyEnhancementShell();
+    const view = document.getElementById('creditShopView');
+    if (!view) return;
+    const types = Array.isArray(recruitTypes) ? recruitTypes : [];
+    const extras = [
+      { key: 'coming_mission', name: 'Mission Pack', costCredit: 800, detail: '준비 중 / 세션 미션 추가 보상 예정', disabled: true },
+      { key: 'coming_skin', name: 'Bridge Theme', costCredit: 1200, detail: '준비 중 / 로비 테마 확장 예정', disabled: true }
+    ];
+    const cards = types.map((type) => ({
+      key: type.key,
+      name: type.name,
+      costCredit: type.costCredit,
+      detail: `R ${Math.round(Number(type.chances?.R || 0) * 100)}% · SR ${Math.round(Number(type.chances?.SR || 0) * 100)}% · SSR ${Math.round(Number(type.chances?.SSR || 0) * 100)}%`,
+      disabled: false,
+      actionLabel: '구매 / 영입',
+      recruitType: type.key
+    })).concat(extras);
+    view.innerHTML = cards.map((item) => `
+      <div class="shop-item ${item.disabled ? 'disabled' : ''}">
+        <div>
+          <strong>${item.name}</strong>
+          <span>${Number(item.costCredit || 0).toLocaleString()} credits</span>
+          <span>${item.detail || ''}</span>
+        </div>
+        <button type="button" ${item.disabled ? 'disabled' : ''} data-shop-action="${item.recruitType || item.key}">${item.actionLabel || '준비 중'}</button>
+      </div>
+    `).join('');
+    Array.from(view.querySelectorAll('[data-shop-action]')).forEach((button) => {
+      button.addEventListener('click', () => {
+        const key = String(button.dataset.shopAction || '');
+        if (key === 'normal' || key === 'premium') recruitLobbyAdmiral(key);
+      });
     });
   }
 
@@ -193,6 +291,138 @@
     };
   }
 
+  function overrideRenderLobby() {
+    if (typeof window.renderLobby !== 'function') return;
+    const baseRenderLobby = window.renderLobby;
+    window.renderLobby = function (data) {
+      baseRenderLobby(data);
+      ensureLobbyEnhancementShell();
+      const profile = lobbyState.profile || {};
+      if (elements.lobbyProfileView) {
+        const featured = profile.featuredAdmiralName || '대표 제독 미지정';
+        const sessionAdmiral = profile.selectedSessionAdmiralName || '다음 세션 미선택';
+        const credit = Number(profile.credit || 0).toLocaleString();
+        elements.lobbyProfileView.innerHTML = `
+          <div class="growth-item assigned">
+            <div>
+              <strong>${featured}</strong>
+              <span>다음 세션: ${sessionAdmiral}</span>
+              <span>현재 보유 크레딧 ${credit}</span>
+            </div>
+          </div>
+        `;
+      }
+      renderCreditShop(lobbyAdmiralState.recruitTypes || []);
+    };
+  }
+
+  function overrideRenderCurrentRoom() {
+    if (typeof window.renderCurrentRoom !== 'function') return;
+    window.renderCurrentRoom = function (room) {
+      if (!elements.currentRoomView) return;
+      if (!room) {
+        elements.currentRoomView.innerHTML = `<div class="growth-item"><div>참가 중인 방이 없습니다.</div></div>`;
+        return;
+      }
+      const players = Array.isArray(room.players) ? room.players : [];
+      const readyCount = players.filter((player) => player.isReady).length;
+      const totalCount = Math.max(1, players.length);
+      const progress = Math.round((readyCount / totalCount) * 100);
+      const chips = players.map((player) => `<span class="room-player-chip ${player.isReady ? 'ready' : ''}">${player.isHost ? '방장 ' : ''}${player.username}${player.isMe ? ' (나)' : ''}</span>`).join('');
+      const startButton = room.isHost && room.status === 'waiting' ? `<button type="button" class="primary" data-start-room="${room.id}">세션 시작</button>` : '';
+      const readyButton = room.status === 'waiting' ? `<button type="button" data-ready-room="${room.id}">${players.find((p) => p.isMe && p.isReady) ? '준비 해제' : '준비 완료'}</button>` : '';
+      const enterButton = room.status === 'in_game' ? `<button type="button" class="primary" data-enter-session="1">게임 입장</button>` : '';
+      const leaveButton = room.status === 'waiting' ? `<button type="button" data-leave-room="${room.id}">나가기</button>` : '';
+      elements.currentRoomView.innerHTML = `
+        <div class="growth-item assigned room-ready-card">
+          <div>
+            <strong>${room.roomName} (${roomStatusLabel(room.status)})</strong>
+            <span>초대 코드 ${room.inviteCode} · ${room.currentPlayers}/${room.maxPlayers} · ${room.mode}</span>
+            <div class="room-ready-bar"><span style="width:${progress}%;"></span></div>
+            <span>준비 인원 ${readyCount}/${totalCount}</span>
+            <div class="room-player-chip-list">${chips}</div>
+          </div>
+          <div class="button-row">${readyButton}${startButton}${enterButton}${leaveButton}</div>
+        </div>
+      `;
+      elements.currentRoomView.querySelector('[data-ready-room]')?.addEventListener('click', () => toggleRoomReady(room.id));
+      elements.currentRoomView.querySelector('[data-start-room]')?.addEventListener('click', () => startRoom(room.id));
+      elements.currentRoomView.querySelector('[data-leave-room]')?.addEventListener('click', () => leaveRoom(room.id));
+      elements.currentRoomView.querySelector('[data-enter-session]')?.addEventListener('click', enterCurrentSession);
+    };
+  }
+
+  function overrideRenderSessionSummary() {
+    if (typeof window.renderSessionSummary !== 'function') return;
+    window.renderSessionSummary = function (summary) {
+      if (!elements.sessionSummaryView) return;
+      if (!summary) {
+        elements.sessionSummaryView.innerHTML = `<div class="growth-item"><div>No settled session yet.</div></div>`;
+        return;
+      }
+      const meName = localStorage.getItem(USERNAME_KEY) || '';
+      const players = Array.isArray(summary.players) ? summary.players : [];
+      const me = players.find((player) => player.username === meName) || players[0] || {};
+      const score = me.detail?.score || {};
+      const reward = me.detail?.reward || {};
+      const breakdown = [
+        `거점 ${Number(score.occupiedZones || 0)}`,
+        `전투 승리 ${Number(score.battleWins || 0)}`,
+        `전투력 ${Number(score.fleetPowerScore || 0).toLocaleString()}`
+      ].join(' · ');
+      const ranking = players.slice(0, 5).map((player) => `<div class="result-rank-line"><strong>#${player.rank || '-'}</strong><span>${player.username}</span><span>${Number(player.finalScore || 0).toLocaleString()}</span></div>`).join('') || '<div class="result-rank-line"><span>정산 데이터 없음</span></div>';
+      elements.sessionSummaryView.innerHTML = `
+        <div class="growth-item assigned session-summary-card">
+          <div>
+            <strong>${summary.roomName || 'Session'} / Rank ${me.rank || '-'}</strong>
+            <span>Total Score ${Number(me.finalScore || score.totalScore || 0).toLocaleString()}</span>
+            <span>Credits +${Number(me.creditReward || reward.creditTotal || 0).toLocaleString()}</span>
+            <span>${breakdown}</span>
+          </div>
+        </div>
+        <div class="growth-item session-ranking-card">
+          <div>
+            <strong>세션 순위</strong>
+            <div class="result-rank-list">${ranking}</div>
+          </div>
+        </div>
+      `;
+    };
+  }
+
+  function overrideRenderLobbyAdmirals() {
+    if (typeof window.renderLobbyAdmirals !== 'function') return;
+    const baseRender = window.renderLobbyAdmirals;
+    window.renderLobbyAdmirals = function (data, recruitLogsData = null) {
+      baseRender(data, recruitLogsData);
+      renderCreditShop(lobbyAdmiralState.recruitTypes || []);
+    };
+  }
+
+  function overrideRecruitLobbyAdmiral() {
+    if (typeof window.recruitLobbyAdmiral !== 'function') return;
+    window.recruitLobbyAdmiral = async function (type) {
+      clearMessages();
+      setBusy(true);
+      try {
+        const data = await api('/lobby/recruit-admiral', {
+          method: 'POST',
+          body: JSON.stringify({ type })
+        });
+        const logs = await api('/lobby/recruit-logs');
+        setStatus(data.message || 'Admiral recruited.');
+        renderLobbyAdmirals(data, logs);
+        await loadLobby();
+        const latest = Array.isArray(logs?.logs) ? logs.logs[0] : null;
+        if (latest) showRecruitOverlay(latest);
+      } catch (err) {
+        handleAuthError(err);
+      } finally {
+        setBusy(false);
+      }
+    };
+  }
+
   function hideUnusedControls() {
     ['refreshPlayersButton', 'drawAdmiralButton'].forEach((id) => {
       const el = document.getElementById(id);
@@ -208,6 +438,7 @@
     if (typeof window.startMissionPolling !== 'function' && typeof window.ensureMissionPolling === 'function') {
       window.startMissionPolling = (...args) => window.ensureMissionPolling(...args);
     }
+    ensureLobbyEnhancementShell();
     hideLegacyGrowthAdmiralCard();
     labelGrowthPolicyAsPrimary();
     overrideLoadGrowth();
@@ -216,6 +447,11 @@
     overrideRenderBattleSessions();
     overridePlayerFlow();
     overrideLegacyAdmiralFlow();
+    overrideRenderLobby();
+    overrideRenderCurrentRoom();
+    overrideRenderSessionSummary();
+    overrideRenderLobbyAdmirals();
+    overrideRecruitLobbyAdmiral();
     removeLegacyGrowthAdmiralDom();
     sanitizeElementRefs();
     overrideSetBusy();
@@ -223,7 +459,7 @@
     overrideAttackPlayer();
     hideUnusedControls();
     if (typeof window.updateDebug === 'function') {
-      window.updateDebug({ cleanEntry: 'app.clean.js', cleanStage: 'all' });
+      window.updateDebug({ cleanEntry: 'app.clean.js', cleanStage: 'all', lobbyUiEnhanced: true });
     }
     console.info('[SF_SLG clean] full cleanup migrated into app.clean.js.');
   }
