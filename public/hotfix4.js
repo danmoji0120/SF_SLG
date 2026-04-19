@@ -73,11 +73,20 @@
     if (Array.isArray(window.admiralButtons)) window.admiralButtons.length = 0;
   }
 
+  function loadStage5Hotfix() {
+    if (document.querySelector('script[data-hotfix-stage="5"]')) return;
+    const script = document.createElement('script');
+    script.src = '/hotfix5.js?v=1';
+    script.dataset.hotfixStage = '5';
+    document.body.appendChild(script);
+  }
+
   function install() {
     removeLegacyGrowthAdmiralDom();
     sanitizeElementRefs();
     overrideSetBusy();
     cleanupLegacyArrays();
+    loadStage5Hotfix();
     if (typeof window.updateDebug === 'function') {
       window.updateDebug({ hotfixStage: 4, runtimeCleanup: true });
     }
