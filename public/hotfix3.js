@@ -83,10 +83,19 @@
     };
   }
 
+  function loadStage4Hotfix() {
+    if (document.querySelector('script[data-hotfix-stage="4"]')) return;
+    const script = document.createElement('script');
+    script.src = '/hotfix4.js?v=1';
+    script.dataset.hotfixStage = '4';
+    document.body.appendChild(script);
+  }
+
   function install() {
     overrideRenderBattleSessions();
     overridePlayerListFlow();
     overrideLegacyAdmiralFlow();
+    loadStage4Hotfix();
     if (typeof window.updateDebug === 'function') {
       window.updateDebug({ hotfixStage: 3 });
     }
