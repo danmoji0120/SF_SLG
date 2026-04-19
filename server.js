@@ -1,4 +1,4 @@
-const path = require("path");
+﻿const path = require("path");
 const fs = require("fs");
 const express = require("express");
 const sqlite3 = require("sqlite3").verbose();
@@ -27,64 +27,117 @@ app.use(express.static(path.join(__dirname, "public")));
 const db = new sqlite3.Database(DB_PATH);
 let passwordColumn = "password_hash";
 
-const SHIPS = {
-  corvette: {
-    name: "\ucd08\uacc4\ud568",
-    cost: { metal: 120, fuel: 40 },
-    attack: 8,
-    hp: 18,
-    speed: 9,
-    targetPriority: ["corvette", "destroyer", "cruiser", "battleship", "carrier"]
-  },
-  destroyer: {
-    name: "\uad6c\ucd95\ud568",
-    cost: { metal: 300, fuel: 120 },
-    attack: 22,
-    hp: 48,
-    speed: 7,
-    targetPriority: ["corvette", "destroyer", "cruiser", "carrier", "battleship"]
-  },
-  cruiser: {
-    name: "\uc21c\uc591\ud568",
-    cost: { metal: 700, fuel: 260 },
-    attack: 46,
-    hp: 115,
-    speed: 5,
-    targetPriority: ["destroyer", "cruiser", "battleship", "carrier", "corvette"]
-  },
-  battleship: {
-    name: "\uc804\ud568",
-    cost: { metal: 1500, fuel: 700 },
-    attack: 110,
-    hp: 320,
-    speed: 3,
-    targetPriority: ["cruiser", "battleship", "carrier", "destroyer", "corvette"]
-  },
-  carrier: {
-    name: "\ud56d\uacf5\ubaa8\ud568",
-    cost: { metal: 2200, fuel: 1100 },
-    attack: 150,
-    hp: 260,
-    speed: 2,
-    targetPriority: ["battleship", "cruiser", "destroyer", "carrier", "corvette"]
-  }
-};
+const { hulls: DEFAULT_HULLS, modules: DEFAULT_COMPONENTS, zoneRoles: ZONE_ROLE_DEFS, balance, researchUnlocks: RESEARCH_UNLOCKS } = require("./data");
+const DEFAULT_COMPONENT_KEY_SET = new Set(DEFAULT_COMPONENTS.map((component) => String(component.key)));
 
+const SHIPS = balance.legacyShips;
 const SHIP_TYPES = Object.keys(SHIPS);
 const FLEET_COLUMNS = SHIP_TYPES.join(", ");
-const BASE_PRODUCTION = { metal: 2, fuel: 1 };
-const BASE_MOVE_FUEL_PER_DISTANCE = 120;
-const MAP_MAX_X = 2000;
-const MAP_MAX_Y = 2000;
-const MAP_DISTANCE_UNIT = 20;
-const SPEEDUP_RESOURCE_PER_SECOND = 100;
-const ZONE_TARGET_POWER_BY_LEVEL = {
-  1: 750,
-  2: 4600,
-  3: 16500,
-  4: 36000,
-  5: 68000
-};
+const BASE_PRODUCTION = balance.baseProduction;
+const BASE_MOVE_FUEL_PER_DISTANCE = balance.movement.baseFuelPerDistance;
+const MAP_MAX_X = balance.map.maxX;
+const MAP_MAX_Y = balance.map.maxY;
+const MAP_DISTANCE_UNIT = balance.movement.mapDistanceUnit;
+const MAP_CENTER = { x: Math.floor(MAP_MAX_X / 2), y: Math.floor(MAP_MAX_Y / 2) };
+const GAME_STARTED_AT = Number(process.env.GAME_STARTED_AT_MS || Date.now());
+const CORE_UNLOCK_AFTER_SECONDS = balance.timing.coreUnlockAfterSeconds;
+const GAME_TARGET_END_SECONDS = balance.timing.targetEndSeconds;
+const SPEEDUP_RESOURCE_PER_SECOND = balance.speedup.resourcePerSecond;
+const ZONE_TARGET_POWER_BY_LEVEL = balance.zoneTargetPowerByLevel;
+
+
+
+function gameElapsedSeconds() {
+  return Math.max(0, Math.floor((Date.now() - GAME_STARTED_AT) / 1000));
+}
+
+function zoneLayerLabel(layer) {
+  if (layer === "outer") return "\uc678\uacfd";
+  if (layer === "core") return "\uc911\uc559";
+  return "\uc911\uac04";
+}
+
+function zoneRoleDefinition(role) {
+  return ZONE_ROLE_DEFS[String(role || "metal")] || ZONE_ROLE_DEFS.metal;
+}
+
+function getHullByKey(key) {
+  return DEFAULT_HULLS.find((hull) => String(hull.key) === String(key));
+}
+
+function getModuleByKey(key) {
+  return DEFAULT_COMPONENTS.find((component) => String(component.key) === String(key));
+}
+
+function moduleMetaByComponent(component) {
+  return getModuleByKey(component?.key) || {};
+}
+
+function getZoneRoleEffect(role, effectKey) {
+  const roleDef = zoneRoleDefinition(role);
+  return Number(roleDef.effects?.[effectKey] ?? balance.zoneRoleBonuses?.[role]?.[effectKey] ?? 0);
+}
+
+function computeBuildTime(hull, totalPower, expectedSlots) {
+  const production = balance.production || {};
+  const weights = production.slotWeights || {};
+  const slotWeight =
+    Number(expectedSlots.engine || 0) * Number(weights.engine ?? 0.6)
+    + Number(expectedSlots.weapon || 0) * Number(weights.weapon ?? 1.2)
+    + Number(expectedSlots.defense || 0) * Number(weights.defense ?? 1)
+    + Number(expectedSlots.utility || 0) * Number(weights.utility ?? 0.7);
+  const complexity = Math.pow(
+    1 + Number(totalPower || 0) / Number(production.powerDivisor || 110),
+    Number(production.complexityExponent || 1.45)
+  );
+  return Math.max(
+    Number(production.minimumBuildTime || 20),
+    Math.floor(Number(hull.base_build_time || hull.baseBuildTime || 0) * complexity + slotWeight * Number(production.slotTimeWeight || 25))
+  );
+}
+
+function defaultZoneLayer(level) {
+  if (Number(level || 1) >= 5) return "core";
+  if (Number(level || 1) <= 1) return "outer";
+  return "mid";
+}
+
+function defaultZoneRole(level, id) {
+  const layer = defaultZoneLayer(level);
+  const index = Math.abs(Number(id || 0));
+  if (layer === "outer") return index % 3 === 0 ? "supply" : (index % 2 === 0 ? "fuel" : "metal");
+  if (layer === "core") return index % 2 === 0 ? "titan_core" : "command_hub";
+  return ["production", "mobility", "combat", "supply", "metal", "fuel"][index % 6];
+}
+
+function ringCoordinate(seed, layer) {
+  const minRadius = { outer: 760, mid: 360, core: 70 }[layer] || 360;
+  const maxRadius = { outer: 930, mid: 700, core: 260 }[layer] || 700;
+  const angle = (seed * 2.399963229728653) + pseudoRandomUnit(seed, 911) * 0.7;
+  const radius = minRadius + pseudoRandomUnit(seed, 313) * (maxRadius - minRadius);
+  const wobbleX = (pseudoRandomUnit(seed, 97) - 0.5) * 58;
+  const wobbleY = (pseudoRandomUnit(seed, 193) - 0.5) * 58;
+  return {
+    x: Math.max(20, Math.min(MAP_MAX_X - 20, Math.round(MAP_CENTER.x + Math.cos(angle) * radius + wobbleX))),
+    y: Math.max(20, Math.min(MAP_MAX_Y - 20, Math.round(MAP_CENTER.y + Math.sin(angle) * radius + wobbleY)))
+  };
+}
+
+function decorateZone(zone) {
+  const level = Number(zone.level || 1);
+  const layer = zone.layer || defaultZoneLayer(level);
+  const role = zone.role || defaultZoneRole(level, zone.id);
+  const roleDef = zoneRoleDefinition(role);
+  return {
+    ...zone,
+    layer,
+    role,
+    unlockAfterSeconds: layer === "core" ? CORE_UNLOCK_AFTER_SECONDS : 0,
+    roleLabel: roleDef.label,
+    roleEffect: roleDef.effect,
+    roleIcon: roleDef.icon
+  };
+}
 
 const DEFAULT_ZONES = [
   {
@@ -205,8 +258,13 @@ function pseudoRandomUnit(seed, salt) {
 function baseShipPower(type) {
   const ship = SHIPS[type];
   if (!ship) return 1;
-  const defense = Math.floor(Number(ship.hp || 0) / 8);
-  return Number(ship.attack || 0) + defense * 0.45 + Number(ship.hp || 0) * 0.12;
+  const powerBalance = balance.combatPower;
+  const defense = Math.floor(Number(ship.hp || 0) / Number(powerBalance.shipHpDefenseDivisor || 8));
+  return (
+    Number(ship.attack || 0) * Number(powerBalance.attackWeight || 1)
+    + defense * Number(powerBalance.defenseWeight || 0.45)
+    + Number(ship.hp || 0) * Number(powerBalance.hpWeight || 0.12)
+  );
 }
 
 function targetZonePower(level, spreadA, spreadB) {
@@ -263,60 +321,97 @@ function buildZoneCombatProfile(zoneId, level) {
   };
 }
 
-for (let id = 10; id <= 620; id += 1) {
-  const level = Math.min(5, Math.floor((id - 10) / 122) + 1);
-  const x = 20 + Math.floor(pseudoRandomUnit(id, 11) * (MAP_MAX_X - 40));
-  const y = 20 + Math.floor(pseudoRandomUnit(id, 29) * (MAP_MAX_Y - 40));
+for (let id = 10; id <= 760; id += 1) {
+  const layer = id <= 310 ? "outer" : id <= 650 ? "mid" : "core";
+  const level = layer === "outer"
+    ? (id % 5 === 0 ? 2 : 1)
+    : layer === "mid"
+      ? 2 + Math.floor(pseudoRandomUnit(id, 17) * 3)
+      : 5;
+  const role = defaultZoneRole(level, id);
+  const coord = ringCoordinate(id, layer);
   const spreadA = pseudoRandomUnit(id, 47);
   const spreadB = pseudoRandomUnit(id, 71);
   const combat = buildZoneCombatProfile(id, level);
+  const isResourceRole = role === "metal" || role === "fuel";
+  const metalBase = role === "metal" ? 5 + level * 3 : isResourceRole ? 1 + level : 0;
+  const fuelBase = role === "fuel" ? 5 + level * 3 : isResourceRole ? 1 + level : 0;
   DEFAULT_ZONES.push({
     id,
-    name: `\uc12d\ud130 ${id} \uc804\ucd08 \uac70\uc810`,
-    description: `Lv.${level} \uc911\ub9bd \uc790\uc6d0 \uac70\uc810. \uc131\uacc4 \ud655\uc7a5\uc744 \uc704\ud55c \uc810\ub839 \ubaa9\ud45c\uc785\ub2c8\ub2e4.`,
+    name: `${zoneLayerLabel(layer)} \uc12d\ud130 ${id}`,
+    description: `Lv.${level} ${zoneLayerLabel(layer)} ${zoneRoleDefinition(role).label}. ${zoneRoleDefinition(role).effect}.`,
     level,
-    x,
-    y,
-    metalRate: 6 + level * 8 + Math.floor(spreadA * (10 + level * 8)),
-    fuelRate: 5 + level * 7 + Math.floor(spreadB * (10 + level * 8)),
+    x: coord.x,
+    y: coord.y,
+    metalRate: metalBase + Math.floor(spreadA * (2 + level * 2)),
+    fuelRate: fuelBase + Math.floor(spreadB * (2 + level * 2)),
     recommendedPower: combat.recommendedPower,
-    garrison: combat.garrison
+    garrison: combat.garrison,
+    layer,
+    role
   });
 }
 
 for (const zone of DEFAULT_ZONES) {
   const combat = buildZoneCombatProfile(zone.id, Number(zone.level || 1));
+  const decorated = decorateZone(zone);
+  if (Number(zone.id || 0) < 10) {
+    const coord = ringCoordinate(zone.id, decorated.layer);
+    zone.x = coord.x;
+    zone.y = coord.y;
+  }
   zone.recommendedPower = combat.recommendedPower;
   zone.garrison = combat.garrison;
+  zone.layer = decorated.layer;
+  zone.role = decorated.role;
+  zone.unlockAfterSeconds = decorated.unlockAfterSeconds;
 }
 
 const RESEARCH = {
-  resource: {
-    name: "\uc790\uc6d0 \uac1c\ubc1c",
-    description: "\uae30\uc9c0\uc640 \uc810\ub839\uc9c0\uc758 \uc790\uc6d0 \uc0dd\uc0b0\ub7c9\uc744 \ub298\ub9bd\ub2c8\ub2e4.",
-    metalCost: 1400,
-    fuelCost: 700,
-    metalGrowth: 1.9,
-    fuelGrowth: 1.82,
+  engineering: {
+    name: "공학",
+    description: "엔진, 이동 성능, 중대형 선체 운용 기반에 영향을 줍니다.",
+    metalCost: 72,
+    fuelCost: 36,
+    metalGrowth: 1.75,
+    fuelGrowth: 1.78,
+    effectPerLevel: 0.04
+  },
+  weapon: {
+    name: "무장",
+    description: "무기 계열, 화력 보너스, 대형 화기 해금에 영향을 줍니다.",
+    metalCost: 75,
+    fuelCost: 38,
+    metalGrowth: 1.78,
+    fuelGrowth: 1.8,
     effectPerLevel: 0.05
   },
-  logistics: {
-    name: "\ubcf4\uae09 \ucd5c\uc801\ud654",
-    description: "\ud568\uc120 \uc0dd\uc0b0 \uc790\uc6d0 \uc18c\ube44\ub97c \uc904\uc785\ub2c8\ub2e4.",
-    metalCost: 1300,
-    fuelCost: 840,
-    metalGrowth: 1.88,
-    fuelGrowth: 1.85,
-    effectPerLevel: 0.03
+  defense: {
+    name: "방어",
+    description: "장갑, 생존력, 방어 특화 선체 해금에 영향을 줍니다.",
+    metalCost: 60,
+    fuelCost: 30,
+    metalGrowth: 1.72,
+    fuelGrowth: 1.76,
+    effectPerLevel: 0.05
   },
-  tactics: {
-    name: "\ud568\ub300 \uc804\uc220",
-    description: "\uc804\ud22c \uc2dc \uc544\uad70 \ud568\ub300\uc758 \uacf5\uaca9\ub825\uc744 \ub298\ub9bd\ub2c8\ub2e4.",
-    metalCost: 1700,
-    fuelCost: 980,
-    metalGrowth: 1.92,
+  energy: {
+    name: "에너지",
+    description: "원자로, 생산 인프라, 전력 운용 및 생산 효율에 영향을 줍니다.",
+    metalCost: 58,
+    fuelCost: 32,
+    metalGrowth: 1.82,
     fuelGrowth: 1.86,
-    effectPerLevel: 0.07
+    effectPerLevel: 0.05
+  },
+  command: {
+    name: "지휘",
+    description: "전술, 보조 모듈, 항공모함/지원함 운용에 영향을 줍니다.",
+    metalCost: 62,
+    fuelCost: 34,
+    metalGrowth: 1.82,
+    fuelGrowth: 1.86,
+    effectPerLevel: 0.03
   }
 };
 
@@ -684,7 +779,7 @@ function normalizeTechNodeEconomy(node) {
 function normalizeTechNodeText(node) {
   const tuned = { ...node };
   if (String(tuned.effectType || "") === "unlock_component" && String(tuned.unlockKey || "")) {
-    const component = DEFAULT_COMPONENTS.find((item) => String(item.key || "") === String(tuned.unlockKey || ""));
+    const component = getModuleByKey(tuned.unlockKey);
     const componentName = component ? String(component.name || tuned.unlockKey) : String(tuned.unlockKey);
     tuned.name = `${componentName} 설계 연구`;
     tuned.description = `${componentName} 모듈 사용을 해금합니다.`;
@@ -743,7 +838,11 @@ function stableKeySpread(value) {
 }
 
 function buildAutoComponentTechNodes() {
-  const basicKeys = new Set(["standard_engine", "light_railgun", "reinforced_armor", "cargo_module"]);
+  const basicKeys = new Set([
+    "basic_engine_mk1",
+    "railgun_mk1",
+    "basic_armor_mk1"
+  ]);
   const reserved = new Set(
     getBaseTechNodes()
       .filter((node) => String(node.effectType || "") === "unlock_component" && String(node.unlockKey || ""))
@@ -861,192 +960,14 @@ const ADMIRAL_POOL = [
   ,{ name: "\uc138\ub9ac\uc2a4 \ub8ec", rarity: "SSR", combatBonus: 0.29, resourceBonus: 0.28, costBonus: 0.1 }
 ];
 
-const DEFAULT_HULLS = [
-  {
-    key: "corvette",
-    name: "\ucd08\uacc4\ud568 \uc120\uccb4",
-    classType: "corvette",
-    baseHp: 80,
-    baseSpeed: 9,
-    powerLimit: 75,
-    baseBuildTime: 30,
-    metalCost: 180,
-    fuelCost: 60,
-    slots: { engine: 1, weapon: 1, defense: 1, utility: 1 }
-  },
-  {
-    key: "destroyer",
-    name: "\uad6c\ucd95\ud568 \uc120\uccb4",
-    classType: "destroyer",
-    baseHp: 160,
-    baseSpeed: 7,
-    powerLimit: 135,
-    baseBuildTime: 95,
-    metalCost: 420,
-    fuelCost: 160,
-    slots: { engine: 1, weapon: 2, defense: 2, utility: 1 }
-  },
-  {
-    key: "cruiser",
-    name: "\uc21c\uc591\ud568 \uc120\uccb4",
-    classType: "cruiser",
-    baseHp: 340,
-    baseSpeed: 5,
-    powerLimit: 230,
-    baseBuildTime: 240,
-    metalCost: 900,
-    fuelCost: 360,
-    slots: { engine: 1, weapon: 3, defense: 2, utility: 2 }
-  },
-  {
-    key: "monitor",
-    name: "\ubaa8\ub2c8\ud130 \uc120\uccb4",
-    classType: "monitor",
-    baseHp: 520,
-    baseSpeed: 3,
-    powerLimit: 360,
-    baseBuildTime: 840,
-    metalCost: 1750,
-    fuelCost: 620,
-    slots: { engine: 1, weapon: 2, defense: 6, utility: 2 }
-  },
-  {
-    key: "battleship",
-    name: "\uc804\ud568 \uc120\uccb4",
-    classType: "battleship",
-    baseHp: 760,
-    baseSpeed: 3,
-    powerLimit: 420,
-    baseBuildTime: 680,
-    metalCost: 2600,
-    fuelCost: 1300,
-    slots: { engine: 2, weapon: 4, defense: 4, utility: 2 }
-  },
-  {
-    key: "carrier",
-    name: "\ud56d\uacf5\ubaa8\ud568 \uc120\uccb4",
-    classType: "carrier",
-    baseHp: 610,
-    baseSpeed: 3,
-    powerLimit: 390,
-    baseBuildTime: 920,
-    metalCost: 3000,
-    fuelCost: 1700,
-    slots: { engine: 2, weapon: 3, defense: 3, utility: 4 }
-  },
-  {
-    key: "dreadnought",
-    name: "\ub4dc\ub808\ub4dc\ub178\ud2b8 \uc120\uccb4",
-    classType: "dreadnought",
-    baseHp: 1180,
-    baseSpeed: 2,
-    powerLimit: 620,
-    baseBuildTime: 1650,
-    metalCost: 5600,
-    fuelCost: 3200,
-    slots: { engine: 2, weapon: 5, defense: 5, utility: 2 }
-  },
-  {
-    key: "titan",
-    name: "\ud0c0\uc774\ud0c4 \uc120\uccb4",
-    classType: "titan",
-    baseHp: 1850,
-    baseSpeed: 1,
-    powerLimit: 920,
-    baseBuildTime: 2900,
-    metalCost: 9800,
-    fuelCost: 5600,
-    slots: { engine: 3, weapon: 6, defense: 6, utility: 3 }
-  }
-];
+const LOBBY_RECRUIT_TYPES = {
+  normal: { key: "normal", name: "일반 영입", costCredit: 100, chances: { R: 0.7, SR: 0.25, SSR: 0.05 } },
+  premium: { key: "premium", name: "고급 영입", costCredit: 300, chances: { R: 0.3, SR: 0.5, SSR: 0.2 } }
+};
 
-const DEFAULT_COMPONENTS = [
-  { key: "standard_engine", name: "\ud45c\uc900 \uc5d4\uc9c4", category: "engine", hp: 0, attack: 0, defense: 0, speed: 1, power: 12, metal: 80, fuel: 40 },
-  { key: "high_output_engine", name: "\uace0\ucd9c\ub825 \uc5d4\uc9c4", category: "engine", hp: 0, attack: 0, defense: 0, speed: 3, power: 26, metal: 180, fuel: 130 },
-  { key: "warp_stabilizer_engine", name: "\uc6cc\ud504 \uc548\uc815\ud654 \uc5d4\uc9c4", category: "engine", hp: 50, attack: 0, defense: 8, speed: 2, power: 36, metal: 320, fuel: 220 },
-  { key: "ion_turbine_engine", name: "\uc774\uc628 \ud130\ube48 \uc5d4\uc9c4", category: "engine", hp: 20, attack: 0, defense: 2, speed: 2, power: 18, metal: 130, fuel: 80 },
-  { key: "fusion_drive", name: "\ud575\uc735\ud569 \ub4dc\ub77c\uc774\ube0c", category: "engine", hp: 45, attack: 0, defense: 4, speed: 3, power: 30, metal: 260, fuel: 180 },
-  { key: "vector_thruster", name: "\ubca1\ud130 \uc2a4\ub7ec\uc2a4\ud130", category: "engine", hp: 30, attack: 0, defense: 6, speed: 4, power: 34, metal: 290, fuel: 210 },
-  { key: "gravitic_impeller", name: "\uc911\ub825 \uc784\ud3a0\ub7ec", category: "engine", hp: 70, attack: 0, defense: 10, speed: 1, power: 40, metal: 360, fuel: 260 },
-  { key: "pulse_booster", name: "\ud384\uc2a4 \ubd80\uc2a4\ud130", category: "engine", hp: 10, attack: 0, defense: 0, speed: 5, power: 28, metal: 240, fuel: 240 },
-  { key: "antimatter_nozzle", name: "\ubc18\ubb3c\uc9c8 \ub178\uc990", category: "engine", hp: 85, attack: 0, defense: 12, speed: 2, power: 52, metal: 520, fuel: 420 },
-  { key: "titan_reactor_core", name: "\ud0c0\uc774\ud0c4 \ub9ac\uc561\ud130 \ucf54\uc5b4", category: "engine", hp: 140, attack: 0, defense: 18, speed: 0, power: 74, metal: 820, fuel: 620 },
-  { key: "light_railgun", name: "\uacbd\ub7c9 \ub808\uc77c\uac74", category: "weapon", hp: 0, attack: 28, defense: 0, speed: 0, power: 18, metal: 140, fuel: 40 },
-  { key: "missile_launcher", name: "\ubbf8\uc0ac\uc77c \ubc1c\uc0ac\uae30", category: "weapon", hp: 0, attack: 45, defense: 0, speed: -1, power: 30, metal: 220, fuel: 90 },
-  { key: "plasma_lance", name: "\ud50c\ub77c\uc988\ub9c8 \ub79c\uc2a4", category: "weapon", hp: 0, attack: 72, defense: 0, speed: -2, power: 52, metal: 430, fuel: 260 },
-  { key: "coil_cannon", name: "\ucf54\uc77c \uce90\ub17c", category: "weapon", hp: 0, attack: 34, defense: 0, speed: 0, power: 22, metal: 170, fuel: 60 },
-  { key: "gauss_battery", name: "\uac00\uc6b0\uc2a4 \ubc30\ud130\ub9ac", category: "weapon", hp: 0, attack: 56, defense: 0, speed: -1, power: 38, metal: 290, fuel: 170 },
-  { key: "heavy_torpedo_bay", name: "\uc911\uc5b4\ub8b0 \ud1a0\ub974\ud398\ub3c4 \ubca0\uc774", category: "weapon", hp: 0, attack: 84, defense: 0, speed: -2, power: 60, metal: 510, fuel: 320 },
-  { key: "beam_emitter", name: "\ube54 \uc5d0\ubbf8\ud130", category: "weapon", hp: 0, attack: 63, defense: 0, speed: -1, power: 44, metal: 350, fuel: 250 },
-  { key: "siege_artillery", name: "\uc2dc\uc988 \ud3ec\ubcd1", category: "weapon", hp: 0, attack: 108, defense: 0, speed: -3, power: 78, metal: 760, fuel: 470 },
-  { key: "flak_array", name: "\ud50c\ub799 \ubc30\uc5f4", category: "weapon", hp: 0, attack: 41, defense: 4, speed: 0, power: 26, metal: 220, fuel: 120 },
-  { key: "spinal_cannon", name: "\ucc99\ucd94 \uc8fc\ud3ec", category: "weapon", hp: 0, attack: 160, defense: 0, speed: -4, power: 110, metal: 1300, fuel: 900 },
-  { key: "reinforced_armor", name: "\uac15\ud654 \uc7a5\uac11\ud310", category: "defense", hp: 70, attack: 0, defense: 18, speed: -1, power: 20, metal: 190, fuel: 30 },
-  { key: "shield_generator", name: "\uc2e4\ub4dc \ubc1c\uc0dd\uae30", category: "defense", hp: 120, attack: 0, defense: 12, speed: 0, power: 32, metal: 260, fuel: 150 },
-  { key: "reactive_armor", name: "\ubc18\uc751\uc131 \uc7a5\uac11", category: "defense", hp: 210, attack: 0, defense: 26, speed: -2, power: 55, metal: 520, fuel: 240 },
-  { key: "nano_plating", name: "\ub098\ub178 \ud50c\ub808\uc774\ud305", category: "defense", hp: 95, attack: 0, defense: 16, speed: 0, power: 24, metal: 180, fuel: 120 },
-  { key: "ablative_layer", name: "\uc5b4\ube14\ub808\uc774\ud2f0\ube0c \ub808\uc774\uc5b4", category: "defense", hp: 150, attack: 0, defense: 14, speed: -1, power: 30, metal: 230, fuel: 140 },
-  { key: "fortress_bulkhead", name: "\ud3ec\ud2b8\ub9ac\uc2a4 \ubcbd\uccb4", category: "defense", hp: 260, attack: 0, defense: 30, speed: -3, power: 70, metal: 680, fuel: 310 },
-  { key: "phase_shield", name: "\ud398\uc774\uc988 \uc2e4\ub4dc", category: "defense", hp: 190, attack: 0, defense: 22, speed: 0, power: 46, metal: 420, fuel: 300 },
-  { key: "point_defense_grid", name: "\uc810\ubc29\uc5b4 \uadf8\ub9ac\ub4dc", category: "defense", hp: 80, attack: 6, defense: 20, speed: 0, power: 34, metal: 300, fuel: 190 },
-  { key: "adaptive_barrier", name: "\uc801\uc751\uc131 \ubc14\ub9ac\uc5b4", category: "defense", hp: 310, attack: 0, defense: 38, speed: -2, power: 86, metal: 980, fuel: 640 },
-  { key: "citadel_armor", name: "\uc2dc\ud0c0\ub378 \uc544\uba38", category: "defense", hp: 520, attack: 0, defense: 56, speed: -4, power: 140, metal: 2200, fuel: 1200 },
-  { key: "tactical_ai", name: "\uc804\uc220 AI", category: "utility", hp: 0, attack: 14, defense: 0, speed: 0, power: 14, metal: 120, fuel: 120 },
-  { key: "cargo_module", name: "\ud654\ubb3c \ubaa8\ub4c8", category: "utility", hp: 30, attack: 0, defense: 4, speed: -1, power: 10, metal: 110, fuel: 40 },
-  { key: "targeting_array", name: "\ud0c0\uaca9 \uc5f0\uc0b0 \ubc30\uc5f4", category: "utility", hp: 0, attack: 22, defense: 6, speed: 0, power: 28, metal: 240, fuel: 170 },
-  { key: "repair_drone_bay", name: "\uc218\ub9ac \ub4dc\ub860 \ubca0\uc774", category: "utility", hp: 110, attack: 0, defense: 10, speed: 0, power: 36, metal: 330, fuel: 230 },
-  { key: "ecm_suite", name: "ECM \uc218\ud2b8", category: "utility", hp: 40, attack: 0, defense: 14, speed: 1, power: 26, metal: 210, fuel: 190 },
-  { key: "sensor_fusion_core", name: "\uc13c\uc11c \ud719\ud569 \ucf54\uc5b4", category: "utility", hp: 35, attack: 10, defense: 6, speed: 1, power: 24, metal: 200, fuel: 160 },
-  { key: "command_uplink", name: "\uc9c0\ud718 \uc5c5\ub9c1\ud06c", category: "utility", hp: 60, attack: 18, defense: 8, speed: 0, power: 34, metal: 320, fuel: 220 },
-  { key: "fuel_optimizer", name: "\uc5f0\ub8cc \ucd5c\uc801\ud654 \ubaa8\ub4c8", category: "utility", hp: 20, attack: 0, defense: 8, speed: 2, power: 18, metal: 180, fuel: 120 },
-  { key: "ammo_fabricator", name: "\ud0c4\uc57d \uc81c\uc870 \ubaa8\ub4c8", category: "utility", hp: 50, attack: 26, defense: 4, speed: -1, power: 40, metal: 420, fuel: 260 },
-  { key: "battle_computer", name: "\ubc30\ud2c0 \ucef4\ud4e8\ud130", category: "utility", hp: 75, attack: 34, defense: 10, speed: 0, power: 52, metal: 560, fuel: 420, powerBonus: 0 },
-  { key: "reactor_boost", name: "\uc6d0\uc790\ub85c \ubd80\uc2a4\ud2b8", category: "utility", hp: 0, attack: 0, defense: 0, speed: -1, power: 16, metal: 700, fuel: 520, powerBonus: 110 },
 
-  { key: "micro_burst_drive", name: "\ub9c8\uc774\ud06c\ub85c \ubc84\uc2a4\ud2b8 \ub4dc\ub77c\uc774\ube0c", category: "engine", hp: 0, attack: 4, defense: -3, speed: 6, power: 42, metal: 360, fuel: 340 },
-  { key: "armored_impulse_engine", name: "\uc7a5\uac11 \uc784\ud384\uc2a4 \uc5d4\uc9c4", category: "engine", hp: 120, attack: 0, defense: 24, speed: -2, power: 68, metal: 760, fuel: 420 },
-  { key: "siege_drive", name: "\uc2dc\uc988 \ub4dc\ub77c\uc774\ube0c", category: "engine", hp: 220, attack: 0, defense: 30, speed: -4, power: 88, metal: 980, fuel: 560 },
-  { key: "escort_afterburner", name: "\uc5d0\uc2a4\ucf54\ud2b8 \uc560\ud504\ud130\ubc84\ub108", category: "engine", hp: 20, attack: 8, defense: -2, speed: 4, power: 30, metal: 280, fuel: 260 },
-  { key: "silent_cruise_engine", name: "\uc0ac\uc77c\ub7f0\ud2b8 \ud06c\ub8e8\uc988 \uc5d4\uc9c4", category: "engine", hp: 40, attack: -4, defense: 10, speed: 2, power: 24, metal: 230, fuel: 170 },
-  { key: "overclocked_ion_drive", name: "\uc624\ubc84\ud074\ub7ed \uc774\uc628 \ub4dc\ub77c\uc774\ube0c", category: "engine", hp: -20, attack: 6, defense: -4, speed: 7, power: 48, metal: 420, fuel: 410 },
-  { key: "ballast_drive", name: "\ubc38\ub7ec\uc2a4\ud2b8 \ub4dc\ub77c\uc774\ube0c", category: "engine", hp: 260, attack: 0, defense: 34, speed: -5, power: 96, metal: 1250, fuel: 680 },
-  { key: "long_range_cruise_core", name: "\uc7a5\uac70\ub9ac \uc21c\ud56d \ucf54\uc5b4", category: "engine", hp: 60, attack: 0, defense: 8, speed: 3, power: 36, metal: 340, fuel: 280 },
-  { key: "interceptor_vector_pack", name: "\uc694\uaca9 \ubca1\ud130 \ud329", category: "engine", hp: 10, attack: 10, defense: -1, speed: 5, power: 44, metal: 390, fuel: 360 },
-  { key: "bastion_propulsion", name: "\ubc14\uc2a4\ud2f0\uc628 \ucd94\uc9c4\uae30", category: "engine", hp: 180, attack: 0, defense: 28, speed: -3, power: 80, metal: 920, fuel: 540 },
 
-  { key: "anti_armor_cannon", name: "\ub300\uc7a5\uac11 \uce90\ub17c", category: "weapon", hp: 0, attack: 92, defense: 0, speed: -3, power: 68, metal: 640, fuel: 340 },
-  { key: "swarm_rocket_pod", name: "\uc2a4\uc6dc \ub85c\ucf13 \ud3ec\ub4dc", category: "weapon", hp: 0, attack: 52, defense: -2, speed: 1, power: 34, metal: 300, fuel: 220 },
-  { key: "interceptor_laser_net", name: "\uc694\uaca9 \ub808\uc774\uc800 \ub124\ud2b8", category: "weapon", hp: 0, attack: 36, defense: 10, speed: 0, power: 28, metal: 260, fuel: 130 },
-  { key: "breacher_rams", name: "\ube0c\ub9ac\ucc98 \ub7a8", category: "weapon", hp: 80, attack: 44, defense: 6, speed: -2, power: 36, metal: 340, fuel: 120 },
-  { key: "ion_spear", name: "\uc774\uc628 \uc2a4\ud53c\uc5b4", category: "weapon", hp: 0, attack: 74, defense: 0, speed: -1, power: 50, metal: 430, fuel: 290 },
-  { key: "suppression_mortar", name: "\uc81c\uc555 \ubaa8\ud0c0", category: "weapon", hp: 0, attack: 118, defense: 0, speed: -4, power: 92, metal: 980, fuel: 620 },
-  { key: "rail_burst_array", name: "\ub808\uc77c \ubc84\uc2a4\ud2b8 \ubc30\uc5f4", category: "weapon", hp: 0, attack: 62, defense: 2, speed: -1, power: 42, metal: 380, fuel: 210 },
-  { key: "carrier_strike_rack", name: "\uce90\ub9ac\uc5b4 \uacf5\uc2b5 \ub799", category: "weapon", hp: 20, attack: 88, defense: 0, speed: -2, power: 66, metal: 620, fuel: 440 },
-  { key: "guardian_turret_ring", name: "\uac00\ub514\uc5b8 \ud130\ub81b \ub9c1", category: "weapon", hp: 30, attack: 48, defense: 12, speed: -1, power: 40, metal: 360, fuel: 200 },
-  { key: "volatile_plasma_silo", name: "\ud718\ubc1c\uc131 \ud50c\ub77c\uc988\ub9c8 \uc0ac\uc77c\ub85c", category: "weapon", hp: -40, attack: 142, defense: -6, speed: -3, power: 104, metal: 1200, fuel: 840 },
 
-  { key: "kinetic_mesh_armor", name: "\ud0a4\ub124\ud2f1 \uba54\uc26c \uc544\uba38", category: "defense", hp: 170, attack: 0, defense: 24, speed: -1, power: 40, metal: 410, fuel: 180 },
-  { key: "fortified_keel", name: "\ud3ec\ud2f0\ud30c\uc774\ub4dc \ud0ac", category: "defense", hp: 290, attack: 0, defense: 32, speed: -2, power: 64, metal: 690, fuel: 280 },
-  { key: "countermeasure_shell", name: "\uce74\uc6b4\ud130\uba54\uc800 \uc178", category: "defense", hp: 90, attack: 8, defense: 16, speed: 1, power: 28, metal: 260, fuel: 170 },
-  { key: "polarized_armor", name: "\ud3f4\ub77c\ub77c\uc774\uc988 \uc544\uba38", category: "defense", hp: 140, attack: 0, defense: 28, speed: 0, power: 38, metal: 330, fuel: 240 },
-  { key: "shock_absorber_layer", name: "\ucda9\uaca9 \ud761\uc218 \ub808\uc774\uc5b4", category: "defense", hp: 220, attack: 0, defense: 18, speed: 0, power: 36, metal: 300, fuel: 210 },
-  { key: "guardian_bulkhead", name: "\uac00\ub514\uc5b8 \ubcbd\uccb4", category: "defense", hp: 360, attack: 0, defense: 42, speed: -3, power: 90, metal: 1080, fuel: 520 },
-  { key: "hardened_radiator_shell", name: "\uac15\ud654 \ub77c\ub514\uc5d0\uc774\ud130 \uc178", category: "defense", hp: 130, attack: 0, defense: 22, speed: 1, power: 34, metal: 320, fuel: 200 },
-  { key: "auxiliary_shield_bank", name: "\ubcf4\uc870 \uc2e4\ub4dc \ubc45\ud06c", category: "defense", hp: 250, attack: 0, defense: 20, speed: -1, power: 48, metal: 470, fuel: 360 },
-  { key: "siege_fortress_plating", name: "\uc2dc\uc988 \ud3ec\ud2b8\ub9ac\uc2a4 \ud50c\ub808\uc774\ud305", category: "defense", hp: 520, attack: 0, defense: 60, speed: -5, power: 150, metal: 2350, fuel: 1260 },
-  { key: "mirror_field_barrier", name: "\ubbf8\ub7ec \ud544\ub4dc \ubc14\ub9ac\uc5b4", category: "defense", hp: 160, attack: 0, defense: 26, speed: 1, power: 44, metal: 450, fuel: 320 },
-
-  { key: "reactor_cooling_suite", name: "\ub9ac\uc561\ud130 \ucee8\ub9c1 \uc218\ud2b8", category: "utility", hp: 40, attack: 0, defense: 8, speed: 0, power: 18, metal: 200, fuel: 150, powerBonus: 26 },
-  { key: "siege_targeting_ai", name: "\uc2dc\uc988 \ud0c0\uac9f\ud305 AI", category: "utility", hp: 0, attack: 52, defense: -4, speed: -1, power: 58, metal: 640, fuel: 440 },
-  { key: "combat_medbay", name: "\uc804\ud22c \uba54\ub4dc\ubca0\uc774", category: "utility", hp: 160, attack: 0, defense: 8, speed: 0, power: 42, metal: 500, fuel: 280 },
-  { key: "deception_field", name: "\uae30\ub9cc \ud544\ub4dc", category: "utility", hp: 30, attack: 10, defense: 12, speed: 2, power: 34, metal: 340, fuel: 260 },
-  { key: "drone_control_spine", name: "\ub4dc\ub860 \uc81c\uc5b4 \uc2a4\ud30c\uc778", category: "utility", hp: 90, attack: 24, defense: 6, speed: -1, power: 46, metal: 520, fuel: 320 },
-  { key: "fuel_refinery_pod", name: "\uc5f0\ub8cc \uc815\uc81c \ud3ec\ub4dc", category: "utility", hp: 35, attack: 0, defense: 6, speed: 1, power: 16, metal: 190, fuel: 110 },
-  { key: "auxiliary_reactor_node", name: "\ubcf4\uc870 \ub9ac\uc561\ud130 \ub178\ub4dc", category: "utility", hp: 0, attack: 0, defense: 2, speed: -1, power: 24, metal: 520, fuel: 360, powerBonus: 70 },
-  { key: "command_broadcast_hub", name: "\uc9c0\ud718 \ube0c\ub85c\ub4dc\uce90\uc2a4\ud2b8 \ud5c8\ube0c", category: "utility", hp: 70, attack: 20, defense: 12, speed: 0, power: 40, metal: 410, fuel: 280 },
-  { key: "stability_gyro_array", name: "\uc548\uc815\ud654 \uc790\uc774\ub85c \ubc30\uc5f4", category: "utility", hp: 50, attack: 0, defense: 18, speed: 1, power: 30, metal: 300, fuel: 230 },
-  { key: "overheat_converter", name: "\uc624\ubc84\ud788\ud2b8 \ucee8\ubc84\ud130", category: "utility", hp: -30, attack: 30, defense: -5, speed: 2, power: 28, metal: 260, fuel: 220, powerBonus: 30 }
-];
 
 function run(sql, params = []) {
   return new Promise((resolve, reject) => {
@@ -1087,7 +1008,10 @@ async function seedNeutralZones() {
     const isThirdEmpire = Number(zone.level || 1) >= 4 && Number(zone.id || 0) % 4 === 0;
     const faction = isThirdEmpire ? "third_empire" : "neutral";
     const baseGarrison = normalizeFleet(zone.garrison || {});
-    const powerScale = isThirdEmpire ? (1.65 + Number(zone.level || 1) * 0.18) : 1;
+    const empireBalance = balance.thirdEmpire || {};
+    const powerScale = isThirdEmpire
+      ? (Number(empireBalance.powerScaleBase || 1.65) + Number(zone.level || 1) * Number(empireBalance.powerScalePerLevel || 0.18))
+      : 1;
     const boostedGarrison = isThirdEmpire
       ? {
           corvette: Math.max(0, Math.floor(Number(baseGarrison.corvette || 0) * powerScale) + 6),
@@ -1098,7 +1022,7 @@ async function seedNeutralZones() {
         }
       : baseGarrison;
     const recommendedPower = isThirdEmpire
-      ? Math.floor(Number(zone.recommendedPower || 0) * 2.2 + Number(zone.level || 1) * 850)
+      ? Math.floor(Number(zone.recommendedPower || 0) * Number(empireBalance.recommendedPowerMultiplier || 2.2) + Number(zone.level || 1) * Number(empireBalance.recommendedPowerFlatPerLevel || 850))
       : zone.recommendedPower;
     const zoneDescription = isThirdEmpire
       ? `[제3제국] ${zone.description}`
@@ -1107,8 +1031,8 @@ async function seedNeutralZones() {
     await run(
       `
         INSERT OR IGNORE INTO neutral_zones
-          (id, name, description, level, map_x, map_y, metal_rate, fuel_rate, recommended_power, garrison_json)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          (id, name, description, level, map_x, map_y, metal_rate, fuel_rate, recommended_power, garrison_json, zone_layer, zone_role, unlock_after_seconds)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       [
         zone.id,
@@ -1120,7 +1044,10 @@ async function seedNeutralZones() {
         zone.metalRate,
         zone.fuelRate,
         recommendedPower,
-        JSON.stringify(boostedGarrison)
+        JSON.stringify(boostedGarrison),
+        zone.layer,
+        zone.role,
+        zone.unlockAfterSeconds || 0
       ]
     );
 
@@ -1128,7 +1055,8 @@ async function seedNeutralZones() {
       `
         UPDATE neutral_zones
         SET name = ?, description = ?, level = ?, map_x = ?, map_y = ?,
-            metal_rate = ?, fuel_rate = ?, recommended_power = ?, garrison_json = ?, faction = ?
+            metal_rate = ?, fuel_rate = ?, recommended_power = ?, garrison_json = ?, faction = ?,
+            zone_layer = ?, zone_role = ?, unlock_after_seconds = ?
         WHERE id = ?
       `,
       [
@@ -1142,6 +1070,9 @@ async function seedNeutralZones() {
         recommendedPower,
         JSON.stringify(boostedGarrison),
         faction,
+        zone.layer,
+        zone.role,
+        zone.unlockAfterSeconds || 0,
         zone.id
       ]
     );
@@ -1317,12 +1248,22 @@ function randomBaseCoordinate() {
   return Math.floor(40 + Math.random() * (MAP_MAX_X - 80));
 }
 
+function randomOuterBaseCoordinate() {
+  const seed = Date.now() + Math.floor(Math.random() * 100000);
+  return ringCoordinate(seed, "outer");
+}
+
+function makeInviteCode() {
+  return Math.random().toString(36).slice(2, 8).toUpperCase();
+}
+
 async function ensureBase(userId) {
   let base = await get("SELECT user_id, map_x, map_y FROM bases WHERE user_id = ?", [userId]);
   if (!base) {
+    const coord = randomOuterBaseCoordinate();
     await run(
       "INSERT INTO bases (user_id, map_x, map_y, moved_at) VALUES (?, ?, ?, ?)",
-      [userId, randomBaseCoordinate(), randomBaseCoordinate(), Date.now()]
+      [userId, coord.x, coord.y, Date.now()]
     );
     base = await get("SELECT user_id, map_x, map_y FROM bases WHERE user_id = ?", [userId]);
   }
@@ -1332,6 +1273,330 @@ async function ensureBase(userId) {
     x: base.map_x,
     y: base.map_y
   };
+}
+
+async function ensureLobbyProfile(userId) {
+  await run(
+    `
+      INSERT OR IGNORE INTO lobby_profiles
+        (user_id, credit, featured_admiral_id, selected_session_admiral_id, equipped_theme_id, created_at, updated_at)
+      VALUES (?, 0, NULL, NULL, 'default', ?, ?)
+    `,
+    [userId, Date.now(), Date.now()]
+  );
+}
+
+async function getLobbyProfile(userId) {
+  await ensureLobbyProfile(userId);
+  const profile = await get(
+    `
+      SELECT lp.*, fa.name AS featured_admiral_name, sa.name AS selected_admiral_name
+      FROM lobby_profiles lp
+      LEFT JOIN admirals fa ON fa.id = lp.featured_admiral_id
+      LEFT JOIN admirals sa ON sa.id = lp.selected_session_admiral_id
+      WHERE lp.user_id = ?
+    `,
+    [userId]
+  );
+  const recentRewards = await all(
+    `
+      SELECT id, session_id, credit_reward, detail_json, created_at
+      FROM session_reward_logs
+      WHERE user_id = ?
+      ORDER BY id DESC
+      LIMIT 5
+    `,
+    [userId]
+  );
+  return {
+    userId,
+    credit: Number(profile?.credit || 0),
+    featuredAdmiralId: profile?.featured_admiral_id ? Number(profile.featured_admiral_id) : null,
+    featuredAdmiralName: profile?.featured_admiral_name || null,
+    selectedSessionAdmiralId: profile?.selected_session_admiral_id ? Number(profile.selected_session_admiral_id) : null,
+    selectedSessionAdmiralName: profile?.selected_admiral_name || null,
+    equippedThemeId: profile?.equipped_theme_id || "default",
+    recentRewards: recentRewards.map((row) => ({
+      id: row.id,
+      sessionId: row.session_id,
+      creditReward: Number(row.credit_reward || 0),
+      detail: parseJsonObject(row.detail_json),
+      createdAt: row.created_at
+    }))
+  };
+}
+
+function pickLobbyAdmiral(recruitType) {
+  const config = LOBBY_RECRUIT_TYPES[recruitType] || LOBBY_RECRUIT_TYPES.normal;
+  const roll = Math.random();
+  let rarity = "R";
+  let threshold = 0;
+  for (const [key, chance] of Object.entries(config.chances)) {
+    threshold += Number(chance || 0);
+    if (roll <= threshold) {
+      rarity = key;
+      break;
+    }
+  }
+  const candidates = ADMIRAL_POOL.filter((admiral) => admiral.rarity === rarity);
+  return candidates[Math.floor(Math.random() * candidates.length)] || ADMIRAL_POOL[0];
+}
+
+function formatLobbyAdmiral(row, profile = {}) {
+  const id = Number(row.id);
+  return {
+    id,
+    name: row.name,
+    rarity: row.rarity,
+    combatBonus: Number(row.combatBonus ?? row.combat_bonus ?? 0),
+    resourceBonus: Number(row.resourceBonus ?? row.resource_bonus ?? 0),
+    costBonus: Number(row.costBonus ?? row.cost_bonus ?? 0),
+    assigned: Number(row.assigned || 0),
+    status: row.status || "active",
+    isFeatured: Number(profile.featuredAdmiralId || profile.featured_admiral_id || 0) === id,
+    isSessionSelected: Number(profile.selectedSessionAdmiralId || profile.selected_session_admiral_id || 0) === id
+  };
+}
+
+async function getLobbyAdmiralsState(userId) {
+  const profile = await getLobbyProfile(userId);
+  const rows = await all(
+    `
+      SELECT id, name, rarity, combat_bonus AS combatBonus,
+             resource_bonus AS resourceBonus, cost_bonus AS costBonus, assigned, status
+      FROM admirals
+      WHERE user_id = ? AND status = 'active'
+      ORDER BY id DESC
+    `,
+    [userId]
+  );
+  return {
+    profile,
+    recruitTypes: Object.values(LOBBY_RECRUIT_TYPES).map((item) => ({
+      key: item.key,
+      name: item.name,
+      costCredit: item.costCredit,
+      chances: item.chances
+    })),
+    admirals: rows.map((row) => formatLobbyAdmiral(row, profile))
+  };
+}
+
+async function formatRoom(row, currentUserId) {
+  const players = await all(
+    `
+      SELECT rp.user_id, rp.is_ready, rp.is_host, u.username
+      FROM room_players rp
+      JOIN users u ON u.id = rp.user_id
+      WHERE rp.room_id = ?
+      ORDER BY rp.is_host DESC, rp.joined_at ASC
+    `,
+    [row.id]
+  );
+  return {
+    id: row.id,
+    roomName: row.room_name,
+    hostUserId: row.host_user_id,
+    hostUsername: row.host_username || players.find((item) => Number(item.is_host || 0) === 1)?.username || "",
+    mode: row.mode,
+    maxPlayers: Number(row.max_players || 1),
+    currentPlayers: players.length,
+    isPrivate: Boolean(row.is_private),
+    inviteCode: row.invite_code,
+    status: row.status,
+    sessionId: row.session_id ? Number(row.session_id) : null,
+    createdAt: row.created_at,
+    players: players.map((player) => ({
+      userId: player.user_id,
+      username: player.username,
+      isReady: Boolean(player.is_ready),
+      isHost: Boolean(player.is_host),
+      isMe: Number(player.user_id) === Number(currentUserId)
+    })),
+    isJoined: players.some((player) => Number(player.user_id) === Number(currentUserId)),
+    isHost: Number(row.host_user_id) === Number(currentUserId)
+  };
+}
+
+async function getCurrentSessionForUser(userId) {
+  const row = await get(
+    `
+      SELECT s.*, r.room_name, r.mode, r.status AS room_status
+      FROM sessions s
+      JOIN session_players sp ON sp.session_id = s.id
+      JOIN rooms r ON r.id = s.room_id
+      WHERE sp.user_id = ? AND s.status = 'active'
+      ORDER BY s.id DESC
+      LIMIT 1
+    `,
+    [userId]
+  );
+  if (!row) return null;
+  return {
+    id: row.id,
+    roomId: row.room_id,
+    roomName: row.room_name,
+    mode: row.mode,
+    status: row.status,
+    startedAt: row.started_at,
+    endedAt: row.ended_at || null
+  };
+}
+
+async function calculateSessionScore(userId, session) {
+  const startedAt = Number(session?.started_at || 0);
+  const endedAt = Number(session?.ended_at || Date.now());
+  const occupied = await get("SELECT COUNT(*) AS count FROM occupied_zones WHERE user_id = ?", [userId]);
+  const battleWins = await get(
+    `
+      SELECT COUNT(*) AS count
+      FROM battle_records
+      WHERE user_id = ? AND result = 'victory' AND created_at BETWEEN ? AND ?
+    `,
+    [userId, startedAt, endedAt]
+  );
+  const battleLosses = await get(
+    `
+      SELECT COUNT(*) AS count
+      FROM battle_records
+      WHERE user_id = ? AND result != 'victory' AND created_at BETWEEN ? AND ?
+    `,
+    [userId, startedAt, endedAt]
+  );
+  const outpostScore = Number(occupied?.count || 0) * 20;
+  const combatScore = Number(battleWins?.count || 0) * 30;
+  const survivalScore = Math.max(10, Math.floor((endedAt - startedAt) / 60000) * 2);
+  const totalScore = outpostScore + combatScore + survivalScore;
+  return {
+    cityScore: survivalScore,
+    outpostScore,
+    combatScore,
+    eventScore: 0,
+    coreScore: 0,
+    totalScore,
+    occupiedZones: Number(occupied?.count || 0),
+    battleWins: Number(battleWins?.count || 0),
+    battleLosses: Number(battleLosses?.count || 0)
+  };
+}
+
+function calculateCreditReward(score, rank, totalPlayers) {
+  const baseReward = 50;
+  const rankReward = rank === 1 ? 150 : rank === 2 ? 100 : rank === 3 ? 70 : 30;
+  const scoreReward = Math.floor(Number(score?.totalScore || 0) * 0.25);
+  const creditTotal = Math.max(50, baseReward + rankReward + scoreReward);
+  return { baseReward, rankReward, missionReward: 0, bonusReward: scoreReward, creditTotal, totalPlayers };
+}
+
+async function getSessionSummary(sessionId) {
+  const session = await get(
+    `
+      SELECT s.*, r.room_name, r.status AS room_status
+      FROM sessions s
+      JOIN rooms r ON r.id = s.room_id
+      WHERE s.id = ?
+    `,
+    [sessionId]
+  );
+  if (!session) return null;
+  const rows = await all(
+    `
+      SELECT sp.*, u.username
+      FROM session_players sp
+      JOIN users u ON u.id = sp.user_id
+      WHERE sp.session_id = ?
+      ORDER BY COALESCE(sp.result_rank, 999), sp.final_score DESC
+    `,
+    [sessionId]
+  );
+  const rewards = await all(
+    "SELECT user_id, credit_reward, detail_json, created_at FROM session_reward_logs WHERE session_id = ? ORDER BY id DESC",
+    [sessionId]
+  );
+  const rewardMap = new Map(rewards.map((row) => [Number(row.user_id), row]));
+  return {
+    id: session.id,
+    roomId: session.room_id,
+    roomName: session.room_name,
+    mode: session.mode,
+    status: session.status,
+    startedAt: session.started_at,
+    endedAt: session.ended_at || null,
+    players: rows.map((row) => {
+      const reward = rewardMap.get(Number(row.user_id));
+      const detail = parseJsonObject(reward?.detail_json);
+      return {
+        userId: row.user_id,
+        username: row.username,
+        rank: row.result_rank ? Number(row.result_rank) : null,
+        isEliminated: Boolean(row.is_eliminated),
+        finalScore: Number(row.final_score || 0),
+        creditReward: Number(row.credit_reward || reward?.credit_reward || 0),
+        detail
+      };
+    })
+  };
+}
+
+async function finalizeSession(sessionId, endedByUserId) {
+  const session = await get("SELECT * FROM sessions WHERE id = ?", [sessionId]);
+  if (!session) {
+    const error = new Error("세션을 찾을 수 없습니다.");
+    error.status = 404;
+    throw error;
+  }
+  const participant = await get("SELECT user_id FROM session_players WHERE session_id = ? AND user_id = ?", [sessionId, endedByUserId]);
+  if (!participant) {
+    const error = new Error("참가 중인 세션만 종료할 수 있습니다.");
+    error.status = 403;
+    throw error;
+  }
+  if (session.status === "ended") {
+    return getSessionSummary(sessionId);
+  }
+
+  const endedAt = Date.now();
+  const participants = await all("SELECT user_id FROM session_players WHERE session_id = ?", [sessionId]);
+  const scored = [];
+  for (const player of participants) {
+    const score = await calculateSessionScore(player.user_id, { ...session, ended_at: endedAt });
+    scored.push({ userId: player.user_id, score });
+  }
+  scored.sort((a, b) => b.score.totalScore - a.score.totalScore || a.userId - b.userId);
+
+  await run("BEGIN TRANSACTION");
+  try {
+    for (let index = 0; index < scored.length; index += 1) {
+      const rank = index + 1;
+      const item = scored[index];
+      const reward = calculateCreditReward(item.score, rank, scored.length);
+      const detail = {
+        rank,
+        totalPlayers: scored.length,
+        score: item.score,
+        reward,
+        endedByUserId
+      };
+      await ensureLobbyProfile(item.userId);
+      await run("UPDATE lobby_profiles SET credit = credit + ?, updated_at = ? WHERE user_id = ?", [reward.creditTotal, endedAt, item.userId]);
+      await run(
+        "UPDATE session_players SET result_rank = ?, final_score = ?, credit_reward = ? WHERE session_id = ? AND user_id = ?",
+        [rank, item.score.totalScore, reward.creditTotal, sessionId, item.userId]
+      );
+      await run(
+        "INSERT INTO session_reward_logs (user_id, session_id, credit_reward, detail_json, created_at) VALUES (?, ?, ?, ?, ?)",
+        [item.userId, sessionId, reward.creditTotal, JSON.stringify(detail), endedAt]
+      );
+    }
+    await run("UPDATE sessions SET status = 'ended', ended_at = ? WHERE id = ?", [endedAt, sessionId]);
+    await run("UPDATE rooms SET status = 'ended', updated_at = ? WHERE id = ?", [endedAt, session.room_id]);
+    await run("COMMIT");
+  } catch (err) {
+    await run("ROLLBACK");
+    throw err;
+  }
+
+  return getSessionSummary(sessionId);
 }
 
 function movementCost(from, to) {
@@ -1384,7 +1649,10 @@ async function initDb() {
       metal_rate INTEGER NOT NULL,
       fuel_rate INTEGER NOT NULL,
       recommended_power INTEGER NOT NULL DEFAULT 100,
-      garrison_json TEXT NOT NULL
+      garrison_json TEXT NOT NULL,
+      zone_layer TEXT NOT NULL DEFAULT 'mid',
+      zone_role TEXT NOT NULL DEFAULT 'metal',
+      unlock_after_seconds INTEGER NOT NULL DEFAULT 0
     )
   `);
 
@@ -1502,6 +1770,25 @@ async function initDb() {
   `);
 
   await run(`
+    CREATE TABLE IF NOT EXISTS ships (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      design_id INTEGER NOT NULL,
+      max_hp INTEGER NOT NULL,
+      current_hp INTEGER NOT NULL,
+      damage_state TEXT NOT NULL DEFAULT 'normal',
+      status TEXT NOT NULL DEFAULT 'reserve',
+      fleet_slot INTEGER,
+      zone_id INTEGER,
+      line TEXT NOT NULL DEFAULT 'mid',
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users(id),
+      FOREIGN KEY (design_id) REFERENCES ship_designs(id)
+    )
+  `);
+
+  await run(`
     CREATE TABLE IF NOT EXISTS missions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       user_id INTEGER NOT NULL,
@@ -1525,6 +1812,46 @@ async function initDb() {
   await ensureColumn("missions", "attacker_ship_count", "INTEGER NOT NULL DEFAULT 0");
 
   await run(`
+    CREATE TABLE IF NOT EXISTS battle_sessions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      mission_id INTEGER,
+      attacker_user_id INTEGER NOT NULL,
+      defender_user_id INTEGER,
+      target_type TEXT NOT NULL,
+      target_id INTEGER,
+      state TEXT NOT NULL DEFAULT 'active',
+      tick INTEGER NOT NULL DEFAULT 0,
+      started_at INTEGER NOT NULL,
+      last_tick_at INTEGER NOT NULL,
+      ended_at INTEGER,
+      retreat_side TEXT,
+      retreat_ticks_remaining INTEGER NOT NULL DEFAULT 0,
+      result TEXT,
+      log_json TEXT NOT NULL DEFAULT '[]',
+      FOREIGN KEY (mission_id) REFERENCES missions(id)
+    )
+  `);
+  await ensureColumn("battle_sessions", "full_log_json", "TEXT NOT NULL DEFAULT '[]'");
+  await ensureColumn("battle_sessions", "reveal_index", "INTEGER NOT NULL DEFAULT 0");
+  await ensureColumn("battle_sessions", "attacker_side_json", "TEXT NOT NULL DEFAULT '[]'");
+  await ensureColumn("battle_sessions", "defender_side_json", "TEXT NOT NULL DEFAULT '[]'");
+  await ensureColumn("battle_sessions", "context_json", "TEXT NOT NULL DEFAULT '{}'");
+  await ensureColumn("battle_sessions", "record_written", "INTEGER NOT NULL DEFAULT 0");
+
+  await run(`
+    CREATE TABLE IF NOT EXISTS repair_jobs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      ship_id INTEGER NOT NULL,
+      start_time INTEGER NOT NULL,
+      last_processed_at INTEGER NOT NULL,
+      status TEXT NOT NULL DEFAULT 'repairing',
+      FOREIGN KEY (user_id) REFERENCES users(id),
+      FOREIGN KEY (ship_id) REFERENCES ships(id)
+    )
+  `);
+
+  await run(`
     CREATE TABLE IF NOT EXISTS battle_records (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       user_id INTEGER NOT NULL,
@@ -1540,12 +1867,27 @@ async function initDb() {
   await run(`
     CREATE TABLE IF NOT EXISTS research (
       user_id INTEGER PRIMARY KEY,
+      engine_level INTEGER NOT NULL DEFAULT 0,
+      weapon_level INTEGER NOT NULL DEFAULT 0,
+      armor_level INTEGER NOT NULL DEFAULT 0,
+      industry_level INTEGER NOT NULL DEFAULT 0,
+      tactics_level INTEGER NOT NULL DEFAULT 0,
       resource_level INTEGER NOT NULL DEFAULT 0,
       logistics_level INTEGER NOT NULL DEFAULT 0,
-      tactics_level INTEGER NOT NULL DEFAULT 0,
       FOREIGN KEY (user_id) REFERENCES users(id)
     )
   `);
+  await ensureColumn("research", "engine_level", "INTEGER NOT NULL DEFAULT 0");
+  await ensureColumn("research", "weapon_level", "INTEGER NOT NULL DEFAULT 0");
+  await ensureColumn("research", "armor_level", "INTEGER NOT NULL DEFAULT 0");
+  await ensureColumn("research", "industry_level", "INTEGER NOT NULL DEFAULT 0");
+  await ensureColumn("research", "resource_level", "INTEGER NOT NULL DEFAULT 0");
+  await ensureColumn("research", "logistics_level", "INTEGER NOT NULL DEFAULT 0");
+  await ensureColumn("research", "engineering_level", "INTEGER NOT NULL DEFAULT 0");
+  await ensureColumn("research", "defense_level", "INTEGER NOT NULL DEFAULT 0");
+  await ensureColumn("research", "energy_level", "INTEGER NOT NULL DEFAULT 0");
+  await ensureColumn("research", "command_level", "INTEGER NOT NULL DEFAULT 0");
+  await run("UPDATE research SET engineering_level = MAX(engineering_level, engine_level), defense_level = MAX(defense_level, armor_level), energy_level = MAX(energy_level, industry_level), command_level = MAX(command_level, tactics_level)");
 
   await run(`
     CREATE TABLE IF NOT EXISTS commander_progress (
@@ -1574,11 +1916,12 @@ async function initDb() {
   await ensureColumn("admirals", "captured_at", "INTEGER");
   await ensureColumn("admirals", "status", "TEXT NOT NULL DEFAULT 'active'");
   await ensureColumn("admirals", "dead_at", "INTEGER");
+  await run("UPDATE admirals SET status = 'active', dead_at = NULL, captured_from = NULL, captured_at = NULL WHERE status != 'active' OR dead_at IS NOT NULL OR captured_from IS NOT NULL OR captured_at IS NOT NULL");
 
   await run(`
     CREATE TABLE IF NOT EXISTS user_settings (
       user_id INTEGER PRIMARY KEY,
-      admiral_policy TEXT NOT NULL DEFAULT 'capture',
+      admiral_policy TEXT NOT NULL DEFAULT 'none',
       FOREIGN KEY (user_id) REFERENCES users(id)
     )
   `);
@@ -1594,6 +1937,104 @@ async function initDb() {
       last_used_at INTEGER NOT NULL DEFAULT 0,
       PRIMARY KEY (user_id, category),
       FOREIGN KEY (user_id) REFERENCES users(id)
+    )
+  `);
+
+  await run(`
+    CREATE TABLE IF NOT EXISTS lobby_profiles (
+      user_id INTEGER PRIMARY KEY,
+      credit INTEGER NOT NULL DEFAULT 0,
+      featured_admiral_id INTEGER,
+      selected_session_admiral_id INTEGER,
+      equipped_theme_id TEXT NOT NULL DEFAULT 'default',
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    )
+  `);
+
+  await run(`
+    CREATE TABLE IF NOT EXISTS rooms (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      room_name TEXT NOT NULL,
+      host_user_id INTEGER NOT NULL,
+      max_players INTEGER NOT NULL DEFAULT 1,
+      is_private INTEGER NOT NULL DEFAULT 0,
+      password_hash TEXT,
+      invite_code TEXT NOT NULL UNIQUE,
+      mode TEXT NOT NULL DEFAULT 'solo',
+      status TEXT NOT NULL DEFAULT 'waiting',
+      session_id INTEGER,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      FOREIGN KEY (host_user_id) REFERENCES users(id)
+    )
+  `);
+
+  await run(`
+    CREATE TABLE IF NOT EXISTS room_players (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      room_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      is_ready INTEGER NOT NULL DEFAULT 0,
+      is_host INTEGER NOT NULL DEFAULT 0,
+      joined_at INTEGER NOT NULL,
+      UNIQUE(room_id, user_id),
+      FOREIGN KEY (room_id) REFERENCES rooms(id),
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    )
+  `);
+
+  await run(`
+    CREATE TABLE IF NOT EXISTS sessions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      room_id INTEGER NOT NULL,
+      mode TEXT NOT NULL DEFAULT 'solo',
+      status TEXT NOT NULL DEFAULT 'active',
+      map_seed TEXT NOT NULL DEFAULT '',
+      started_at INTEGER NOT NULL,
+      ended_at INTEGER,
+      FOREIGN KEY (room_id) REFERENCES rooms(id)
+    )
+  `);
+
+  await run(`
+    CREATE TABLE IF NOT EXISTS session_players (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      result_rank INTEGER,
+      is_eliminated INTEGER NOT NULL DEFAULT 0,
+      final_score INTEGER NOT NULL DEFAULT 0,
+      credit_reward INTEGER NOT NULL DEFAULT 0,
+      UNIQUE(session_id, user_id),
+      FOREIGN KEY (session_id) REFERENCES sessions(id),
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    )
+  `);
+
+  await run(`
+    CREATE TABLE IF NOT EXISTS session_reward_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      session_id INTEGER,
+      credit_reward INTEGER NOT NULL DEFAULT 0,
+      detail_json TEXT NOT NULL DEFAULT '{}',
+      created_at INTEGER NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    )
+  `);
+
+  await run(`
+    CREATE TABLE IF NOT EXISTS lobby_recruit_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      recruit_type TEXT NOT NULL,
+      admiral_id INTEGER,
+      cost_credit INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users(id),
+      FOREIGN KEY (admiral_id) REFERENCES admirals(id)
     )
   `);
 
@@ -1727,6 +2168,14 @@ async function initDb() {
   await ensureColumn("neutral_zones", "map_y", "INTEGER NOT NULL DEFAULT 50");
   await ensureColumn("neutral_zones", "recommended_power", "INTEGER NOT NULL DEFAULT 100");
   await ensureColumn("neutral_zones", "faction", "TEXT NOT NULL DEFAULT 'neutral'");
+  await ensureColumn("neutral_zones", "zone_layer", "TEXT NOT NULL DEFAULT 'mid'");
+  await ensureColumn("neutral_zones", "zone_role", "TEXT NOT NULL DEFAULT 'metal'");
+  await ensureColumn("neutral_zones", "unlock_after_seconds", "INTEGER NOT NULL DEFAULT 0");
+  await ensureColumn("neutral_zones", "control_state", "TEXT NOT NULL DEFAULT 'neutral'");
+  await ensureColumn("neutral_zones", "capture_progress", "REAL NOT NULL DEFAULT 0");
+  await ensureColumn("neutral_zones", "capturing_user_id", "INTEGER");
+  await ensureColumn("neutral_zones", "capture_started_at", "INTEGER NOT NULL DEFAULT 0");
+  await ensureColumn("neutral_zones", "contested_until", "INTEGER NOT NULL DEFAULT 0");
   await ensureColumn("missions", "attacker_fleet_json", "TEXT NOT NULL DEFAULT '[]'");
   await ensureColumn("missions", "attacker_fleet_slot", "INTEGER NOT NULL DEFAULT 1");
   await ensureColumn("missions", "attacker_admiral_id", "INTEGER");
@@ -1739,12 +2188,14 @@ async function initDb() {
   for (const user of users) {
     await ensureBase(user.id);
     await ensureStarterDesign(user.id);
-    await run("INSERT OR IGNORE INTO user_settings (user_id, admiral_policy) VALUES (?, 'capture')", [user.id]);
+    await run("INSERT OR IGNORE INTO user_settings (user_id, admiral_policy) VALUES (?, 'none')", [user.id]);
     await run(
       "INSERT OR IGNORE INTO city_buildings (user_id, shipyard_level, government_level, housing_level, research_lab_level, tactical_center_level) VALUES (?, 1, 1, 1, 1, 1)",
       [user.id]
     );
+    await ensureLobbyProfile(user.id);
     await ensureFleetGroups(user.id);
+    await backfillShipsFromOwnedShips(user.id);
   }
 }
 
@@ -1855,20 +2306,18 @@ async function getUserSettings(userId) {
   );
   if (!row) {
     await run(
-      "INSERT INTO user_settings (user_id, admiral_policy, economy_policy, industry_policy, military_policy, policy_locked_until) VALUES (?, 'capture', ?, ?, ?, 0)",
+      "INSERT INTO user_settings (user_id, admiral_policy, economy_policy, industry_policy, military_policy, policy_locked_until) VALUES (?, 'none', ?, ?, ?, 0)",
       [userId, DEFAULT_POLICY_SELECTION.economy, DEFAULT_POLICY_SELECTION.industry, DEFAULT_POLICY_SELECTION.military]
     );
     row = {
-      admiral_policy: "capture",
+      admiral_policy: "none",
       economy_policy: DEFAULT_POLICY_SELECTION.economy,
       industry_policy: DEFAULT_POLICY_SELECTION.industry,
       military_policy: DEFAULT_POLICY_SELECTION.military,
       policy_locked_until: 0
     };
   }
-  const admiralPolicy = ["capture", "kill", "release"].includes(String(row.admiral_policy || "capture"))
-    ? String(row.admiral_policy)
-    : "capture";
+  const admiralPolicy = "none";
   const policies = normalizePolicySelection(row);
   const policyEffects = getStrategicPolicyEffects(policies);
   const policyLockedUntil = Number(row.policy_locked_until || 0);
@@ -1889,17 +2338,7 @@ function ownerColorHex(ownerId) {
 }
 
 function hullUnlockRequirement(hullKey) {
-  const map = {
-    corvette: { type: "lab", level: 1 },
-    destroyer: { type: "tech", key: "destroyer_blueprint" },
-    cruiser: { type: "tech", key: "cruiser_command" },
-    monitor: { type: "tech", key: "unlock_monitor" },
-    battleship: { type: "tech", key: "unlock_battleship" },
-    carrier: { type: "tech", key: "unlock_carrier" },
-    dreadnought: { type: "tech", key: "unlock_dreadnought" },
-    titan: { type: "tech", key: "unlock_titan" }
-  };
-  return map[hullKey] || { type: "lab", level: 1 };
+  return { type: "levels", levels: RESEARCH_UNLOCKS.hulls[String(hullKey || "")] || {} };
 }
 
 function componentTierByPower(powerCost) {
@@ -1916,27 +2355,134 @@ function componentTierByPower(powerCost) {
   return 10;
 }
 
+function componentMkByPower(powerCost, key = "") {
+  const meta = getModuleByKey(key);
+  if (Number.isFinite(Number(meta?.mk))) return Number(meta.mk);
+  const power = Number(powerCost || 0);
+  if (power <= 26) return 1;
+  if (power <= 40) return 2;
+  return 3;
+}
+
+function researchTypeLabel(type) {
+  const map = {
+    engineering: "공학",
+    weapon: "무장",
+    defense: "방어",
+    energy: "에너지",
+    command: "지휘",
+    engine: "공학",
+    armor: "방어",
+    industry: "에너지",
+    tactics: "지휘"
+  };
+  return map[String(type || "").toLowerCase()] || String(type || "");
+}
+
+function componentFamilyName(familyKey) {
+  const map = {
+    basic_engine: "표준 엔진",
+    fast_engine: "고속 엔진",
+    interceptor_engine: "요격 엔진",
+    tank_engine: "중장갑 추진기",
+    warp_engine: "워프 안정 엔진",
+    railgun: "경량 레일건",
+    missile: "미사일 런처",
+    laser: "레이저 포",
+    gauss: "가우스 캐논",
+    torpedo: "중어뢰 발사기",
+    spinal: "척추 주포",
+    aa_gun: "대공포",
+    basic_armor: "강화 장갑",
+    basic_shield: "실드 발생기",
+    reactive_armor: "반응 장갑",
+    phase_shield: "페이즈 실드",
+    citadel_armor: "시타델 장갑",
+    targeting_system: "타겟팅 시스템",
+    repair_bay: "수리 드론 베이",
+    aux_reactor: "보조 리액터",
+    ecm: "ECM 장치",
+    strike_wing: "공격기 비행단",
+    interceptor_wing: "요격기 비행단",
+    bomber_drone: "폭격 드론 편대",
+    repair_wing: "수리 드론 편대"
+  };
+  return map[String(familyKey || "")] || String(familyKey || "");
+}
+
+function familyMkDisplayName(familyKey, mk) {
+  return `${componentFamilyName(familyKey)} Mk${Math.max(1, Number(mk || 1))}`;
+}
+
+function mergeLevelRequirements(...requirements) {
+  const merged = { type: "levels", levels: {} };
+  for (const requirement of requirements) {
+    const levels = requirement?.levels || {};
+    for (const [key, value] of Object.entries(levels)) {
+      const parsed = Math.max(0, Number(value || 0));
+      merged.levels[key] = Math.max(Number(merged.levels[key] || 0), parsed);
+    }
+  }
+  return merged;
+}
+
+function componentFamilyKey(component) {
+  const meta = moduleMetaByComponent(component);
+  return String(meta.family || component?.family_key || component?.family || component?.key || "");
+}
+
+function componentFamilyRequirement(component) {
+  return { type: "levels", levels: RESEARCH_UNLOCKS.modules[String(component?.key || "")] || {} };
+}
+
+function displayNameForFamilyMk(component) {
+  const familyKey = componentFamilyKey(component);
+  const mk = componentMkByPower(Number(component?.power_cost || component?.power || 0), component?.key);
+  return familyMkDisplayName(familyKey, mk);
+}
+
+function toVisibleComponents(rawComponents) {
+  const grouped = new Map();
+  for (const row of Array.isArray(rawComponents) ? rawComponents : []) {
+    if (!DEFAULT_COMPONENT_KEY_SET.has(String(row?.key || ""))) continue;
+    const familyKey = componentFamilyKey(row);
+    const mk = componentMkByPower(Number(row.power_cost || 0), row.key);
+    const groupKey = `${String(row.category)}:${familyKey}:mk${mk}`;
+    const currentScore =
+      Number(row.attack_bonus || 0) * 1.4 +
+      Number(row.defense_bonus || 0) * 1.2 +
+      Number(row.hp_bonus || 0) * 0.55 +
+      Number(row.speed_bonus || 0) * 18 +
+      Number(row.power_bonus || 0) * 0.45;
+    const existing = grouped.get(groupKey);
+    if (!existing || currentScore > existing._score || (currentScore === existing._score && Number(row.id) < Number(existing.id))) {
+      grouped.set(groupKey, {
+        ...row,
+        family_key: familyKey,
+        family_name: componentFamilyName(familyKey),
+        mk,
+        display_name: familyMkDisplayName(familyKey, mk),
+        _score: currentScore
+      });
+    }
+  }
+  return Array.from(grouped.values())
+    .sort((a, b) => {
+      const c = String(a.category || "").localeCompare(String(b.category || ""));
+      if (c) return c;
+      const f = String(a.family_name || "").localeCompare(String(b.family_name || ""));
+      if (f) return f;
+      return Number(a.mk || 0) - Number(b.mk || 0);
+    })
+    .map(({ _score, ...rest }) => rest);
+}
+
+function componentMkRequirement(component) {
+  return { type: "levels", levels: RESEARCH_UNLOCKS.modules[String(component?.key || "")] || {} };
+}
+
 function tunedComponentForTier(baseComponent) {
-  const component = { ...baseComponent };
-  const tier = componentTierByPower(component.power);
-  if (tier <= 5) return component;
-  const growth = tier - 5;
-  const statMult = 1 + (growth * 0.13);
-  const speedMult = 1 + (growth * 0.06);
-  const costMult = 1 + (growth * 0.11);
-  const powerMult = 1 + (growth * 0.05);
-  component.hp = Math.round(Number(component.hp || 0) * statMult);
-  component.attack = Math.round(Number(component.attack || 0) * statMult);
-  component.defense = Math.round(Number(component.defense || 0) * statMult);
-  const speed = Number(component.speed || 0);
-  component.speed = speed >= 0
-    ? Math.round(speed * speedMult)
-    : Math.round(speed * (1 + ((speedMult - 1) * 0.5)));
-  component.power = Math.max(1, Math.round(Number(component.power || 0) * powerMult));
-  component.powerBonus = Math.round(Number(component.powerBonus || 0) * statMult);
-  component.metal = Math.max(1, Math.round(Number(component.metal || 0) * costMult));
-  component.fuel = Math.max(1, Math.round(Number(component.fuel || 0) * costMult));
-  return component;
+  return { ...baseComponent };
 }
 
 function getComponentTechUnlockKeySet() {
@@ -1957,20 +2503,31 @@ function getComponentTechUnlockKeySet() {
 }
 
 function componentUnlockRequirement(component) {
-  const basicKeys = new Set(["standard_engine", "light_railgun", "reinforced_armor", "cargo_module"]);
-  const key = String(component?.key || "");
-  if (basicKeys.has(key)) {
-    return { type: "lab", level: 1 };
-  }
-  const techManagedKeys = getComponentTechUnlockKeySet();
-  if (techManagedKeys.has(key)) {
-    return { type: "tech", key: componentUnlockNodeKey(key) };
-  }
-  const tier = componentTierByPower(Number(component?.power_cost || component?.power || 0));
-  return { type: "lab", level: Math.max(2, Math.min(10, tier)) };
+  return mergeLevelRequirements(componentFamilyRequirement(component), componentMkRequirement(component));
+}
+
+function researchValue(research, key) {
+  const aliases = {
+    engine: "engineering",
+    armor: "defense",
+    industry: "energy",
+    tactics: "command",
+    logistics: "engineering",
+    resource: "energy"
+  };
+  const rawKey = String(key || "").toLowerCase();
+  const primary = aliases[rawKey] || rawKey;
+  return Math.max(Number(research?.[primary] || 0), Number(research?.[rawKey] || 0));
 }
 
 function isUnlockedByResearch(requirement, research) {
+  if (String(requirement?.type || "") === "levels") {
+    const levels = requirement.levels || {};
+    return Object.entries(levels).every(([key, value]) => {
+      const current = researchValue(research, key);
+      return current >= Number(value || 0);
+    });
+  }
   if (String(requirement?.type || "") === "tech") {
     const keys = Array.isArray(research?.techKeys) ? research.techKeys : [];
     return keys.includes(String(requirement.key || ""));
@@ -1978,7 +2535,7 @@ function isUnlockedByResearch(requirement, research) {
   if (String(requirement?.type || "") === "lab") {
     return Number(research?.labLevel || 1) >= Number(requirement.level || 1);
   }
-  const level = Number(research?.[requirement.type] || 0);
+  const level = researchValue(research, requirement.type);
   return level >= Number(requirement.level || 0);
 }
 
@@ -2210,14 +2767,140 @@ function normalizeShipPlan(plan) {
   return normalized;
 }
 
+function normalizeIndividualShipPlan(plan) {
+  if (!Array.isArray(plan)) return [];
+  const normalized = [];
+  const used = new Set();
+  for (const raw of plan) {
+    const shipId = Number.parseInt(raw?.shipId ?? raw?.id, 10);
+    if (!Number.isInteger(shipId) || shipId <= 0 || used.has(shipId)) continue;
+    used.add(shipId);
+    const line = ["front", "mid", "back"].includes(String(raw?.line || "")) ? String(raw.line) : null;
+    normalized.push({ shipId, line });
+  }
+  return normalized;
+}
+
+async function releaseFleetSlotShips(userId, slot) {
+  await run(
+    "UPDATE ships SET status = 'reserve', fleet_slot = NULL, zone_id = NULL, updated_at = ? WHERE user_id = ? AND status = 'fleet' AND fleet_slot = ?",
+    [Date.now(), userId, slot]
+  );
+}
+
+async function assignFleetSlotShips(userId, slot, ships) {
+  await releaseFleetSlotShips(userId, slot);
+  const individualPlan = normalizeIndividualShipPlan(ships);
+  if (individualPlan.length) {
+    for (const item of individualPlan) {
+      const row = await get(
+        `
+          SELECT s.id, h.class_type
+          FROM ships s
+          JOIN ship_designs d ON d.id = s.design_id
+          JOIN hulls h ON h.id = d.hull_id
+          WHERE s.id = ? AND s.user_id = ? AND s.status = 'reserve'
+        `,
+        [item.shipId, userId]
+      );
+      if (!row) continue;
+      const line = item.line || defaultLineForHull(row.class_type);
+      await run(
+        "UPDATE ships SET status = 'fleet', fleet_slot = ?, line = ?, updated_at = ? WHERE id = ?",
+        [slot, line, Date.now(), item.shipId]
+      );
+    }
+    await syncOwnedShipsFromShips(userId);
+    return;
+  }
+  for (const item of normalizeShipPlan(ships)) {
+    const design = await get(
+      `
+        SELECT d.id, h.class_type
+        FROM ship_designs d
+        JOIN hulls h ON h.id = d.hull_id
+        WHERE d.id = ? AND d.user_id = ?
+      `,
+      [item.designId, userId]
+    );
+    const line = defaultLineForHull(design?.class_type);
+    const rows = await all(
+      "SELECT id FROM ships WHERE user_id = ? AND design_id = ? AND status = 'reserve' ORDER BY current_hp DESC, id ASC LIMIT ?",
+      [userId, item.designId, item.quantity]
+    );
+    for (const ship of rows) {
+      await run(
+        "UPDATE ships SET status = 'fleet', fleet_slot = ?, line = ?, updated_at = ? WHERE id = ?",
+        [slot, line, Date.now(), ship.id]
+      );
+    }
+  }
+  await syncOwnedShipsFromShips(userId);
+}
+
+async function markFleetSlotShipsForMission(userId, slot) {
+  await run(
+    "UPDATE ships SET status = 'mission', updated_at = ? WHERE user_id = ? AND status = 'fleet' AND fleet_slot = ?",
+    [Date.now(), userId, slot]
+  );
+  await syncOwnedShipsFromShips(userId);
+}
+
+async function returnMissionShipsToReserve(userId, slot) {
+  await run(
+    "UPDATE ships SET status = 'reserve', fleet_slot = NULL, zone_id = NULL, updated_at = ? WHERE user_id = ? AND status = 'mission' AND fleet_slot = ?",
+    [Date.now(), userId, slot]
+  );
+  await syncOwnedShipsFromShips(userId);
+}
+
 async function getFleetGroups(userId) {
   await ensureFleetGroups(userId);
+  await backfillShipsFromOwnedShips(userId);
+  const shipRows = await all(
+    `
+      SELECT s.id, s.design_id, s.max_hp, s.current_hp, s.damage_state, s.status, s.fleet_slot, s.line,
+             d.name AS design_name, d.final_hp, d.final_attack, d.final_defense, d.final_speed,
+             h.name AS hull_name, h.class_type
+      FROM ships s
+      JOIN ship_designs d ON d.id = s.design_id
+      JOIN hulls h ON h.id = d.hull_id
+      WHERE s.user_id = ? AND s.status IN ('reserve', 'fleet')
+      ORDER BY s.status ASC, s.fleet_slot ASC, d.name ASC, s.current_hp DESC, s.id ASC
+    `,
+    [userId]
+  );
+  const formatShipRow = (row) => ({
+    shipId: Number(row.id),
+    id: Number(row.id),
+    designId: Number(row.design_id),
+    designName: row.design_name,
+    hullName: row.hull_name,
+    classType: row.class_type,
+    maxHp: Number(row.max_hp || 0),
+    currentHp: Number(row.current_hp || 0),
+    hpRatio: Number(row.max_hp || 0) > 0 ? Number(row.current_hp || 0) / Number(row.max_hp || 1) : 0,
+    damageState: row.damage_state,
+    damageStateLabel: damageStateLabel(row.damage_state),
+    status: row.status,
+    fleetSlot: row.fleet_slot ? Number(row.fleet_slot) : null,
+    line: row.line || defaultLineForHull(row.class_type),
+    finalHp: Number(row.final_hp || 0),
+    finalAttack: Number(row.final_attack || 0),
+    finalDefense: Number(row.final_defense || 0),
+    finalSpeed: Number(row.final_speed || 0),
+    combatPower: Math.floor(designFleetPower([{ quantity: 1, finalHp: row.final_hp, finalAttack: row.final_attack, finalDefense: row.final_defense, finalSpeed: row.final_speed }]))
+  });
+  const availableShips = shipRows
+    .filter((row) => String(row.status) === "reserve")
+    .map(formatShipRow);
   const owned = await all(
     `
-      SELECT os.design_id, os.quantity, d.name, d.final_hp, d.final_attack, d.final_defense, d.final_speed
-      FROM owned_ships os
-      JOIN ship_designs d ON d.id = os.design_id
-      WHERE os.user_id = ? AND os.quantity > 0
+      SELECT s.design_id, COUNT(*) AS quantity, d.name, d.final_hp, d.final_attack, d.final_defense, d.final_speed
+      FROM ships s
+      JOIN ship_designs d ON d.id = s.design_id
+      WHERE s.user_id = ? AND s.status IN ('reserve', 'fleet')
+      GROUP BY s.design_id
     `,
     [userId]
   );
@@ -2246,25 +2929,50 @@ async function getFleetGroups(userId) {
   );
   return rows.map((row) => {
     let plan = [];
+    let individualPlan = [];
     try {
-      plan = normalizeShipPlan(JSON.parse(row.ship_plan_json || "[]"));
+      const parsed = JSON.parse(row.ship_plan_json || "[]");
+      individualPlan = normalizeIndividualShipPlan(parsed);
+      plan = normalizeShipPlan(parsed);
     } catch (err) {
       plan = [];
+      individualPlan = [];
+    }
+    const assignedShips = shipRows
+      .filter((ship) => String(ship.status) === "fleet" && Number(ship.fleet_slot || 0) === Number(row.slot_index || 0))
+      .map(formatShipRow);
+    if (individualPlan.length) {
+      const order = new Map(individualPlan.map((item, index) => [Number(item.shipId), index]));
+      assignedShips.sort((a, b) => Number(order.get(a.shipId) ?? 9999) - Number(order.get(b.shipId) ?? 9999));
+    }
+    if (!individualPlan.length) {
+      try {
+      plan = normalizeShipPlan(JSON.parse(row.ship_plan_json || "[]"));
+      } catch (err) {
+        plan = [];
+      }
     }
     const cappedFleet = [];
-    for (const ship of plan) {
+    const groupFleet = individualPlan.length
+      ? Array.from(assignedShips.reduce((map, ship) => {
+          const current = map.get(ship.designId) || { designId: ship.designId, name: ship.designName, quantity: 0, finalHp: ship.finalHp, finalAttack: ship.finalAttack, finalDefense: ship.finalDefense, finalSpeed: ship.finalSpeed };
+          current.quantity += 1;
+          map.set(ship.designId, current);
+          return map;
+        }, new Map()).values())
+      : plan;
+    for (const ship of groupFleet) {
       const ownedShip = ownedByDesign.get(Number(ship.designId));
-      if (!ownedShip) continue;
-      const qty = Math.min(Number(ownedShip.quantity || 0), Number(ship.quantity || 0));
+      const qty = individualPlan.length ? Number(ship.quantity || 0) : Math.min(Number(ownedShip?.quantity || 0), Number(ship.quantity || 0));
       if (qty <= 0) continue;
       cappedFleet.push({
         designId: Number(ship.designId),
-        name: ownedShip.name,
+        name: ship.name || ownedShip?.name,
         quantity: qty,
-        finalHp: ownedShip.finalHp,
-        finalAttack: ownedShip.finalAttack,
-        finalDefense: ownedShip.finalDefense,
-        finalSpeed: ownedShip.finalSpeed
+        finalHp: ship.finalHp || ownedShip?.finalHp,
+        finalAttack: ship.finalAttack || ownedShip?.finalAttack,
+        finalDefense: ship.finalDefense || ownedShip?.finalDefense,
+        finalSpeed: ship.finalSpeed || ownedShip?.finalSpeed
       });
     }
     const basePower = Math.floor(designFleetPower(cappedFleet));
@@ -2280,7 +2988,9 @@ async function getFleetGroups(userId) {
       basePower,
       fleetCombatPower,
       totalShips: cappedFleet.reduce((sum, ship) => sum + Number(ship.quantity || 0), 0),
-      ships: plan
+      ships: individualPlan.length ? assignedShips.map((ship) => ({ shipId: ship.shipId, line: ship.line, designId: ship.designId, quantity: 1 })) : plan,
+      assignedShips,
+      availableShips: availableShips.concat(assignedShips)
     };
   });
 }
@@ -2304,25 +3014,29 @@ async function getLaunchFleetFromSlot(userId, slot) {
   );
   if (!row) return { slot: slotNumber, fleet: [], admiral: null };
 
-  let plan = [];
+  let savedPlan = [];
   try {
-    plan = normalizeShipPlan(JSON.parse(row.ship_plan_json || "[]"));
+    savedPlan = JSON.parse(row.ship_plan_json || "[]");
   } catch (err) {
-    plan = [];
+    savedPlan = [];
   }
+  await assignFleetSlotShips(userId, slotNumber, savedPlan);
   const owned = await all(
     `
-      SELECT os.design_id, os.quantity, d.name, d.final_hp, d.final_attack, d.final_defense, d.final_speed
-      FROM owned_ships os
-      JOIN ship_designs d ON d.id = os.design_id
-      WHERE os.user_id = ? AND os.quantity > 0
+      SELECT s.design_id, COUNT(*) AS quantity, GROUP_CONCAT(s.id) AS ship_ids,
+             d.name, d.final_hp, d.final_attack, d.final_defense, d.final_speed
+      FROM ships s
+      JOIN ship_designs d ON d.id = s.design_id
+      WHERE s.user_id = ? AND s.status = 'fleet' AND s.fleet_slot = ?
+      GROUP BY s.design_id
     `,
-    [userId]
+    [userId, slotNumber]
   );
   const ownedByDesign = new Map();
   for (const ship of owned) {
     ownedByDesign.set(Number(ship.design_id), {
       quantity: Number(ship.quantity || 0),
+      shipIds: String(ship.ship_ids || "").split(",").map((id) => Number.parseInt(id, 10)).filter((id) => Number.isInteger(id)),
       name: ship.name,
       finalHp: Number(ship.final_hp || 0),
       finalAttack: Number(ship.final_attack || 0),
@@ -2331,15 +3045,13 @@ async function getLaunchFleetFromSlot(userId, slot) {
     });
   }
   const fleet = [];
-  for (const item of plan) {
-    const ownedShip = ownedByDesign.get(item.designId);
-    if (!ownedShip) continue;
-    const useCount = Math.min(ownedShip.quantity, Number(item.quantity || 0));
-    if (useCount <= 0) continue;
+  for (const [designId, ownedShip] of ownedByDesign.entries()) {
+    const useCount = Number(ownedShip.quantity || 0);
     fleet.push({
-      designId: item.designId,
+      designId,
       name: ownedShip.name,
       quantity: useCount,
+      shipIds: ownedShip.shipIds || [],
       finalHp: ownedShip.finalHp,
       finalAttack: ownedShip.finalAttack,
       finalDefense: ownedShip.finalDefense,
@@ -2365,13 +3077,14 @@ async function getActiveTravelingMissionForSlot(userId, slot) {
   const slotNumber = Number.parseInt(slot, 10);
   if (!Number.isInteger(slotNumber) || slotNumber < 1) return null;
   return get(
-    "SELECT id, mission_type, target_name FROM missions WHERE user_id = ? AND status = 'traveling' AND attacker_fleet_slot = ? ORDER BY id DESC LIMIT 1",
+    "SELECT id, mission_type, target_name FROM missions WHERE user_id = ? AND status IN ('traveling', 'combat', 'resolving') AND attacker_fleet_slot = ? ORDER BY id DESC LIMIT 1",
     [userId, slotNumber]
   );
 }
 
 async function getTotalShipCount(userId) {
-  const owned = await get("SELECT COALESCE(SUM(quantity), 0) AS cnt FROM owned_ships WHERE user_id = ?", [userId]);
+  await backfillShipsFromOwnedShips(userId);
+  const owned = await get("SELECT COUNT(*) AS cnt FROM ships WHERE user_id = ? AND status != 'destroyed'", [userId]);
   const queued = await get("SELECT COALESCE(SUM(quantity), 0) AS cnt FROM production_queue WHERE user_id = ? AND status = 'building'", [userId]);
   return Number(owned?.cnt || 0) + Number(queued?.cnt || 0);
 }
@@ -2393,15 +3106,49 @@ async function applyFleetLosses(userId, startFleet, remainingFleet) {
   for (const [designId, startQty] of startMap.entries()) {
     const remainQty = Math.max(0, Number(remainMap.get(designId) || 0));
     const loss = Math.max(0, startQty - remainQty);
-    if (loss <= 0) continue;
-    await run(
-      "UPDATE owned_ships SET quantity = CASE WHEN quantity > ? THEN quantity - ? ELSE 0 END WHERE user_id = ? AND design_id = ?",
-      [loss, loss, userId, designId]
+    if (loss > 0) {
+      const candidates = await all(
+        `
+          SELECT id
+          FROM ships
+          WHERE user_id = ? AND design_id = ? AND status != 'destroyed'
+          ORDER BY CASE status WHEN 'mission' THEN 0 WHEN 'fleet' THEN 1 WHEN 'garrison' THEN 2 ELSE 3 END, current_hp ASC, id ASC
+          LIMIT ?
+        `,
+        [userId, designId, loss]
+      );
+      for (const ship of candidates) {
+        await run(
+          "UPDATE ships SET current_hp = 0, damage_state = 'destroyed', status = 'destroyed', updated_at = ? WHERE id = ?",
+          [Date.now(), ship.id]
+        );
+      }
+    }
+
+    const survivorsToDamage = await all(
+      `
+        SELECT id, max_hp
+        FROM ships
+        WHERE user_id = ? AND design_id = ? AND status != 'destroyed'
+        ORDER BY CASE status WHEN 'mission' THEN 0 WHEN 'fleet' THEN 1 WHEN 'garrison' THEN 2 ELSE 3 END, id ASC
+        LIMIT ?
+      `,
+      [userId, designId, remainQty]
     );
+    const damageRatio = loss > 0 ? 0.55 : 0.86;
+    for (const ship of survivorsToDamage) {
+      const nextHp = Math.max(1, Math.floor(Number(ship.max_hp || 1) * damageRatio));
+      await run(
+        "UPDATE ships SET current_hp = MIN(current_hp, ?), damage_state = ?, updated_at = ? WHERE id = ?",
+        [nextHp, damageStateForHp(nextHp, ship.max_hp), Date.now(), ship.id]
+      );
+    }
   }
+  await syncOwnedShipsFromShips(userId);
 }
 
 async function getProductionRates(userId) {
+  await processZoneCaptures();
   const bonus = await get(
     `
       SELECT
@@ -2433,19 +3180,146 @@ async function getProductionRates(userId) {
   };
 }
 
+async function processZoneCaptures() {
+  const now = Date.now();
+  const rows = await all(
+    "SELECT id, level, capturing_user_id, capture_started_at FROM neutral_zones WHERE control_state = 'capturing' AND capturing_user_id IS NOT NULL"
+  );
+  for (const zone of rows) {
+    const captureSeconds =
+      Number(balance.zoneCapture?.baseSeconds || 45)
+      + Number(zone.level || 1) * Number(balance.zoneCapture?.perLevelSeconds || 45);
+    const progress = Math.min(1, Math.max(0, (now - Number(zone.capture_started_at || now)) / (captureSeconds * 1000)));
+    if (progress < 1) {
+      await run("UPDATE neutral_zones SET capture_progress = ? WHERE id = ?", [progress, zone.id]);
+      continue;
+    }
+    await run("BEGIN TRANSACTION");
+    try {
+      await run("DELETE FROM occupied_zones WHERE zone_id = ?", [zone.id]);
+      await run("INSERT INTO occupied_zones (user_id, zone_id, captured_at) VALUES (?, ?, ?)", [zone.capturing_user_id, zone.id, now]);
+      await run("UPDATE neutral_zones SET control_state = 'occupied', capture_progress = 1, capturing_user_id = NULL, capture_started_at = 0 WHERE id = ?", [zone.id]);
+      await run("COMMIT");
+    } catch (err) {
+      await run("ROLLBACK");
+      throw err;
+    }
+  }
+}
+
+async function getZoneRoleBonuses(userId) {
+  const rows = await all(
+    `
+      SELECT z.zone_role AS role, COUNT(*) AS cnt
+      FROM occupied_zones oz
+      JOIN neutral_zones z ON z.id = oz.zone_id
+      WHERE oz.user_id = ?
+      GROUP BY z.zone_role
+    `,
+    [userId]
+  );
+  const count = (role) => {
+    const roleConfig = zoneRoleDefinition(role);
+    const cap = Number(roleConfig.maxStacks || balance.zoneRoleStackLimit || 3);
+    return Math.min(cap, Number(rows.find((row) => String(row.role) === role)?.cnt || 0));
+  };
+  const effect = (role, key) => {
+    return getZoneRoleEffect(role, key);
+  };
+  return {
+    buildCostPct: count("supply") * effect("supply", "buildCostPct"),
+    buildTimePct: count("production") * effect("production", "buildTimePct"),
+    movementPct: count("mobility") * effect("mobility", "movementPct"),
+    combatPct: count("combat") * effect("combat", "combatPct") + count("command_hub") * effect("command_hub", "combatPct"),
+    resourcePct: count("command_hub") * effect("command_hub", "resourcePct"),
+    titanCoreCount: count("titan_core") * (effect("titan_core", "titanCoreCount") || 1)
+  };
+}
+
 async function getResearch(userId) {
   await processTechQueueForUser(userId);
+  let row = await get(
+    `
+      SELECT engine_level, weapon_level, armor_level, industry_level, tactics_level,
+             engineering_level, defense_level, energy_level, command_level,
+             resource_level, logistics_level
+      FROM research
+      WHERE user_id = ?
+    `,
+    [userId]
+  );
+  if (!row) {
+    await run(
+      `
+        INSERT INTO research
+          (user_id, engine_level, weapon_level, armor_level, industry_level, tactics_level,
+           engineering_level, defense_level, energy_level, command_level, resource_level, logistics_level)
+        VALUES (?, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+      `,
+      [userId]
+    );
+    row = {
+      engine_level: 0,
+      weapon_level: 0,
+      armor_level: 0,
+      industry_level: 0,
+      tactics_level: 0,
+      engineering_level: 0,
+      defense_level: 0,
+      energy_level: 0,
+      command_level: 0,
+      resource_level: 0,
+      logistics_level: 0
+    };
+  }
   const city = await getCityState(userId);
-  const govLevel = Number(city?.levels?.government || 1);
-  const techRows = await all("SELECT tech_key FROM user_tech WHERE user_id = ?", [userId]);
-  const techKeys = techRows.map((row) => String(row.tech_key || ""));
+  const engineering = Math.max(Number(row.engineering_level || 0), Number(row.engine_level || 0));
+  const weapon = Number(row.weapon_level || 0);
+  const defense = Math.max(Number(row.defense_level || 0), Number(row.armor_level || 0));
+  const energy = Math.max(Number(row.energy_level || 0), Number(row.industry_level || 0));
+  const command = Math.max(Number(row.command_level || 0), Number(row.tactics_level || 0));
   return {
-    resource: govLevel,
-    logistics: govLevel,
-    tactics: govLevel,
+    engineering,
+    weapon,
+    defense,
+    energy,
+    command,
+    // Legacy aliases keep older requirement helpers and UI fragments working while the
+    // visible research model moves to the five Notion tracks.
+    engine: engineering,
+    armor: defense,
+    industry: energy,
+    tactics: command,
+    resource: energy,
+    logistics: engineering,
     labLevel: Number(city?.levels?.research_lab || 1),
-    techKeys
+    techKeys: []
   };
+}
+
+function buildResearchQueueKey(type, targetLevel) {
+  return `track:${String(type || "").trim().toLowerCase()}:${Math.max(1, Number(targetLevel || 1))}`;
+}
+
+function normalizeResearchTrack(type) {
+  const aliases = {
+    engine: "engineering",
+    armor: "defense",
+    industry: "energy",
+    tactics: "command"
+  };
+  const key = String(type || "").trim().toLowerCase();
+  return aliases[key] || key;
+}
+
+function parseResearchQueueKey(key) {
+  const raw = String(key || "");
+  const match = /^track:([a-z_]+):(\d+)$/i.exec(raw);
+  if (!match) return null;
+  const type = normalizeResearchTrack(match[1]);
+  const level = Number.parseInt(match[2], 10);
+  if (!RESEARCH[type] || !Number.isInteger(level) || level < 1) return null;
+  return { type, level };
 }
 
 async function processTechQueueForUser(userId) {
@@ -2455,12 +3329,30 @@ async function processTechQueueForUser(userId) {
     [userId, now]
   );
   for (const row of due) {
+    const track = parseResearchQueueKey(row.tech_key);
     await run("BEGIN TRANSACTION");
     try {
-      await run(
-        "INSERT OR IGNORE INTO user_tech (user_id, tech_key, researched_at) VALUES (?, ?, ?)",
-        [userId, row.tech_key, now]
-      );
+      if (track) {
+        const columnMap = {
+          engineering: "engineering_level",
+          weapon: "weapon_level",
+          defense: "defense_level",
+          energy: "energy_level",
+          command: "command_level"
+        };
+        const column = columnMap[track.type];
+        if (!column) throw new Error(`Unknown research track: ${track.type}`);
+        await run(`UPDATE research SET ${column} = CASE WHEN ${column} < ? THEN ? ELSE ${column} END WHERE user_id = ?`, [
+          track.level,
+          track.level,
+          userId
+        ]);
+      } else {
+        await run(
+          "INSERT OR IGNORE INTO user_tech (user_id, tech_key, researched_at) VALUES (?, ?, ?)",
+          [userId, row.tech_key, now]
+        );
+      }
       await run("UPDATE tech_queue SET status = 'completed' WHERE id = ?", [row.id]);
       await run("COMMIT");
     } catch (err) {
@@ -2471,62 +3363,42 @@ async function processTechQueueForUser(userId) {
 }
 
 async function getTechTreeState(userId) {
-  await processTechQueueForUser(userId);
-  const city = await getCityState(userId);
-  const labLevel = Number(city?.levels?.research_lab || 1);
-  const nodes = await all("SELECT * FROM tech_nodes ORDER BY tier ASC, id ASC");
-  const researchedRows = await all("SELECT tech_key FROM user_tech WHERE user_id = ?", [userId]);
-  const researchedSet = new Set(researchedRows.map((row) => String(row.tech_key || "")));
+  const research = await getResearch(userId);
   const active = await get(
     "SELECT tech_key, start_time, end_time, status FROM tech_queue WHERE user_id = ? AND status = 'researching' ORDER BY id DESC LIMIT 1",
     [userId]
   );
-  const activeKey = active ? String(active.tech_key || "") : null;
   const now = Date.now();
+  const activeTrack = active ? parseResearchQueueKey(active.tech_key) : null;
 
-  const parsedNodes = nodes.map((node) => {
-    let requires = [];
-    try {
-      requires = Array.isArray(JSON.parse(node.requires_json || "[]")) ? JSON.parse(node.requires_json || "[]") : [];
-    } catch (err) {
-      requires = [];
-    }
-    const isResearched = researchedSet.has(String(node.key));
-    const requirementMet = requires.every((key) => researchedSet.has(String(key)));
-    const sameBranchLocked = false;
-    const tierUnlocked = labLevel >= Number(node.tier || 1);
-    const available = !isResearched && requirementMet && tierUnlocked && !activeKey;
-
+  const tracks = Object.entries(RESEARCH).map(([key, item]) => {
+    const currentLevel = Number(research?.[key] || 0);
+    const nextLevel = currentLevel + 1;
+    const nextCost = researchCost(key, currentLevel);
+    const nextTime = researchDurationSeconds(key, currentLevel);
     return {
-      key: String(node.key),
-      name: String(node.name),
-      tier: Number(node.tier || 1),
-      category: String(node.category || ""),
-      description: String(node.description || ""),
-      cost: { metal: Number(node.metal_cost || 0), fuel: Number(node.fuel_cost || 0) },
-      researchTime: Number(node.research_time || 0),
-      requires: requires.map((key) => String(key)),
-      exclusiveGroup: String(node.exclusive_group || ""),
-      effectType: String(node.effect_type || ""),
-      effectValue: Number(node.effect_value || 0),
-      unlockKey: String(node.unlock_key || ""),
-      researched: isResearched,
-      lockedByBranch: sameBranchLocked,
-      available
+      key,
+      name: item.name,
+      description: item.description,
+      level: currentLevel,
+      nextLevel,
+      nextCost,
+      nextTime,
+      researching: Boolean(activeTrack && activeTrack.type === key),
+      effectPerLevel: Number(item.effectPerLevel || 0)
     };
   });
-  const maxTier = parsedNodes.length
-    ? Math.max(...parsedNodes.map((node) => Number(node.tier || 1)))
-    : 1;
 
   return {
-    labLevel,
-    labTierUnlocked: Math.max(1, Math.min(maxTier, labLevel)),
-    nodes: parsedNodes,
-    researchedKeys: Array.from(researchedSet),
+    mode: "research_tracks",
+    labLevel: Number(research.labLevel || 1),
+    tracks,
+    research,
     activeResearch: active
       ? {
           key: String(active.tech_key || ""),
+          trackType: activeTrack?.type || null,
+          targetLevel: activeTrack?.level || null,
           startTime: Number(active.start_time || 0),
           endTime: Number(active.end_time || 0),
           remainingSeconds: Math.max(0, Math.ceil((Number(active.end_time || 0) - now) / 1000))
@@ -2536,16 +3408,7 @@ async function getTechTreeState(userId) {
 }
 
 async function getTechEffects(userId) {
-  await processTechQueueForUser(userId);
-  const rows = await all(
-    `
-      SELECT tn.effect_type, tn.effect_value, tn.unlock_key
-      FROM user_tech ut
-      JOIN tech_nodes tn ON tn.key = ut.tech_key
-      WHERE ut.user_id = ?
-    `,
-    [userId]
-  );
+  const research = await getResearch(userId);
   const effect = {
     resourcePct: 0,
     movementPct: 0,
@@ -2558,19 +3421,34 @@ async function getTechEffects(userId) {
     hulls: new Set(),
     components: new Set()
   };
-  for (const row of rows) {
-    const type = String(row.effect_type || "");
-    const value = Number(row.effect_value || 0);
-    if (type === "buff_resource_pct") effect.resourcePct += value;
-    if (type === "buff_movement_pct") effect.movementPct += value;
-    if (type === "buff_combat_pct") effect.combatPct += value;
-    if (type === "buff_defense_pct") effect.defensePct += value;
-    if (type === "buff_build_cost_pct") effect.buildCostPct += value;
-    if (type === "buff_build_lines_flat") effect.buildLinesFlat += Math.floor(value);
-    if (type === "buff_population_cap_flat") effect.populationCapFlat += Math.floor(value);
-    if (type === "buff_colony_cap_flat") effect.colonyCapFlat += Math.floor(value);
-    if (type === "unlock_hull" && row.unlock_key) effect.hulls.add(String(row.unlock_key));
-    if (type === "unlock_component" && row.unlock_key) effect.components.add(String(row.unlock_key));
+  const engineering = Number(research.engineering || 0);
+  const weapon = Number(research.weapon || 0);
+  const defense = Number(research.defense || 0);
+  const energy = Number(research.energy || 0);
+  const command = Number(research.command || 0);
+
+  effect.resourcePct += energy * 0.05;
+  effect.movementPct += engineering * 0.04;
+  effect.combatPct += (weapon * 0.05) + (command * 0.03);
+  effect.defensePct += defense * 0.05;
+  effect.buildCostPct += energy * 0.02;
+
+  if (energy >= 4) effect.buildLinesFlat += 1;
+  if (energy >= 7) effect.buildLinesFlat += 1;
+  if (energy >= 10) effect.buildLinesFlat += 1;
+
+  if (energy >= 3) effect.populationCapFlat += 120;
+  if (energy >= 6) effect.populationCapFlat += 220;
+  if (energy >= 9) effect.populationCapFlat += 320;
+
+  if (command >= 4) effect.colonyCapFlat += 1;
+  if (command >= 8) effect.colonyCapFlat += 1;
+
+  const hullKeys = ["corvette", "destroyer", "cruiser", "monitor", "battleship", "carrier", "tactical_support", "dreadnought", "titan"];
+  for (const hullKey of hullKeys) {
+    if (isUnlockedByResearch(hullUnlockRequirement(hullKey), research)) {
+      effect.hulls.add(hullKey);
+    }
   }
   return effect;
 }
@@ -2627,6 +3505,7 @@ async function getPlayerBonuses(userId) {
   const commander = await getCommanderProgress(userId);
   const city = await getCityState(userId);
   const settings = await getUserSettings(userId);
+  const zoneRoleBonuses = await getZoneRoleBonuses(userId);
   const strategicPolicy = settings.policyEffects || { resourcePct: 0, buildCostPct: 0, combatPct: 0, movementPct: 0, defensePct: 0 };
   const govLevel = Number(city?.levels?.government || 1);
   const commanderResource = commander.level * 0.03;
@@ -2640,12 +3519,14 @@ async function getPlayerBonuses(userId) {
   const resourceBonus =
     policyResource +
     Number(strategicPolicy.resourcePct || 0) +
+    Number(zoneRoleBonuses.resourcePct || 0) +
     techEffects.resourcePct +
     Number(admiral?.resourceBonus || 0) +
     commanderResource;
   const costBonus =
     policyCost +
     Number(strategicPolicy.buildCostPct || 0) +
+    Number(zoneRoleBonuses.buildCostPct || 0) +
     techEffects.buildCostPct +
     Number(admiral?.costBonus || 0) +
     commanderCost +
@@ -2653,6 +3534,7 @@ async function getPlayerBonuses(userId) {
   const combatBonus =
     policyCombat +
     Number(strategicPolicy.combatPct || 0) +
+    Number(zoneRoleBonuses.combatPct || 0) +
     techEffects.combatPct +
     (techEffects.defensePct + Number(strategicPolicy.defensePct || 0)) * 0.35 +
     Number(admiral?.combatBonus || 0) +
@@ -2661,6 +3543,7 @@ async function getPlayerBonuses(userId) {
   const movementBonus =
     policyMovement +
     Number(strategicPolicy.movementPct || 0) +
+    Number(zoneRoleBonuses.movementPct || 0) +
     techEffects.movementPct +
     Number(admiral?.combatBonus || 0) * 0.5 +
     Number(admiral?.resourceBonus || 0) * 0.25 +
@@ -2668,6 +3551,7 @@ async function getPlayerBonuses(userId) {
     Number(city.bonuses.movementBonus || 0);
   const effectiveCityBonuses = {
     ...city.bonuses,
+    buildTimeMultiplier: Math.max(0.15, Number(city.bonuses.buildTimeMultiplier || 1) - Number(zoneRoleBonuses.buildTimePct || 0)),
     buildLines: Math.max(1, Number(city.bonuses.buildLines || 1) + Number(techEffects.buildLinesFlat || 0)),
     populationCap: Math.max(1, Number(city.bonuses.populationCap || 0) + Number(techEffects.populationCapFlat || 0)),
     colonyCap: Math.max(1, Number(city.bonuses.colonyCap || 0) + Number(techEffects.colonyCapFlat || 0))
@@ -2693,6 +3577,7 @@ async function getPlayerBonuses(userId) {
       unlockedHulls: Array.from(techEffects.hulls),
       unlockedComponents: Array.from(techEffects.components)
     },
+    zoneRoleBonuses,
     admiral: admiral || null,
     city: {
       ...city,
@@ -2707,6 +3592,14 @@ function researchCost(type, level) {
     metal: Math.floor(item.metalCost * Math.pow(item.metalGrowth, level)),
     fuel: Math.floor(item.fuelCost * Math.pow(item.fuelGrowth, level))
   };
+}
+
+function researchDurationSeconds(type, level) {
+  const stage = Math.max(1, Number(level || 0) + 1);
+  const notionDurations = [120, 180, 300, 480, 720, 1080, 1500];
+  const base = notionDurations[Math.min(notionDurations.length - 1, stage - 1)];
+  const typeMultiplier = { engineering: 1.05, weapon: 1.08, defense: 1, energy: 0.96, command: 1.02 };
+  return Math.max(120, Math.floor(base * Number(typeMultiplier[type] || 1)));
 }
 
 function formatResearchState(research) {
@@ -2724,30 +3617,68 @@ function formatResearchState(research) {
 }
 
 function formatRequirementText(requirement) {
-  if (String(requirement?.type || "") === "tech") return `tech:${requirement.key}`;
-  if (String(requirement?.type || "") === "lab") return `lab Lv.${requirement.level}`;
+  if (String(requirement?.type || "") === "levels") {
+    const levels = requirement.levels || {};
+    const entries = Object.entries(levels)
+      .filter(([, value]) => Number(value || 0) > 0)
+      .map(([key, value]) => `${researchTypeLabel(key)} Lv.${Number(value)}`);
+    return entries.length ? entries.join(", ") : "조건 없음";
+  }
+  if (String(requirement?.type || "") === "tech") return `기술 ${String(requirement.key || "")}`;
+  if (String(requirement?.type || "") === "lab") return `연구소 Lv.${requirement.level}`;
   return `${requirement.type} Lv.${requirement.level}`;
 }
 
 function buildUnlockSummary(research, hulls, components) {
+  const normalizedComponents = toVisibleComponents(components);
   const requirementOrder = (requirement) => {
     const type = String(requirement?.type || "");
+    if (type === "levels") {
+      return Object.values(requirement.levels || {}).reduce((sum, value) => sum + Number(value || 0), 0);
+    }
     if (type === "lab") return Number(requirement.level || 0);
     if (type === "tech") return 1000;
     return 500;
   };
   const unlockedHulls = hulls.filter((hull) => isUnlockedByResearch(hullUnlockRequirement(hull.key), research));
-  const unlockedComponents = components.filter((component) => isUnlockedByResearch(componentUnlockRequirement(component), research));
+  const unlockedComponents = normalizedComponents.filter((component) => isUnlockedByResearch(componentUnlockRequirement(component), research));
   const nextHull = hulls
     .filter((hull) => !isUnlockedByResearch(hullUnlockRequirement(hull.key), research))
     .map((hull) => ({ name: hull.name, requirement: hullUnlockRequirement(hull.key) }))
     .sort((a, b) => requirementOrder(a.requirement) - requirementOrder(b.requirement))[0] || null;
-  const nextComponent = components
+  const nextComponent = normalizedComponents
     .filter((component) => !isUnlockedByResearch(componentUnlockRequirement(component), research))
-    .map((component) => ({ name: component.name, requirement: componentUnlockRequirement(component) }))
+    .map((component) => ({ name: component.display_name || displayNameForFamilyMk(component), requirement: componentUnlockRequirement(component) }))
     .sort((a, b) => requirementOrder(a.requirement) - requirementOrder(b.requirement))[0] || null;
 
   return {
+    unlocked: [
+      ...unlockedHulls.map((hull) => ({ type: "hull", name: hull.name })),
+      ...unlockedComponents.map((component) => ({
+        type: component.category,
+        name: component.display_name || displayNameForFamilyMk(component),
+        familyKey: component.family_key || componentFamilyKey(component),
+        familyName: component.family_name || componentFamilyName(component.family_key || componentFamilyKey(component)),
+        mk: Number(component.mk || componentMkByPower(Number(component.power_cost || 0), component.key)),
+        category: component.category
+      }))
+    ],
+    locked: [
+      ...hulls
+        .filter((hull) => !isUnlockedByResearch(hullUnlockRequirement(hull.key), research))
+        .map((hull) => ({ type: "hull", name: hull.name, requirement: formatRequirementText(hullUnlockRequirement(hull.key)) })),
+      ...normalizedComponents
+        .filter((component) => !isUnlockedByResearch(componentUnlockRequirement(component), research))
+        .map((component) => ({
+          type: component.category,
+          name: component.display_name || displayNameForFamilyMk(component),
+          requirement: formatRequirementText(componentUnlockRequirement(component)),
+          familyKey: component.family_key || componentFamilyKey(component),
+          familyName: component.family_name || componentFamilyName(component.family_key || componentFamilyKey(component)),
+          mk: Number(component.mk || componentMkByPower(Number(component.power_cost || 0), component.key)),
+          category: component.category
+        }))
+    ],
     hulls: {
       unlocked: unlockedHulls.length,
       total: hulls.length,
@@ -2755,7 +3686,7 @@ function buildUnlockSummary(research, hulls, components) {
     },
     components: {
       unlocked: unlockedComponents.length,
-      total: components.length,
+      total: normalizedComponents.length,
       next: nextComponent ? `${nextComponent.name} (${formatRequirementText(nextComponent.requirement)})` : "모든 모듈 해금"
     }
   };
@@ -2789,7 +3720,7 @@ async function calculateDesign(input) {
     const research = await getResearch(input.userId);
     const hullReq = hullUnlockRequirement(hull.key);
     if (!isUnlockedByResearch(hullReq, research)) {
-      const error = new Error(`해당 선체는 연구 ${hullReq.type} Lv.${hullReq.level} 이후 해금됩니다.`);
+      const error = new Error(`해당 선체는 ${formatRequirementText(hullReq)} 이후 해금됩니다.`);
       error.status = 400;
       throw error;
     }
@@ -2800,10 +3731,10 @@ async function calculateDesign(input) {
   const defenses = parseComponentList(input.defenses, input.defenseId);
   const utilities = parseComponentList(input.utilities, input.utilityId);
   const expected = {
-    engine: Number(hull.slot_engine || 1),
-    weapon: Number(hull.slot_weapon || 1),
-    defense: Number(hull.slot_defense || 1),
-    utility: Number(hull.slot_utility || 1)
+    engine: Number(hull.slot_engine ?? 1),
+    weapon: Number(hull.slot_weapon ?? 1),
+    defense: Number(hull.slot_defense ?? 1),
+    utility: Number(hull.slot_utility ?? 0)
   };
 
   if (engines.length > expected.engine || weapons.length > expected.weapon || defenses.length > expected.defense || utilities.length > expected.utility) {
@@ -2823,12 +3754,23 @@ async function calculateDesign(input) {
       error.status = 400;
       throw error;
     }
+    if (!DEFAULT_COMPONENT_KEY_SET.has(String(component.key || ""))) {
+      const error = new Error("노션 기준 모듈만 새 설계에 사용할 수 있습니다.");
+      error.status = 400;
+      throw error;
+    }
+    const moduleMeta = moduleMetaByComponent(component);
+    if (String(moduleMeta.penalty || "").includes("carrier_only") && String(hull.class_type || "") !== "carrier") {
+      const error = new Error(`${component.name} 모듈은 항공모함 전용입니다.`);
+      error.status = 400;
+      throw error;
+    }
     if (input.userId) {
       const research = input._research || await getResearch(input.userId);
       input._research = research;
       const requirement = componentUnlockRequirement(component);
       if (!isUnlockedByResearch(requirement, research)) {
-        const error = new Error(`${component.name} 모듈은 연구 ${requirement.type} Lv.${requirement.level} 이후 해금됩니다.`);
+        const error = new Error(`${component.name} 모듈은 ${formatRequirementText(requirement)} 이후 해금됩니다.`);
         error.status = 400;
         throw error;
       }
@@ -2872,9 +3814,7 @@ async function calculateDesign(input) {
   const finalSpeed = Math.max(1, hull.base_speed + components.reduce((sum, component) => sum + component.speed_bonus, 0));
   const totalMetalCost = hull.metal_cost + components.reduce((sum, component) => sum + component.metal_cost, 0);
   const totalFuelCost = hull.fuel_cost + components.reduce((sum, component) => sum + component.fuel_cost, 0);
-  const slotWeight = expected.engine * 0.6 + expected.weapon * 1.2 + expected.defense + expected.utility * 0.7;
-  const complexity = Math.pow(1 + totalPower / 110, 1.45);
-  const totalBuildTime = Math.max(20, Math.floor(hull.base_build_time * complexity + slotWeight * 25));
+  const totalBuildTime = computeBuildTime(hull, totalPower, expected);
 
   return {
     hull,
@@ -2960,6 +3900,112 @@ async function getDesigns(userId) {
   return rows.map((row) => formatDesign(row, powerBonusById));
 }
 
+function damageStateForHp(currentHp, maxHp) {
+  const max = Math.max(1, Number(maxHp || 1));
+  const current = Math.max(0, Number(currentHp || 0));
+  const ratio = current / max;
+  if (current <= 0) return "destroyed";
+  if (ratio < 0.15) return "critical";
+  if (ratio < 0.4) return "heavy";
+  if (ratio < 0.7) return "light";
+  return "normal";
+}
+
+function damageStateLabel(state) {
+  const labels = { normal: "정상", light: "경미", heavy: "중파", critical: "대파", destroyed: "격침" };
+  return labels[String(state || "normal")] || "정상";
+}
+
+function defaultLineForHull(classType) {
+  const key = String(classType || "").toLowerCase();
+  if (["monitor"].includes(key)) return "front";
+  if (["carrier", "tactical_support"].includes(key)) return "back";
+  if (["battleship", "cruiser", "dreadnought", "titan"].includes(key)) return "mid";
+  return "front";
+}
+
+async function createShipsForDesign(userId, designId, quantity, status = "reserve", options = {}) {
+  const design = await get(
+    `
+      SELECT d.id, d.final_hp, h.class_type
+      FROM ship_designs d
+      JOIN hulls h ON h.id = d.hull_id
+      WHERE d.id = ? AND d.user_id = ?
+    `,
+    [designId, userId]
+  );
+  if (!design) return 0;
+
+  const count = Math.max(0, Number.parseInt(quantity, 10) || 0);
+  const line = options.line || defaultLineForHull(design.class_type);
+  const now = Date.now();
+  for (let idx = 0; idx < count; idx += 1) {
+    await run(
+      `
+        INSERT INTO ships
+          (user_id, design_id, max_hp, current_hp, damage_state, status, fleet_slot, zone_id, line, created_at, updated_at)
+        VALUES (?, ?, ?, ?, 'normal', ?, ?, ?, ?, ?, ?)
+      `,
+      [
+        userId,
+        designId,
+        Math.max(1, Number(design.final_hp || 1)),
+        Math.max(1, Number(design.final_hp || 1)),
+        status,
+        options.fleetSlot || null,
+        options.zoneId || null,
+        line,
+        now,
+        now
+      ]
+    );
+  }
+  return count;
+}
+
+async function syncOwnedShipsFromShips(userId) {
+  const rows = await all(
+    `
+      SELECT design_id, COUNT(*) AS quantity
+      FROM ships
+      WHERE user_id = ? AND status != 'destroyed'
+      GROUP BY design_id
+    `,
+    [userId]
+  );
+  await run("DELETE FROM owned_ships WHERE user_id = ?", [userId]);
+  for (const row of rows) {
+    await run(
+      "INSERT INTO owned_ships (user_id, design_id, quantity) VALUES (?, ?, ?) ON CONFLICT(user_id, design_id) DO UPDATE SET quantity = excluded.quantity",
+      [userId, row.design_id, row.quantity]
+    );
+  }
+}
+
+async function backfillShipsFromOwnedShips(userId) {
+  const rows = await all(
+    `
+      SELECT os.design_id, os.quantity, d.final_hp, h.class_type
+      FROM owned_ships os
+      JOIN ship_designs d ON d.id = os.design_id
+      JOIN hulls h ON h.id = d.hull_id
+      WHERE os.user_id = ? AND os.quantity > 0
+    `,
+    [userId]
+  );
+  for (const row of rows) {
+    const existing = await get(
+      "SELECT COUNT(*) AS cnt FROM ships WHERE user_id = ? AND design_id = ? AND status != 'destroyed'",
+      [userId, row.design_id]
+    );
+    const missing = Math.max(0, Number(row.quantity || 0) - Number(existing?.cnt || 0));
+    if (missing > 0) {
+      await createShipsForDesign(userId, row.design_id, missing, "reserve", { line: defaultLineForHull(row.class_type) });
+    }
+  }
+  await syncOwnedShipsFromShips(userId);
+}
+
 async function processProductionQueue(userId) {
   const now = Date.now();
   const completed = await all(
@@ -2970,6 +4016,7 @@ async function processProductionQueue(userId) {
   for (const item of completed) {
     await run("BEGIN TRANSACTION");
     try {
+      await createShipsForDesign(userId, item.design_id, item.quantity);
       await run(
         `
           INSERT INTO owned_ships (user_id, design_id, quantity)
@@ -2986,6 +4033,7 @@ async function processProductionQueue(userId) {
       throw err;
     }
   }
+  await syncOwnedShipsFromShips(userId);
 }
 
 async function getProductionQueue(userId) {
@@ -3035,21 +4083,47 @@ function parseDesignComponentIds(design) {
 
 async function getOwnedShips(userId) {
   await processProductionQueue(userId);
+  await processRepairJobs(userId);
+  await backfillShipsFromOwnedShips(userId);
   const rows = await all(
     `
-      SELECT os.quantity, d.*
-      FROM owned_ships os
-      JOIN ship_designs d ON d.id = os.design_id
-      WHERE os.user_id = ? AND os.quantity > 0
-      ORDER BY os.id DESC
+      SELECT
+        s.design_id,
+        COUNT(*) AS quantity,
+        SUM(CASE WHEN s.status = 'reserve' THEN 1 ELSE 0 END) AS reserve_quantity,
+        SUM(CASE WHEN s.status = 'fleet' THEN 1 ELSE 0 END) AS fleet_quantity,
+        SUM(CASE WHEN s.status = 'mission' THEN 1 ELSE 0 END) AS mission_quantity,
+        SUM(CASE WHEN s.status = 'garrison' THEN 1 ELSE 0 END) AS garrison_quantity,
+        SUM(CASE WHEN s.status = 'repairing' THEN 1 ELSE 0 END) AS repairing_quantity,
+        AVG(CASE WHEN s.max_hp > 0 THEN CAST(s.current_hp AS REAL) / s.max_hp ELSE 0 END) AS avg_hp_ratio,
+        SUM(CASE WHEN s.damage_state = 'light' THEN 1 ELSE 0 END) AS light_damage,
+        SUM(CASE WHEN s.damage_state = 'heavy' THEN 1 ELSE 0 END) AS heavy_damage,
+        SUM(CASE WHEN s.damage_state = 'critical' THEN 1 ELSE 0 END) AS critical_damage,
+        d.*
+      FROM ships s
+      JOIN ship_designs d ON d.id = s.design_id
+      WHERE s.user_id = ? AND s.status != 'destroyed'
+      GROUP BY s.design_id
+      ORDER BY MAX(s.id) DESC
     `,
     [userId]
   );
 
   return rows.map((row) => ({
-    designId: row.id,
+    designId: row.design_id,
     name: row.name,
     quantity: row.quantity,
+    reserveQuantity: Number(row.reserve_quantity || 0),
+    fleetQuantity: Number(row.fleet_quantity || 0),
+    missionQuantity: Number(row.mission_quantity || 0),
+    garrisonQuantity: Number(row.garrison_quantity || 0),
+    repairingQuantity: Number(row.repairing_quantity || 0),
+    avgHpRatio: Number(row.avg_hp_ratio || 0),
+    damageSummary: {
+      light: Number(row.light_damage || 0),
+      heavy: Number(row.heavy_damage || 0),
+      critical: Number(row.critical_damage || 0)
+    },
     finalHp: row.final_hp,
     finalAttack: row.final_attack,
     finalDefense: row.final_defense,
@@ -3060,78 +4134,124 @@ async function getOwnedShips(userId) {
 async function ensureStarterDesign(userId) {
   const existing = await get("SELECT id FROM ship_designs WHERE user_id = ? LIMIT 1", [userId]);
   if (existing) return existing.id;
-
-  const parts = await get(
-    `
-      SELECT
-        h.id AS hull_id,
-        e.id AS engine_id,
-        w.id AS weapon_id,
-        d.id AS defense_id,
-        u.id AS utility_id
-      FROM hulls h
-      JOIN components e ON e.key = 'standard_engine'
-      JOIN components w ON w.key = 'light_railgun'
-      JOIN components d ON d.key = 'reinforced_armor'
-      JOIN components u ON u.key = 'cargo_module'
-      WHERE h.key = 'corvette'
-      LIMIT 1
-    `
-  );
-  if (!parts) return null;
-
-  const calculated = await calculateDesign({
-    hullId: parts.hull_id,
-    engines: [parts.engine_id],
-    weapons: [parts.weapon_id],
-    defenses: [parts.defense_id],
-    utilities: [parts.utility_id]
-  });
-
-  const result = await run(
-    `
-      INSERT INTO ship_designs
-        (user_id, name, hull_id, engine_component_id, weapon_component_id, defense_component_id, utility_component_id,
-         engine_components_json, weapon_components_json, defense_components_json, utility_components_json,
-         final_hp, final_attack, final_defense, final_speed, total_power, total_metal_cost, total_fuel_cost, total_build_time, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `,
-    [
-      userId,
-      "\uc2a4\ud0c0\ud130 \uc21c\ucc30\ud568",
-      parts.hull_id,
-      parts.engine_id,
-      parts.weapon_id,
-      parts.defense_id,
-      parts.utility_id,
-      JSON.stringify(calculated.componentIds.engines),
-      JSON.stringify(calculated.componentIds.weapons),
-      JSON.stringify(calculated.componentIds.defenses),
-      JSON.stringify(calculated.componentIds.utilities),
-      calculated.finalHp,
-      calculated.finalAttack,
-      calculated.finalDefense,
-      calculated.finalSpeed,
-      calculated.totalPower,
-      calculated.totalMetalCost,
-      calculated.totalFuelCost,
-      calculated.totalBuildTime,
-      Date.now()
-    ]
-  );
-
-  await run(
-    "INSERT INTO owned_ships (user_id, design_id, quantity) VALUES (?, ?, ?) ON CONFLICT(user_id, design_id) DO NOTHING",
-    [userId, result.lastID, 6]
-  );
-
-  return result.lastID;
+  return null;
 }
 
 async function getOwnedShipFleet(userId) {
   await ensureStarterDesign(userId);
   const ships = await getOwnedShips(userId);
   return ships.filter((ship) => Number(ship.quantity || 0) > 0);
+}
+
+async function getShips(userId) {
+  await processProductionQueue(userId);
+  await processRepairJobs(userId);
+  const rows = await all(
+    `
+      SELECT s.*, d.name AS design_name, d.final_attack, d.final_defense, d.final_speed, d.total_metal_cost, d.total_fuel_cost,
+             h.name AS hull_name, h.class_type
+      FROM ships s
+      JOIN ship_designs d ON d.id = s.design_id
+      JOIN hulls h ON h.id = d.hull_id
+      WHERE s.user_id = ? AND s.status != 'destroyed'
+      ORDER BY s.status ASC, s.design_id ASC, s.id ASC
+      LIMIT 1000
+    `,
+    [userId]
+  );
+  return rows.map((row) => ({
+    id: Number(row.id),
+    designId: Number(row.design_id),
+    designName: row.design_name,
+    hullName: row.hull_name,
+    classType: row.class_type,
+    maxHp: Number(row.max_hp || 0),
+    currentHp: Number(row.current_hp || 0),
+    hpRatio: Number(row.max_hp || 0) > 0 ? Number(row.current_hp || 0) / Number(row.max_hp || 1) : 0,
+    damageState: row.damage_state,
+    damageStateLabel: damageStateLabel(row.damage_state),
+    status: row.status,
+    fleetSlot: row.fleet_slot ? Number(row.fleet_slot) : null,
+    zoneId: row.zone_id ? Number(row.zone_id) : null,
+    line: row.line,
+    finalAttack: Number(row.final_attack || 0),
+    finalDefense: Number(row.final_defense || 0),
+    finalSpeed: Number(row.final_speed || 0),
+    repairCost: repairCostForShip(row)
+  }));
+}
+
+function repairCostForShip(ship) {
+  const maxHp = Math.max(1, Number(ship.max_hp || ship.final_hp || 1));
+  const missing = Math.max(0, maxHp - Number(ship.current_hp || 0));
+  const ratio = missing / maxHp;
+  return {
+    metal: Math.ceil(Number(ship.total_metal_cost || 0) * ratio * Number(balance.repair?.costCoefficient || 0.7)),
+    fuel: Math.ceil(Number(ship.total_fuel_cost || 0) * ratio * Number(balance.repair?.costCoefficient || 0.7))
+  };
+}
+
+async function processRepairJobs(userId) {
+  const now = Date.now();
+  const jobs = await all(
+    `
+      SELECT r.*, s.max_hp, s.current_hp, d.total_metal_cost, d.total_fuel_cost
+      FROM repair_jobs r
+      JOIN ships s ON s.id = r.ship_id
+      JOIN ship_designs d ON d.id = s.design_id
+      WHERE r.user_id = ? AND r.status = 'repairing'
+      ORDER BY r.id ASC
+    `,
+    [userId]
+  );
+  for (const job of jobs) {
+    const elapsedTicks = Math.floor((now - Number(job.last_processed_at || job.start_time || now)) / (Number(balance.repair?.tickSeconds || 10) * 1000));
+    if (elapsedTicks <= 0) continue;
+    const ship = await get(
+      `
+        SELECT s.*, d.total_metal_cost, d.total_fuel_cost
+        FROM ships s
+        JOIN ship_designs d ON d.id = s.design_id
+        WHERE s.id = ? AND s.user_id = ?
+      `,
+      [job.ship_id, userId]
+    );
+    if (!ship || ship.status === "destroyed") {
+      await run("UPDATE repair_jobs SET status = 'cancelled' WHERE id = ?", [job.id]);
+      continue;
+    }
+    const maxHp = Math.max(1, Number(ship.max_hp || 1));
+    const healPerTick = Math.max(1, Math.ceil(maxHp * Number(balance.repair?.hpRatioPerTick || 0.02)));
+    const totalHeal = Math.min(maxHp - Number(ship.current_hp || 0), healPerTick * elapsedTicks);
+    if (totalHeal <= 0) {
+      await run("UPDATE repair_jobs SET status = 'completed' WHERE id = ?", [job.id]);
+      await run("UPDATE ships SET status = 'reserve', damage_state = 'normal', updated_at = ? WHERE id = ?", [now, ship.id]);
+      continue;
+    }
+    const costRatio = totalHeal / maxHp * Number(balance.repair?.costCoefficient || 0.7);
+    const metalCost = Math.ceil(Number(ship.total_metal_cost || 0) * costRatio);
+    const fuelCost = Math.ceil(Number(ship.total_fuel_cost || 0) * costRatio);
+    const state = await getUpdatedResources(userId);
+    if (Number(state.resources.metal || 0) < metalCost || Number(state.resources.fuel || 0) < fuelCost) {
+      await run("UPDATE repair_jobs SET status = 'paused', last_processed_at = ? WHERE id = ?", [now, job.id]);
+      continue;
+    }
+    const nextHp = Math.min(maxHp, Number(ship.current_hp || 0) + totalHeal);
+    await run("BEGIN TRANSACTION");
+    try {
+      await run("UPDATE resources SET metal = metal - ?, fuel = fuel - ? WHERE user_id = ?", [metalCost, fuelCost, userId]);
+      await run(
+        "UPDATE ships SET current_hp = ?, damage_state = ?, status = ?, updated_at = ? WHERE id = ?",
+        [nextHp, damageStateForHp(nextHp, maxHp), nextHp >= maxHp ? "reserve" : "repairing", now, ship.id]
+      );
+      await run("UPDATE repair_jobs SET status = ?, last_processed_at = ? WHERE id = ?", [nextHp >= maxHp ? "completed" : "repairing", now, job.id]);
+      await run("COMMIT");
+    } catch (err) {
+      await run("ROLLBACK");
+      throw err;
+    }
+  }
+  await syncOwnedShipsFromShips(userId);
 }
 
 function designFleetSummary(fleet) {
@@ -3142,11 +4262,16 @@ function designFleetSummary(fleet) {
 
 function designFleetPower(fleet) {
   const ships = Array.isArray(fleet) ? fleet : [];
+  const powerBalance = balance.combatPower;
   return ships.reduce((sum, ship) => {
     const attack = Number(ship.finalAttack || ship.attack || 0);
     const defense = Number(ship.finalDefense || ship.defense || 0);
     const hp = Number(ship.finalHp || ship.hp || 0);
-    return sum + Number(ship.quantity || 0) * (attack + defense * 0.45 + hp * 0.12);
+    return sum + Number(ship.quantity || 0) * (
+      attack * Number(powerBalance.attackWeight || 1)
+      + defense * Number(powerBalance.defenseWeight || 0.45)
+      + hp * Number(powerBalance.hpWeight || 0.12)
+    );
   }, 0);
 }
 
@@ -3158,9 +4283,9 @@ function designFleetSpeed(fleet) {
   const weightedSpeed = ships.reduce((sum, ship) => {
     return sum + Number(ship.quantity || 0) * Number(ship.finalSpeed || ship.speed || 1);
   }, 0) / count;
-  const sizePenalty = 1 + count / 80;
+  const sizePenalty = 1 + count / Number(balance.fleetSpeed.sizePenaltyDivisor || 80);
 
-  return Math.max(0.5, weightedSpeed / sizePenalty);
+  return Math.max(Number(balance.fleetSpeed.minimumSpeed || 0.5), weightedSpeed / sizePenalty);
 }
 
 function travelTimeSecondsForDesignFleet(from, to, fleet, bonuses) {
@@ -3168,7 +4293,7 @@ function travelTimeSecondsForDesignFleet(from, to, fleet, bonuses) {
   const dy = Number(from.y) - Number(to.y);
   const distance = Math.sqrt(dx * dx + dy * dy) / MAP_DISTANCE_UNIT;
   const speed = designFleetSpeed(fleet) * Number(bonuses?.movementMultiplier || 1);
-  return Math.max(10, Math.ceil((distance / Math.max(0.5, speed)) * 60));
+  return Math.max(10, Math.ceil((distance / Math.max(Number(balance.fleetSpeed.minimumSpeed || 0.5), speed)) * 60));
 }
 
 function hasDesignShips(fleet) {
@@ -3271,7 +4396,7 @@ function garrisonToDesignFleet(garrison) {
       quantity: legacy[type],
       finalHp: SHIPS[type].hp,
       finalAttack: SHIPS[type].attack,
-      finalDefense: Math.floor(SHIPS[type].hp / 8),
+      finalDefense: Math.floor(SHIPS[type].hp / Number(balance.combatPower.shipHpDefenseDivisor || 8)),
       finalSpeed: SHIPS[type].speed
     }));
 }
@@ -3308,6 +4433,551 @@ async function addBattleRecord(userId, title, result, travelSeconds, log) {
   );
 }
 
+async function addBattleSessionFromResult(mission, targetType, targetId, defenderUserId, battle, extraLog = []) {
+  const log = [...(battle?.log || []), ...extraLog];
+  const now = Date.now();
+  const initialLog = log.slice(0, 3);
+  await run(
+    `
+      INSERT INTO battle_sessions
+        (mission_id, attacker_user_id, defender_user_id, target_type, target_id, state, tick,
+         started_at, last_tick_at, ended_at, retreat_side, retreat_ticks_remaining, result, log_json,
+         full_log_json, reveal_index)
+      VALUES (?, ?, ?, ?, ?, 'active', 0, ?, ?, NULL, NULL, 0, ?, ?, ?, ?)
+    `,
+    [
+      mission?.id || null,
+      mission.user_id,
+      defenderUserId || null,
+      targetType,
+      targetId || null,
+      Number(mission?.arrive_at || now),
+      now,
+      battle?.result || "failed",
+      JSON.stringify(initialLog),
+      JSON.stringify(log),
+      initialLog.length
+    ]
+  );
+}
+
+function parseJsonArray(value) {
+  try {
+    const parsed = JSON.parse(value || "[]");
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (err) {
+    return [];
+  }
+}
+
+function parseJsonObject(value) {
+  try {
+    const parsed = JSON.parse(value || "{}");
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch (err) {
+    return {};
+  }
+}
+
+function sideHasLivingUnits(units) {
+  return (Array.isArray(units) ? units : []).some((unit) => Number(unit.currentHp || 0) > 0);
+}
+
+function averageHpRatio(units) {
+  const living = (Array.isArray(units) ? units : []).filter((unit) => Number(unit.currentHp || 0) > 0);
+  if (!living.length) return 0;
+  return living.reduce((sum, unit) => sum + (Number(unit.currentHp || 0) / Math.max(1, Number(unit.maxHp || 1))), 0) / living.length;
+}
+
+function frontLineCollapsed(units) {
+  const front = (Array.isArray(units) ? units : []).filter((unit) => String(unit.line || "mid") === "front");
+  return front.length > 0 && !front.some((unit) => Number(unit.currentHp || 0) > 0);
+}
+
+function hasCriticalCapitalDamage(units) {
+  return (Array.isArray(units) ? units : []).some((unit) => {
+    const type = String(unit.classType || "");
+    const capital = ["battleship", "carrier", "dreadnought", "titan"].includes(type);
+    const ratio = Number(unit.currentHp || 0) / Math.max(1, Number(unit.maxHp || 1));
+    return capital && ratio > 0 && ratio <= 0.14;
+  });
+}
+
+function combatLineRank(line) {
+  const value = String(line || "mid");
+  if (value === "front") return 0;
+  if (value === "mid") return 1;
+  return 2;
+}
+
+function chooseLineTarget(units, attacker) {
+  const living = (Array.isArray(units) ? units : []).filter((unit) => Number(unit.currentHp || 0) > 0);
+  if (!living.length) return null;
+  const family = String(attacker.weaponFamily || "");
+  const tickSeed = Number(attacker.shipId || attacker.virtualId || attacker.designId || 0) + Number(attacker.attack || 0);
+  const canThreatenBack = ["missile_weapon", "siege_weapon"].includes(family) && tickSeed % (family === "missile_weapon" ? 3 : 5) === 0;
+  const sorted = living.slice().sort((a, b) => {
+    if (canThreatenBack) return combatLineRank(b.line) - combatLineRank(a.line) || Number(a.currentHp || 0) - Number(b.currentHp || 0);
+    return combatLineRank(a.line) - combatLineRank(b.line) || Number(a.currentHp || 0) - Number(b.currentHp || 0);
+  });
+  return sorted[0] || null;
+}
+
+function computeTickDamage(attacker, target) {
+  const attack = Math.max(1, Number(attacker.attack || 0));
+  const defense = Math.max(0, Number(target.defense || 0));
+  const speedFactor = 1 + Math.max(0, Number(attacker.speed || 0)) * 0.015;
+  const raw = attack * speedFactor - defense * 0.28;
+  return Math.max(1, Math.floor(raw));
+}
+
+async function persistUnitHp(unit) {
+  if (!unit?.shipId) return;
+  const hp = Math.max(0, Math.floor(Number(unit.currentHp || 0)));
+  await run(
+    "UPDATE ships SET current_hp = ?, damage_state = ?, status = CASE WHEN ? <= 0 THEN 'destroyed' ELSE status END, updated_at = ? WHERE id = ?",
+    [hp, damageStateForHp(hp, unit.maxHp), hp, Date.now(), unit.shipId]
+  );
+}
+
+async function runOneBattleTick(session, attackerUnits, defenderUnits, logs) {
+  const sides = [
+    { label: "공격측", attackers: attackerUnits, defenders: defenderUnits },
+    { label: "방어측", attackers: defenderUnits, defenders: attackerUnits }
+  ];
+  const tickNo = Number(session.tick || 0) + 1;
+  logs.push(`[${tickNo}틱]`);
+  for (const side of sides) {
+    const livingAttackers = side.attackers
+      .filter((unit) => Number(unit.currentHp || 0) > 0)
+      .sort((a, b) => combatLineRank(a.line) - combatLineRank(b.line) || Number(b.speed || 0) - Number(a.speed || 0));
+    for (const attacker of livingAttackers) {
+      const target = chooseLineTarget(side.defenders, attacker);
+      if (!target) break;
+      const damage = computeTickDamage(attacker, target);
+      target.currentHp = Math.max(0, Number(target.currentHp || 0) - damage);
+      const sunk = Number(target.currentHp || 0) <= 0;
+      logs.push(`${side.label} ${attacker.name} -> ${target.name} ${damage} 피해${sunk ? " / 격침" : ""}`);
+      await persistUnitHp(target);
+    }
+    if (!sideHasLivingUnits(side.defenders)) break;
+  }
+}
+
+async function shipRowsToBattleUnits(userId, options = {}) {
+  const params = [userId];
+  let statusClause = "s.status IN ('reserve', 'fleet', 'garrison')";
+  if (options.status) {
+    statusClause = "s.status = ?";
+    params.push(String(options.status));
+  }
+  if (Number.isInteger(Number(options.fleetSlot))) {
+    statusClause += " AND s.fleet_slot = ?";
+    params.push(Number(options.fleetSlot));
+  }
+  if (Number.isInteger(Number(options.zoneId))) {
+    statusClause += " AND s.zone_id = ?";
+    params.push(Number(options.zoneId));
+  }
+  const rows = await all(
+    `
+      SELECT s.id, s.design_id, s.max_hp, s.current_hp, s.line,
+             d.name AS design_name, d.final_attack, d.final_defense, d.final_speed,
+             h.class_type
+      FROM ships s
+      JOIN ship_designs d ON d.id = s.design_id
+      JOIN hulls h ON h.id = d.hull_id
+      WHERE s.user_id = ? AND ${statusClause}
+      ORDER BY s.fleet_slot ASC, s.id ASC
+    `,
+    params
+  );
+  return rows.map((row) => ({
+    shipId: Number(row.id),
+    designId: Number(row.design_id),
+    name: row.design_name,
+    classType: row.class_type,
+    line: row.line || defaultLineForHull(row.class_type),
+    maxHp: Number(row.max_hp || 1),
+    currentHp: Math.max(0, Number(row.current_hp || row.max_hp || 1)),
+    attack: Number(row.final_attack || 0),
+    defense: Number(row.final_defense || 0),
+    speed: Number(row.final_speed || 0),
+    weaponFamily: ""
+  }));
+}
+
+function designFleetToVirtualUnits(fleet, labelPrefix = "") {
+  const units = [];
+  for (const ship of Array.isArray(fleet) ? fleet : []) {
+    const quantity = Math.max(0, Number(ship.quantity || 0));
+    if (quantity <= 0) continue;
+    units.push({
+      virtualId: `${ship.designId || ship.name}-${units.length}`,
+      designId: ship.designId,
+      name: `${labelPrefix}${ship.name || "함선"} ${quantity}척`,
+      classType: ship.classType || "virtual",
+      line: defaultLineForHull(ship.classType),
+      maxHp: Math.max(1, Number(ship.finalHp || 1) * quantity),
+      currentHp: Math.max(1, Number(ship.finalHp || 1) * quantity),
+      attack: Math.max(1, Number(ship.finalAttack || 1) * quantity),
+      defense: Math.max(0, Number(ship.finalDefense || 0) * Math.max(1, Math.sqrt(quantity))),
+      speed: Number(ship.finalSpeed || 0),
+      weaponFamily: ""
+    });
+  }
+  return units;
+}
+
+async function syncZoneGarrisonFromShips(userId, zoneId) {
+  const rows = await all(
+    `
+      SELECT design_id, COUNT(*) AS quantity
+      FROM ships
+      WHERE user_id = ? AND zone_id = ? AND status = 'garrison'
+      GROUP BY design_id
+    `,
+    [userId, zoneId]
+  );
+  const compactShips = rows
+    .map((row) => ({
+      designId: Number(row.design_id),
+      quantity: Number(row.quantity || 0)
+    }))
+    .filter((item) => item.designId > 0 && item.quantity > 0);
+  if (!compactShips.length) {
+    await run("DELETE FROM zone_garrisons WHERE user_id = ? AND zone_id = ?", [userId, zoneId]);
+    return;
+  }
+  await run(
+    "INSERT INTO zone_garrisons (user_id, zone_id, ship_plan_json, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(user_id, zone_id) DO UPDATE SET ship_plan_json = excluded.ship_plan_json, updated_at = excluded.updated_at",
+    [userId, zoneId, JSON.stringify(compactShips), Date.now()]
+  );
+}
+
+async function createBattleSessionForMission(mission) {
+  const existing = await get("SELECT id FROM battle_sessions WHERE mission_id = ? LIMIT 1", [mission.id]);
+  if (existing) return existing.id;
+
+  const attackerUnits = await shipRowsToBattleUnits(mission.user_id, {
+    status: "mission",
+    fleetSlot: Number(mission.attacker_fleet_slot || 1)
+  });
+  if (!attackerUnits.length) {
+    throw new Error("No mission ships available for battle session");
+  }
+
+  let defenderUnits = [];
+  let targetType = "zone";
+  let targetId = mission.target_zone_id || null;
+  let defenderUserId = null;
+  let title = mission.target_name || "전투";
+  const context = {
+    missionType: mission.mission_type,
+    attackerUserId: mission.user_id,
+    attackerSlot: Number(mission.attacker_fleet_slot || 1),
+    travelSeconds: Math.max(10, Math.ceil((mission.arrive_at - mission.started_at) / 1000)),
+    title
+  };
+
+  if (mission.mission_type === "pvp") {
+    const targetUser = await get("SELECT id, username FROM users WHERE id = ?", [mission.target_user_id]);
+    if (!targetUser) throw new Error("Target user does not exist");
+    targetType = "base";
+    targetId = targetUser.id;
+    defenderUserId = targetUser.id;
+    title = `${targetUser.username} 기지 기습`;
+    context.title = title;
+    defenderUnits = await shipRowsToBattleUnits(targetUser.id);
+  } else if (mission.mission_type === "zone") {
+    const zone = await get("SELECT * FROM neutral_zones WHERE id = ?", [mission.target_zone_id]);
+    if (!zone) throw new Error("Target zone does not exist");
+    title = `${zone.name} 점령 전투`;
+    context.title = title;
+    context.zoneId = zone.id;
+    context.zoneLevel = Number(zone.level || 1);
+    const owner = await get("SELECT user_id FROM occupied_zones WHERE zone_id = ?", [zone.id]);
+    if (owner?.user_id) {
+      defenderUserId = Number(owner.user_id);
+      context.previousOwnerId = defenderUserId;
+      defenderUnits = await shipRowsToBattleUnits(defenderUserId, { status: "garrison", zoneId: zone.id });
+    } else {
+      context.previousCapturingUserId = zone.capturing_user_id ? Number(zone.capturing_user_id) : null;
+      defenderUnits = designFleetToVirtualUnits(garrisonToDesignFleet(parseGarrison(zone)), "중립 ");
+    }
+  }
+
+  const logs = [
+    `[전투 세션 시작] ${title}`,
+    `공격측 ${attackerUnits.length}척 / 방어측 ${defenderUnits.length}개 전투 단위`,
+    "전열/중열/후열 기준으로 틱 전투를 시작합니다."
+  ];
+  const now = Date.now();
+  const result = await run(
+    `
+      INSERT INTO battle_sessions
+        (mission_id, attacker_user_id, defender_user_id, target_type, target_id, state, tick,
+         started_at, last_tick_at, ended_at, retreat_side, retreat_ticks_remaining, result, log_json,
+         full_log_json, reveal_index, attacker_side_json, defender_side_json, context_json, record_written)
+      VALUES (?, ?, ?, ?, ?, 'active', 0, ?, ?, NULL, NULL, 0, NULL, ?, '[]', 0, ?, ?, ?, 0)
+    `,
+    [
+      mission.id,
+      mission.user_id,
+      defenderUserId,
+      targetType,
+      targetId,
+      now,
+      now,
+      JSON.stringify(logs),
+      JSON.stringify(attackerUnits),
+      JSON.stringify(defenderUnits),
+      JSON.stringify(context)
+    ]
+  );
+  return result.lastID;
+}
+
+async function finishBattleSession(session, attackerUnits, defenderUnits, logs, result) {
+  const claim = await run("UPDATE battle_sessions SET record_written = 1 WHERE id = ? AND record_written = 0", [session.id]);
+  if (!claim.changes) return;
+  const context = parseJsonObject(session.context_json);
+  const mission = session.mission_id
+    ? await get("SELECT * FROM missions WHERE id = ?", [session.mission_id])
+    : null;
+  const title = context.title || "전투";
+  const travelSeconds = Number(context.travelSeconds || 0);
+  const attackerUserId = Number(session.attacker_user_id);
+  const defenderUserId = session.defender_user_id ? Number(session.defender_user_id) : null;
+
+  if (result === "victory" && context.missionType === "pvp" && defenderUserId) {
+    const defenderState = await getUpdatedResources(defenderUserId);
+    const loot = {
+      metal: Math.min(Math.floor(Number(defenderState?.resources?.metal || 0) * 0.2), 2000),
+      fuel: Math.min(Math.floor(Number(defenderState?.resources?.fuel || 0) * 0.2), 1200)
+    };
+    if (loot.metal > 0 || loot.fuel > 0) {
+      await run("BEGIN TRANSACTION");
+      try {
+        await run("UPDATE resources SET metal = metal + ?, fuel = fuel + ? WHERE user_id = ?", [loot.metal, loot.fuel, attackerUserId]);
+        await run("UPDATE resources SET metal = MAX(0, metal - ?), fuel = MAX(0, fuel - ?) WHERE user_id = ?", [loot.metal, loot.fuel, defenderUserId]);
+        await run("COMMIT");
+      } catch (err) {
+        await run("ROLLBACK");
+        throw err;
+      }
+    }
+    logs.push(`[약탈 성공] 금속 ${loot.metal.toLocaleString()}, 연료 ${loot.fuel.toLocaleString()}`);
+  } else if (context.missionType === "pvp" && result !== "victory") {
+    logs.push("[약탈 실패] 승리하지 못해 자원을 획득하지 못했습니다.");
+  }
+
+  if (result === "victory" && context.missionType === "zone" && context.zoneId) {
+    const zone = await get("SELECT id, level, control_state, capturing_user_id FROM neutral_zones WHERE id = ?", [context.zoneId]);
+    if (zone) {
+      const wasCapturing = String(zone.control_state || "") === "capturing" && zone.capturing_user_id && Number(zone.capturing_user_id) !== attackerUserId;
+      await run(
+        "UPDATE neutral_zones SET control_state = 'capturing', capture_progress = 0, capturing_user_id = ?, capture_started_at = ?, contested_until = 0 WHERE id = ?",
+        [attackerUserId, Date.now(), zone.id]
+      );
+      if (defenderUserId) {
+        await run(
+          "UPDATE ships SET status = 'reserve', zone_id = NULL, fleet_slot = NULL, updated_at = ? WHERE user_id = ? AND zone_id = ? AND status = 'garrison'",
+          [Date.now(), defenderUserId, zone.id]
+        );
+        await run("DELETE FROM zone_garrisons WHERE user_id = ? AND zone_id = ?", [defenderUserId, zone.id]);
+        logs.push("[주둔군 철수] 생존 방어 주둔군은 예비 함대로 복귀했습니다.");
+      }
+      const captureSeconds = Number(balance.zoneCapture?.baseSeconds || 45) + Number(zone.level || 1) * Number(balance.zoneCapture?.perLevelSeconds || 45);
+      if (wasCapturing) {
+        logs.push("[점령권 경합 승리] 기존 점령 진행을 중단시키고 새 점령을 시작합니다.");
+      }
+      logs.push(`[점령 진행] ${formatTravelTime(captureSeconds)} 동안 점령 게이지를 채웁니다.`);
+    }
+  } else if (context.missionType === "zone" && defenderUserId && context.zoneId) {
+    await syncZoneGarrisonFromShips(defenderUserId, Number(context.zoneId));
+    logs.push("[방어 유지] 생존 주둔군이 거점에 남아 방어를 계속합니다.");
+  }
+
+  await addBattleRecord(attackerUserId, title, result, travelSeconds, logs);
+  await addCommanderXp(attackerUserId, result === "victory" ? 120 : 60);
+  if (defenderUserId) {
+    await addBattleRecord(defenderUserId, `방어: ${title}`, result === "victory" ? "defeat" : "victory", travelSeconds, logs);
+    await addCommanderXp(defenderUserId, result === "victory" ? 60 : 100);
+  }
+  if (mission) {
+    await run(
+      "UPDATE missions SET status = 'completed', result = ?, log_json = ? WHERE id = ?",
+      [result, JSON.stringify(logs), mission.id]
+    );
+    if (mission.mission_type !== "garrison") {
+      await returnMissionShipsToReserve(attackerUserId, Number(mission.attacker_fleet_slot || 1));
+    }
+    if ((mission.mission_type === "pvp" || mission.mission_type === "zone") && mission.target_user_id) {
+      await run("UPDATE incoming_alerts SET status = 'resolved' WHERE mission_id = ?", [mission.id]);
+    }
+  }
+  await syncOwnedShipsFromShips(attackerUserId);
+  if (defenderUserId) await syncOwnedShipsFromShips(defenderUserId);
+}
+
+async function processBattleSessionsForUser(userId) {
+  const tickMs = Math.max(1000, Number(balance.combatLoop?.tickSeconds || 8) * 1000);
+  const now = Date.now();
+  const rows = await all(
+    `
+      SELECT *
+      FROM battle_sessions
+      WHERE (attacker_user_id = ? OR defender_user_id = ?) AND state IN ('active', 'retreating')
+      ORDER BY id ASC
+    `,
+    [userId, userId]
+  );
+  for (const row of rows) {
+    const elapsedTicks = Math.max(0, Math.floor((now - Number(row.last_tick_at || row.started_at || now)) / tickMs));
+    if (elapsedTicks <= 0) continue;
+    let visible = [];
+    let full = [];
+    let attackerUnits = parseJsonArray(row.attacker_side_json);
+    let defenderUnits = parseJsonArray(row.defender_side_json);
+    try {
+      visible = JSON.parse(row.log_json || "[]");
+      full = JSON.parse(row.full_log_json || row.log_json || "[]");
+    } catch (err) {
+      visible = [];
+      full = [];
+    }
+
+    if (attackerUnits.length || defenderUnits.length) {
+      let state = String(row.state || "active");
+      let retreatTicks = Number(row.retreat_ticks_remaining || 0);
+      let result = row.result || null;
+      let processedTicks = 0;
+      for (let i = 0; i < elapsedTicks; i += 1) {
+        processedTicks += 1;
+        if (state === "retreating") {
+          retreatTicks = Math.max(0, retreatTicks - 1);
+          visible.push(`[후퇴 진행] 남은 틱 ${retreatTicks}`);
+          if (retreatTicks <= 0) {
+            state = "ended";
+            result = "retreat";
+            visible.push("[후퇴 성공] 생존 함선이 전장을 이탈했습니다.");
+            break;
+          }
+          await runOneBattleTick({ ...row, tick: Number(row.tick || 0) + processedTicks - 1 }, attackerUnits, defenderUnits, visible);
+        } else {
+          await runOneBattleTick({ ...row, tick: Number(row.tick || 0) + processedTicks - 1 }, attackerUnits, defenderUnits, visible);
+          const attackerAlive = sideHasLivingUnits(attackerUnits);
+          const defenderAlive = sideHasLivingUnits(defenderUnits);
+          if (!attackerAlive || !defenderAlive) {
+            state = "ended";
+            result = attackerAlive && !defenderAlive ? "victory" : "defeat";
+            visible.push(result === "victory" ? "[전투 종료] 공격측 승리." : "[전투 종료] 공격측 패배.");
+            break;
+          }
+          if (averageHpRatio(attackerUnits) <= 0.3 || frontLineCollapsed(attackerUnits) || hasCriticalCapitalDamage(attackerUnits)) {
+            state = "retreating";
+            retreatTicks = Math.max(1, Number(balance.combatLoop?.retreatDelayTicks || 2));
+            visible.push("[자동 후퇴] 함대 손상이 심각해 후퇴 절차에 들어갑니다.");
+          }
+        }
+      }
+      const endedAt = state === "ended" ? now : null;
+      await run(
+        `UPDATE battle_sessions
+         SET state = ?, tick = tick + ?, last_tick_at = ?, ended_at = COALESCE(ended_at, ?),
+             retreat_ticks_remaining = ?, result = ?, log_json = ?,
+             attacker_side_json = ?, defender_side_json = ?
+         WHERE id = ?`,
+        [
+          state,
+          processedTicks,
+          now,
+          endedAt,
+          retreatTicks,
+          result,
+          JSON.stringify(visible),
+          JSON.stringify(attackerUnits),
+          JSON.stringify(defenderUnits),
+          row.id
+        ]
+      );
+      if (state === "ended") {
+        await finishBattleSession({ ...row, state, result }, attackerUnits, defenderUnits, visible, result);
+      }
+      continue;
+    }
+
+    let revealIndex = Math.max(Number(row.reveal_index || visible.length || 0), visible.length);
+    let state = String(row.state || "active");
+    let retreatTicks = Number(row.retreat_ticks_remaining || 0);
+    let result = row.result || null;
+    for (let i = 0; i < elapsedTicks; i += 1) {
+      if (state === "retreating") {
+        retreatTicks = Math.max(0, retreatTicks - 1);
+        visible.push(`[후퇴 진행] 남은 틱 ${retreatTicks}`);
+        if (retreatTicks <= 0) {
+          state = "ended";
+          result = "retreat";
+          visible.push("[후퇴 성공] 함대가 전장을 이탈했습니다.");
+          break;
+        }
+      } else if (revealIndex < full.length) {
+        visible.push(full[revealIndex]);
+        revealIndex += 1;
+      } else {
+        state = "ended";
+        visible.push("[세션 종료] 전투 로그 동기화가 완료되었습니다.");
+        break;
+      }
+    }
+    const endedAt = state === "ended" ? now : null;
+    await run(
+      "UPDATE battle_sessions SET state = ?, tick = tick + ?, last_tick_at = ?, ended_at = COALESCE(ended_at, ?), retreat_ticks_remaining = ?, result = ?, log_json = ?, reveal_index = ? WHERE id = ?",
+      [state, elapsedTicks, now, endedAt, retreatTicks, result, JSON.stringify(visible), revealIndex, row.id]
+    );
+  }
+}
+
+async function getBattleSessionsForUser(userId) {
+  await processMissionQueueForUser(userId);
+  await processBattleSessionsForUser(userId);
+  const rows = await all(
+    `
+      SELECT *
+      FROM battle_sessions
+      WHERE attacker_user_id = ? OR defender_user_id = ?
+      ORDER BY id DESC
+      LIMIT 30
+    `,
+    [userId, userId]
+  );
+  return rows.map((row) => ({
+    id: Number(row.id),
+    missionId: row.mission_id ? Number(row.mission_id) : null,
+    attackerUserId: Number(row.attacker_user_id),
+    defenderUserId: row.defender_user_id ? Number(row.defender_user_id) : null,
+    targetType: row.target_type,
+    targetId: row.target_id ? Number(row.target_id) : null,
+    state: row.state,
+    tick: Number(row.tick || 0),
+    startedAt: Number(row.started_at || 0),
+    lastTickAt: Number(row.last_tick_at || 0),
+    endedAt: row.ended_at ? Number(row.ended_at) : null,
+    retreatSide: row.retreat_side || null,
+    retreatTicksRemaining: Number(row.retreat_ticks_remaining || 0),
+    result: row.result || null,
+    targetName: parseJsonObject(row.context_json).title || row.target_type,
+    log: (() => {
+      try {
+        return JSON.parse(row.log_json || "[]");
+      } catch (err) {
+        return [];
+      }
+    })()
+  }));
+}
+
 async function getBattleRecords(userId) {
   const rows = await all(
     `
@@ -3340,7 +5010,10 @@ async function deleteUserCompletely(userId) {
   try {
     await run("DELETE FROM incoming_alerts WHERE target_user_id = ? OR attacker_user_id = ?", [userId, userId]);
     await run("DELETE FROM missions WHERE user_id = ? OR target_user_id = ?", [userId, userId]);
+    await run("DELETE FROM battle_sessions WHERE attacker_user_id = ? OR defender_user_id = ?", [userId, userId]);
     await run("DELETE FROM battle_records WHERE user_id = ?", [userId]);
+    await run("DELETE FROM repair_jobs WHERE user_id = ?", [userId]);
+    await run("DELETE FROM ships WHERE user_id = ?", [userId]);
     await run("DELETE FROM production_queue WHERE user_id = ?", [userId]);
     await run("DELETE FROM owned_ships WHERE user_id = ?", [userId]);
     await run("DELETE FROM ship_designs WHERE user_id = ?", [userId]);
@@ -3440,21 +5113,10 @@ async function resolveMission(mission) {
 
     const attackerState = await getUpdatedResources(mission.user_id);
     const defenderState = await getUpdatedResources(targetUser.id);
-    const attackerSettings = await getUserSettings(mission.user_id);
     const loot = { metal: 0, fuel: 0 };
-    let capturedAdmiral = null;
-    let killedAdmiral = null;
     if (battle.result === "victory") {
       loot.metal = Math.min(Math.floor(defenderState.resources.metal * 0.2), 2000);
       loot.fuel = Math.min(Math.floor(defenderState.resources.fuel * 0.2), 1200);
-      const defenderAdmiral = await getAssignedAdmiral(targetUser.id);
-      if (defenderAdmiral) {
-        if (attackerSettings.admiralPolicy === "kill") {
-          killedAdmiral = defenderAdmiral;
-        } else if (attackerSettings.admiralPolicy === "capture" && Math.random() < 0.65) {
-          capturedAdmiral = defenderAdmiral;
-        }
-      }
     }
 
     await run("BEGIN TRANSACTION");
@@ -3466,18 +5128,6 @@ async function resolveMission(mission) {
         await run("UPDATE resources SET metal = metal + ?, fuel = fuel + ? WHERE user_id = ?", [loot.metal, loot.fuel, mission.user_id]);
         await run("UPDATE resources SET metal = MAX(0, metal - ?), fuel = MAX(0, fuel - ?) WHERE user_id = ?", [loot.metal, loot.fuel, targetUser.id]);
       }
-      if (capturedAdmiral) {
-        await run(
-          "UPDATE admirals SET user_id = ?, assigned = 0, status = 'active', dead_at = NULL, captured_from = ?, captured_at = ? WHERE id = ?",
-          [mission.user_id, targetUser.id, Date.now(), capturedAdmiral.id]
-        );
-      }
-      if (killedAdmiral) {
-        await run(
-          "UPDATE admirals SET assigned = 0, status = 'dead', dead_at = ? WHERE id = ? AND user_id = ?",
-          [Date.now(), killedAdmiral.id, targetUser.id]
-        );
-      }
       await run("COMMIT");
     } catch (err) {
       await run("ROLLBACK");
@@ -3487,11 +5137,6 @@ async function resolveMission(mission) {
     const log = [...battle.log];
     if (battle.result === "victory") {
       log.push(`\uc57d\ud0c8 \uc131\uacf5: \uae08\uc18d ${loot.metal}, \uc5f0\ub8cc ${loot.fuel}`);
-      if (capturedAdmiral) log.push(`\uc81c\ub3c5 \uc0dd\ud3ec: [${capturedAdmiral.rarity}] ${capturedAdmiral.name}`);
-      if (killedAdmiral) log.push(`\uc81c\ub3c5 \uc0ac\ub9dd: [${killedAdmiral.rarity}] ${killedAdmiral.name}`);
-      if (!capturedAdmiral && !killedAdmiral && attackerSettings.admiralPolicy === "release") {
-        log.push("\uc81c\ub3c5 \ucc98\ubd84 \uc815\ucc45: \uc0dd\ud3ec \uc5c6\uc774 \uc0b4\ub824\ub454 \ud6c4 \ud6c4\ud1f4.");
-      }
     } else {
       log.push("\uacf5\uaca9 \uc2e4\ud328: \uc57d\ud0c8\uc5d0 \uc2e4\ud328\ud588\uc2b5\ub2c8\ub2e4.");
     }
@@ -3503,6 +5148,8 @@ async function resolveMission(mission) {
       travelSeconds,
       log
     );
+    await addBattleSessionFromResult(mission, "base", targetUser.id, targetUser.id, battle, log.slice(battle.log.length));
+    await returnMissionShipsToReserve(mission.user_id, Number(mission.attacker_fleet_slot || 1));
     await addCommanderXp(mission.user_id, battle.result === "victory" ? 140 : 70);
     await addCommanderXp(targetUser.id, battle.result === "victory" ? 65 : 120);
     await addBattleRecord(
@@ -3540,6 +5187,13 @@ async function resolveMission(mission) {
         result: "failed",
         title: `${zone.name} \uc810\ub839`,
         log: ["[\ucd9c\uaca9 \ucde8\uc18c] \uc774\ubbf8 \ub0b4 \uc810\ub839\uc9c0\uc785\ub2c8\ub2e4."]
+      };
+    }
+    if (owner?.user_id && String(zone.zone_layer || "") === "outer") {
+      return {
+        result: "failed",
+        title: `${zone.name} \uc810\ub839`,
+        log: ["[\ucd9c\uaca9 \ucde8\uc18c] \uc678\uacfd \uc601\uc5ed\uc740 \ucd08\ubc18 \ubcf4\ud638 \uad6c\uc5ed\uc774\ub77c \ud0c8\ucde8\ud560 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4."]
       };
     }
 
@@ -3627,8 +5281,10 @@ async function resolveMission(mission) {
             log: [...battle.log, `[점령 실패] 식민지 상한(${city.bonuses.colonyCap})에 도달했습니다.`]
           };
         }
-        await run("DELETE FROM occupied_zones WHERE zone_id = ?", [zone.id]);
-        await run("INSERT INTO occupied_zones (user_id, zone_id, captured_at) VALUES (?, ?, ?)", [mission.user_id, zone.id, Date.now()]);
+        await run(
+          "UPDATE neutral_zones SET control_state = 'capturing', capture_progress = 0, capturing_user_id = ?, capture_started_at = ?, contested_until = 0 WHERE id = ?",
+          [mission.user_id, Date.now(), zone.id]
+        );
       }
       await run("COMMIT");
     } catch (err) {
@@ -3637,6 +5293,10 @@ async function resolveMission(mission) {
     }
 
     const log = [...battle.log];
+    if (battle.result === "victory") {
+      const captureSeconds = Number(balance.zoneCapture?.baseSeconds || 45) + Number(zone.level || 1) * Number(balance.zoneCapture?.perLevelSeconds || 45);
+      log.push(`[점령 진행] ${formatTravelTime(captureSeconds)} 동안 점령 게이지를 채웁니다.`);
+    }
     await addBattleRecord(
       mission.user_id,
       `${zone.name} ${owner ? "\ud0c8\ucde8" : "\uc810\ub839"}`,
@@ -3644,6 +5304,8 @@ async function resolveMission(mission) {
       travelSeconds,
       log
     );
+    await addBattleSessionFromResult(mission, "zone", zone.id, owner?.user_id || null, battle);
+    await returnMissionShipsToReserve(mission.user_id, Number(mission.attacker_fleet_slot || 1));
     await addCommanderXp(mission.user_id, battle.result === "victory" ? 120 : 60);
     if (owner) {
       await addCommanderXp(owner.user_id, battle.result === "victory" ? 60 : 100);
@@ -3704,6 +5366,11 @@ async function resolveMission(mission) {
       "INSERT INTO zone_garrisons (user_id, zone_id, ship_plan_json, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(user_id, zone_id) DO UPDATE SET ship_plan_json = excluded.ship_plan_json, updated_at = excluded.updated_at",
       [mission.user_id, zone.id, JSON.stringify(compactShips), Date.now()]
     );
+    await run(
+      "UPDATE ships SET status = 'garrison', zone_id = ?, fleet_slot = NULL, updated_at = ? WHERE user_id = ? AND status = 'mission' AND fleet_slot = ?",
+      [zone.id, Date.now(), mission.user_id, Number(mission.attacker_fleet_slot || 1)]
+    );
+    await syncOwnedShipsFromShips(mission.user_id);
 
     return {
       result: "success",
@@ -3734,11 +5401,22 @@ async function processMissionQueueForUser(userId) {
     if (!claim.changes) continue;
 
     try {
+      if (mission.mission_type === "pvp" || mission.mission_type === "zone") {
+        await createBattleSessionForMission({ ...mission, status: "resolving" });
+        await run(
+          "UPDATE missions SET status = 'combat', result = 'combat', log_json = ? WHERE id = ? AND status = 'resolving'",
+          [JSON.stringify(["[도착] 전투 세션이 시작되었습니다."]), mission.id]
+        );
+        continue;
+      }
       const resolved = await resolveMission(mission);
       await run(
         "UPDATE missions SET status = 'completed', result = ?, log_json = ? WHERE id = ? AND status = 'resolving'",
         [resolved.result, JSON.stringify(resolved.log || []), mission.id]
       );
+      if (mission.mission_type !== "garrison") {
+        await returnMissionShipsToReserve(userId, Number(mission.attacker_fleet_slot || 1));
+      }
       if ((mission.mission_type === "pvp" || mission.mission_type === "zone") && mission.target_user_id) {
         await run("UPDATE incoming_alerts SET status = 'resolved' WHERE mission_id = ?", [mission.id]);
       }
@@ -3810,9 +5488,9 @@ function fleetSpeed(fleet) {
   const weightedSpeed = SHIP_TYPES.reduce((sum, type) => {
     return sum + Number(fleet[type] || 0) * SHIPS[type].speed;
   }, 0) / count;
-  const sizePenalty = 1 + count / 80;
+  const sizePenalty = 1 + count / Number(balance.fleetSpeed.sizePenaltyDivisor || 80);
 
-  return Math.max(0.5, weightedSpeed / sizePenalty);
+  return Math.max(Number(balance.fleetSpeed.minimumSpeed || 0.5), weightedSpeed / sizePenalty);
 }
 
 function travelTimeSeconds(from, to, fleet, bonuses) {
@@ -3820,7 +5498,7 @@ function travelTimeSeconds(from, to, fleet, bonuses) {
   const dy = Number(from.y) - Number(to.y);
   const distance = Math.sqrt(dx * dx + dy * dy);
   const speed = fleetSpeed(fleet) * Number(bonuses?.movementMultiplier || 1);
-  return Math.max(10, Math.ceil((distance / Math.max(0.5, speed)) * 60));
+  return Math.max(10, Math.ceil((distance / Math.max(Number(balance.fleetSpeed.minimumSpeed || 0.5), speed)) * 60));
 }
 
 function formatTravelTime(seconds) {
@@ -3968,6 +5646,11 @@ function parseGarrison(zone) {
 function formatZone(row) {
   const garrison = parseGarrison(row);
   const garrisonFleet = garrisonToDesignFleet(garrison);
+  const layer = String(row.zone_layer || defaultZoneLayer(row.level));
+  const role = String(row.zone_role || defaultZoneRole(row.level, row.id));
+  const unlockAfterSeconds = Number(row.unlock_after_seconds || 0);
+  const remainingUnlockSeconds = Math.max(0, unlockAfterSeconds - gameElapsedSeconds());
+  const roleDef = zoneRoleDefinition(role);
 
   return {
     id: row.id,
@@ -3978,6 +5661,15 @@ function formatZone(row) {
     y: row.map_y,
     metalRate: row.metal_rate,
     fuelRate: row.fuel_rate,
+    layer,
+    layerLabel: zoneLayerLabel(layer),
+    role,
+    roleLabel: roleDef.label,
+    roleEffect: roleDef.effect,
+    roleIcon: roleDef.icon,
+    unlockAfterSeconds,
+    locked: remainingUnlockSeconds > 0,
+    remainingUnlockSeconds,
     faction: String(row.faction || "neutral"),
     isThirdEmpire: String(row.faction || "") === "third_empire",
     actualPower: Math.floor(designFleetPower(garrisonFleet)),
@@ -3986,7 +5678,12 @@ function formatZone(row) {
     ownerUsername: row.owner_username || null,
     ownerColor: row.owner_id ? ownerColorHex(row.owner_id) : null,
     occupied: Boolean(row.owner_id),
-    ownedByMe: Boolean(row.owned_by_me)
+    ownedByMe: Boolean(row.owned_by_me),
+    controlState: String(row.control_state || (row.owner_id ? "occupied" : "neutral")),
+    captureProgress: Number(row.capture_progress || 0),
+    capturingUserId: row.capturing_user_id ? Number(row.capturing_user_id) : null,
+    captureStartedAt: Number(row.capture_started_at || 0),
+    contestedUntil: Number(row.contested_until || 0)
   };
 }
 
@@ -4026,12 +5723,17 @@ app.post("/signup", async (req, res) => {
       [result.lastID, 6, 2, 0, 0, 0]
     );
 
-  await run(
-      "INSERT INTO research (user_id, resource_level, logistics_level, tactics_level) VALUES (?, 0, 0, 0)",
+    await run(
+      `
+        INSERT INTO research
+          (user_id, engine_level, weapon_level, armor_level, industry_level, tactics_level,
+           engineering_level, defense_level, energy_level, command_level, resource_level, logistics_level)
+        VALUES (?, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+      `,
       [result.lastID]
     );
     await run("INSERT INTO commander_progress (user_id, level, xp) VALUES (?, 1, 0)", [result.lastID]);
-    await run("INSERT INTO user_settings (user_id, admiral_policy) VALUES (?, 'capture')", [result.lastID]);
+    await run("INSERT INTO user_settings (user_id, admiral_policy) VALUES (?, 'none')", [result.lastID]);
     await run(
       "INSERT INTO city_buildings (user_id, shipyard_level, government_level, housing_level, research_lab_level, tactical_center_level) VALUES (?, 1, 1, 1, 1, 1)",
       [result.lastID]
@@ -4041,7 +5743,9 @@ app.post("/signup", async (req, res) => {
       [result.lastID, randomBaseCoordinate(), randomBaseCoordinate(), Date.now()]
     );
     await ensureStarterDesign(result.lastID);
+    await backfillShipsFromOwnedShips(result.lastID);
     await ensureFleetGroups(result.lastID);
+    await ensureLobbyProfile(result.lastID);
 
     return res.status(201).json({ message: "\ud68c\uc6d0\uac00\uc785 \uc644\ub8cc. \uc774\uc81c \ub85c\uadf8\uc778\ud558\uc138\uc694." });
   } catch (err) {
@@ -4081,6 +5785,491 @@ app.post("/login", async (req, res) => {
   } catch (err) {
     console.error(err);
     return res.status(500).json({ error: "\ub85c\uadf8\uc778 \ucc98\ub9ac \uc911 \uc624\ub958\uac00 \ubc1c\uc0dd\ud588\uc2b5\ub2c8\ub2e4." });
+  }
+});
+
+app.get("/lobby/profile", requireAuth, async (req, res) => {
+  try {
+    const profile = await getLobbyProfile(req.user.id);
+    const currentSession = await getCurrentSessionForUser(req.user.id);
+    const joinedRoomRow = await get(
+      `
+        SELECT r.*, u.username AS host_username
+        FROM rooms r
+        JOIN room_players rp ON rp.room_id = r.id
+        JOIN users u ON u.id = r.host_user_id
+        WHERE rp.user_id = ? AND r.status IN ('waiting', 'starting', 'in_game')
+        ORDER BY r.id DESC
+        LIMIT 1
+      `,
+      [req.user.id]
+    );
+    const joinedRoom = joinedRoomRow ? await formatRoom(joinedRoomRow, req.user.id) : null;
+    return res.json({ profile, currentSession, joinedRoom });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "로비 정보를 불러오는 중 오류가 발생했습니다." });
+  }
+});
+
+app.get("/lobby", requireAuth, async (req, res) => {
+  try {
+    const profile = await getLobbyProfile(req.user.id);
+    const rooms = await all(
+      `
+        SELECT r.*, u.username AS host_username
+        FROM rooms r
+        JOIN users u ON u.id = r.host_user_id
+        WHERE r.status IN ('waiting', 'starting', 'in_game')
+        ORDER BY r.id DESC
+        LIMIT 30
+      `
+    );
+    return res.json({
+      profile,
+      currentSession: await getCurrentSessionForUser(req.user.id),
+      rooms: await Promise.all(rooms.map((room) => formatRoom(room, req.user.id)))
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "로비를 불러오는 중 오류가 발생했습니다." });
+  }
+});
+
+app.get("/rooms", requireAuth, async (req, res) => {
+  try {
+    const rows = await all(
+      `
+        SELECT r.*, u.username AS host_username
+        FROM rooms r
+        JOIN users u ON u.id = r.host_user_id
+        WHERE r.status IN ('waiting', 'starting', 'in_game')
+        ORDER BY r.id DESC
+        LIMIT 50
+      `
+    );
+    return res.json({ rooms: await Promise.all(rows.map((row) => formatRoom(row, req.user.id))) });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "방 목록을 불러오는 중 오류가 발생했습니다." });
+  }
+});
+
+app.post("/rooms", requireAuth, async (req, res) => {
+  try {
+    const mode = String(req.body.mode || "solo") === "multi" ? "multi" : "solo";
+    const roomName = String(req.body.roomName || req.body.name || "").trim() || `${req.user.username}의 방`;
+    const maxPlayers = mode === "solo"
+      ? 1
+      : Math.min(8, Math.max(2, Number.parseInt(req.body.maxPlayers, 10) || 4));
+    const isPrivate = req.body.isPrivate ? 1 : 0;
+    const password = String(req.body.password || "");
+    const passwordHash = isPrivate && password ? await bcrypt.hash(password, 10) : null;
+    let inviteCode = makeInviteCode();
+    while (await get("SELECT id FROM rooms WHERE invite_code = ?", [inviteCode])) {
+      inviteCode = makeInviteCode();
+    }
+    const now = Date.now();
+    const created = await run(
+      `
+        INSERT INTO rooms
+          (room_name, host_user_id, max_players, is_private, password_hash, invite_code, mode, status, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'waiting', ?, ?)
+      `,
+      [roomName.slice(0, 40), req.user.id, maxPlayers, isPrivate, passwordHash, inviteCode, mode, now, now]
+    );
+    await run(
+      "INSERT INTO room_players (room_id, user_id, is_ready, is_host, joined_at) VALUES (?, ?, 1, 1, ?)",
+      [created.lastID, req.user.id, now]
+    );
+    const row = await get(
+      `
+        SELECT r.*, u.username AS host_username
+        FROM rooms r
+        JOIN users u ON u.id = r.host_user_id
+        WHERE r.id = ?
+      `,
+      [created.lastID]
+    );
+    return res.status(201).json({ message: "방을 만들었습니다.", room: await formatRoom(row, req.user.id) });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "방 생성 중 오류가 발생했습니다." });
+  }
+});
+
+app.get("/rooms/:id", requireAuth, async (req, res) => {
+  try {
+    const row = await get(
+      `
+        SELECT r.*, u.username AS host_username
+        FROM rooms r
+        JOIN users u ON u.id = r.host_user_id
+        WHERE r.id = ?
+      `,
+      [Number(req.params.id)]
+    );
+    if (!row) return res.status(404).json({ error: "방을 찾을 수 없습니다." });
+    return res.json({ room: await formatRoom(row, req.user.id) });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "방 정보를 불러오는 중 오류가 발생했습니다." });
+  }
+});
+
+app.post("/rooms/:id/join", requireAuth, async (req, res) => {
+  try {
+    const roomId = Number(req.params.id);
+    const room = await get("SELECT * FROM rooms WHERE id = ?", [roomId]);
+    if (!room) return res.status(404).json({ error: "방을 찾을 수 없습니다." });
+    if (room.status !== "waiting") return res.status(400).json({ error: "이미 시작된 방에는 참가할 수 없습니다." });
+    if (room.password_hash) {
+      const ok = await bcrypt.compare(String(req.body.password || ""), room.password_hash);
+      if (!ok) return res.status(401).json({ error: "방 비밀번호가 올바르지 않습니다." });
+    }
+    const count = await get("SELECT COUNT(*) AS count FROM room_players WHERE room_id = ?", [roomId]);
+    if (Number(count?.count || 0) >= Number(room.max_players || 1)) {
+      return res.status(400).json({ error: "방 정원이 가득 찼습니다." });
+    }
+    await run(
+      "INSERT OR IGNORE INTO room_players (room_id, user_id, is_ready, is_host, joined_at) VALUES (?, ?, 0, 0, ?)",
+      [roomId, req.user.id, Date.now()]
+    );
+    const row = await get(
+      `
+        SELECT r.*, u.username AS host_username
+        FROM rooms r
+        JOIN users u ON u.id = r.host_user_id
+        WHERE r.id = ?
+      `,
+      [roomId]
+    );
+    return res.json({ message: "방에 참가했습니다.", room: await formatRoom(row, req.user.id) });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "방 참가 중 오류가 발생했습니다." });
+  }
+});
+
+app.post("/rooms/join-code", requireAuth, async (req, res) => {
+  try {
+    const inviteCode = String(req.body.inviteCode || "").trim().toUpperCase();
+    const room = await get("SELECT * FROM rooms WHERE invite_code = ? AND status = 'waiting'", [inviteCode]);
+    if (!room) return res.status(404).json({ error: "초대 코드에 해당하는 대기 방이 없습니다." });
+    if (room.password_hash) {
+      const ok = await bcrypt.compare(String(req.body.password || ""), room.password_hash);
+      if (!ok) return res.status(401).json({ error: "방 비밀번호가 올바르지 않습니다." });
+    }
+    const count = await get("SELECT COUNT(*) AS count FROM room_players WHERE room_id = ?", [room.id]);
+    if (Number(count?.count || 0) >= Number(room.max_players || 1)) {
+      return res.status(400).json({ error: "방 정원이 가득 찼습니다." });
+    }
+    await run(
+      "INSERT OR IGNORE INTO room_players (room_id, user_id, is_ready, is_host, joined_at) VALUES (?, ?, 0, 0, ?)",
+      [room.id, req.user.id, Date.now()]
+    );
+    const row = await get(
+      `
+        SELECT r.*, u.username AS host_username
+        FROM rooms r
+        JOIN users u ON u.id = r.host_user_id
+        WHERE r.id = ?
+      `,
+      [room.id]
+    );
+    return res.json({ message: "초대 코드로 방에 참가했습니다.", room: await formatRoom(row, req.user.id) });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "초대 코드 참가 중 오류가 발생했습니다." });
+  }
+});
+
+app.post("/rooms/:id/leave", requireAuth, async (req, res) => {
+  try {
+    const roomId = Number(req.params.id);
+    const room = await get("SELECT * FROM rooms WHERE id = ?", [roomId]);
+    if (!room) return res.status(404).json({ error: "방을 찾을 수 없습니다." });
+    if (room.status === "in_game") return res.status(400).json({ error: "진행 중인 세션은 로비에서 나갈 수 없습니다." });
+    await run("DELETE FROM room_players WHERE room_id = ? AND user_id = ?", [roomId, req.user.id]);
+    const remaining = await all("SELECT * FROM room_players WHERE room_id = ? ORDER BY joined_at ASC", [roomId]);
+    if (!remaining.length) {
+      await run("UPDATE rooms SET status = 'ended', updated_at = ? WHERE id = ?", [Date.now(), roomId]);
+      return res.json({ message: "방을 나갔습니다.", room: null });
+    }
+    if (Number(room.host_user_id) === Number(req.user.id)) {
+      const nextHost = remaining[0];
+      await run("UPDATE room_players SET is_host = CASE WHEN user_id = ? THEN 1 ELSE 0 END WHERE room_id = ?", [nextHost.user_id, roomId]);
+      await run("UPDATE rooms SET host_user_id = ?, updated_at = ? WHERE id = ?", [nextHost.user_id, Date.now(), roomId]);
+    }
+    return res.json({ message: "방을 나갔습니다." });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "방 나가기 중 오류가 발생했습니다." });
+  }
+});
+
+app.post("/rooms/:id/ready", requireAuth, async (req, res) => {
+  try {
+    const roomId = Number(req.params.id);
+    const room = await get("SELECT * FROM rooms WHERE id = ?", [roomId]);
+    if (!room) return res.status(404).json({ error: "방을 찾을 수 없습니다." });
+    if (room.status !== "waiting") return res.status(400).json({ error: "대기 중인 방에서만 준비 상태를 바꿀 수 있습니다." });
+    const current = await get("SELECT is_ready FROM room_players WHERE room_id = ? AND user_id = ?", [roomId, req.user.id]);
+    if (!current) return res.status(403).json({ error: "참가 중인 방이 아닙니다." });
+    const nextReady = typeof req.body.isReady === "boolean" ? (req.body.isReady ? 1 : 0) : (current.is_ready ? 0 : 1);
+    await run("UPDATE room_players SET is_ready = ? WHERE room_id = ? AND user_id = ?", [nextReady, roomId, req.user.id]);
+    const row = await get(
+      `
+        SELECT r.*, u.username AS host_username
+        FROM rooms r
+        JOIN users u ON u.id = r.host_user_id
+        WHERE r.id = ?
+      `,
+      [roomId]
+    );
+    return res.json({ message: nextReady ? "준비 완료." : "준비를 해제했습니다.", room: await formatRoom(row, req.user.id) });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "준비 상태 변경 중 오류가 발생했습니다." });
+  }
+});
+
+app.post("/rooms/:id/start", requireAuth, async (req, res) => {
+  try {
+    const roomId = Number(req.params.id);
+    const room = await get("SELECT * FROM rooms WHERE id = ?", [roomId]);
+    if (!room) return res.status(404).json({ error: "방을 찾을 수 없습니다." });
+    if (Number(room.host_user_id) !== Number(req.user.id)) {
+      return res.status(403).json({ error: "방장만 세션을 시작할 수 있습니다." });
+    }
+    if (room.status === "in_game" && room.session_id) {
+      return res.json({ message: "이미 세션이 진행 중입니다.", session: await getCurrentSessionForUser(req.user.id) });
+    }
+    if (room.status !== "waiting") return res.status(400).json({ error: "대기 중인 방만 시작할 수 있습니다." });
+    const players = await all("SELECT * FROM room_players WHERE room_id = ? ORDER BY joined_at ASC", [roomId]);
+    if (!players.length) return res.status(400).json({ error: "참가자가 없습니다." });
+    if (room.mode === "multi" && players.length < 2) {
+      return res.status(400).json({ error: "멀티 방은 최소 2명 이상 필요합니다." });
+    }
+    const notReady = players.filter((player) => !player.is_host && !Number(player.is_ready || 0));
+    if (room.mode === "multi" && notReady.length > 0) {
+      return res.status(400).json({ error: "아직 준비하지 않은 참가자가 있습니다." });
+    }
+
+    await run("UPDATE rooms SET status = 'starting', updated_at = ? WHERE id = ?", [Date.now(), roomId]);
+    const created = await run(
+      "INSERT INTO sessions (room_id, mode, status, map_seed, started_at) VALUES (?, ?, 'active', ?, ?)",
+      [roomId, room.mode, `${room.invite_code}-${Date.now()}`, Date.now()]
+    );
+    for (const player of players) {
+      await ensureLobbyProfile(player.user_id);
+      await ensureBase(player.user_id);
+      await ensureStarterDesign(player.user_id);
+      await backfillShipsFromOwnedShips(player.user_id);
+      await ensureFleetGroups(player.user_id);
+      await run(
+        "INSERT OR IGNORE INTO session_players (session_id, user_id, is_eliminated, final_score, credit_reward) VALUES (?, ?, 0, 0, 0)",
+        [created.lastID, player.user_id]
+      );
+    }
+    await run("UPDATE rooms SET status = 'in_game', session_id = ?, updated_at = ? WHERE id = ?", [created.lastID, Date.now(), roomId]);
+    return res.json({
+      message: "세션을 시작했습니다.",
+      session: await getCurrentSessionForUser(req.user.id)
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "세션 시작 중 오류가 발생했습니다." });
+  }
+});
+
+app.get("/sessions/current", requireAuth, async (req, res) => {
+  try {
+    return res.json({ session: await getCurrentSessionForUser(req.user.id) });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "현재 세션 정보를 불러오는 중 오류가 발생했습니다." });
+  }
+});
+
+app.post("/sessions/:id/end", requireAuth, async (req, res) => {
+  try {
+    const sessionId = Number.parseInt(req.params.id, 10);
+    const summary = await finalizeSession(sessionId, req.user.id);
+    return res.json({
+      message: "세션 정산을 완료했습니다.",
+      summary,
+      profile: await getLobbyProfile(req.user.id)
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(err.status || 500).json({ error: err.message || "세션 종료 정산 중 오류가 발생했습니다." });
+  }
+});
+
+app.get("/sessions/:id/summary", requireAuth, async (req, res) => {
+  try {
+    const sessionId = Number.parseInt(req.params.id, 10);
+    const participant = await get("SELECT user_id FROM session_players WHERE session_id = ? AND user_id = ?", [sessionId, req.user.id]);
+    if (!participant) return res.status(403).json({ error: "참가한 세션 결과만 볼 수 있습니다." });
+    const summary = await getSessionSummary(sessionId);
+    if (!summary) return res.status(404).json({ error: "세션을 찾을 수 없습니다." });
+    return res.json({ summary });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "세션 결과를 불러오는 중 오류가 발생했습니다." });
+  }
+});
+
+app.get("/lobby/reward-logs", requireAuth, async (req, res) => {
+  try {
+    const rows = await all(
+      `
+        SELECT id, session_id, credit_reward, detail_json, created_at
+        FROM session_reward_logs
+        WHERE user_id = ?
+        ORDER BY id DESC
+        LIMIT 20
+      `,
+      [req.user.id]
+    );
+    return res.json({
+      logs: rows.map((row) => ({
+        id: row.id,
+        sessionId: row.session_id,
+        creditReward: Number(row.credit_reward || 0),
+        detail: parseJsonObject(row.detail_json),
+        createdAt: row.created_at
+      }))
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "보상 기록을 불러오는 중 오류가 발생했습니다." });
+  }
+});
+
+app.get("/lobby/admirals", requireAuth, async (req, res) => {
+  try {
+    return res.json(await getLobbyAdmiralsState(req.user.id));
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "로비 제독 정보를 불러오는 중 오류가 발생했습니다." });
+  }
+});
+
+app.post("/lobby/recruit-admiral", requireAuth, async (req, res) => {
+  try {
+    const recruitType = LOBBY_RECRUIT_TYPES[String(req.body.type || "normal")] ? String(req.body.type || "normal") : "normal";
+    const config = LOBBY_RECRUIT_TYPES[recruitType];
+    const profile = await getLobbyProfile(req.user.id);
+    if (Number(profile.credit || 0) < Number(config.costCredit || 0)) {
+      return res.status(400).json({ error: `크레딧이 부족합니다. 필요: ${config.costCredit}` });
+    }
+    const admiral = pickLobbyAdmiral(recruitType);
+    let admiralId = null;
+    await run("BEGIN TRANSACTION");
+    try {
+      await run("UPDATE lobby_profiles SET credit = credit - ?, updated_at = ? WHERE user_id = ?", [config.costCredit, Date.now(), req.user.id]);
+      const currentAssigned = await getAssignedAdmiral(req.user.id);
+      const inserted = await run(
+        `
+          INSERT INTO admirals
+            (user_id, name, rarity, combat_bonus, resource_bonus, cost_bonus, assigned, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+        [
+          req.user.id,
+          admiral.name,
+          admiral.rarity,
+          admiral.combatBonus,
+          admiral.resourceBonus,
+          admiral.costBonus,
+          currentAssigned ? 0 : 1,
+          Date.now()
+        ]
+      );
+      admiralId = inserted.lastID;
+      await run(
+        "INSERT INTO lobby_recruit_logs (user_id, recruit_type, admiral_id, cost_credit, created_at) VALUES (?, ?, ?, ?, ?)",
+        [req.user.id, recruitType, admiralId, config.costCredit, Date.now()]
+      );
+      const currentProfile = await get("SELECT featured_admiral_id, selected_session_admiral_id FROM lobby_profiles WHERE user_id = ?", [req.user.id]);
+      if (!currentProfile?.featured_admiral_id) {
+        await run("UPDATE lobby_profiles SET featured_admiral_id = ?, updated_at = ? WHERE user_id = ?", [admiralId, Date.now(), req.user.id]);
+      }
+      if (!currentProfile?.selected_session_admiral_id) {
+        await run("UPDATE lobby_profiles SET selected_session_admiral_id = ?, updated_at = ? WHERE user_id = ?", [admiralId, Date.now(), req.user.id]);
+      }
+      await run("COMMIT");
+    } catch (err) {
+      await run("ROLLBACK");
+      throw err;
+    }
+    return res.json({
+      message: `${config.name}: [${admiral.rarity}] ${admiral.name} 영입 완료.`,
+      recruited: { id: admiralId, ...admiral },
+      ...(await getLobbyAdmiralsState(req.user.id))
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "로비 제독 영입 중 오류가 발생했습니다." });
+  }
+});
+
+app.post("/lobby/select-featured-admiral", requireAuth, async (req, res) => {
+  try {
+    const admiralId = Number.parseInt(req.body.admiralId, 10);
+    const admiral = await get("SELECT id FROM admirals WHERE id = ? AND user_id = ? AND status = 'active'", [admiralId, req.user.id]);
+    if (!admiral) return res.status(404).json({ error: "대표로 지정할 제독을 찾을 수 없습니다." });
+    await ensureLobbyProfile(req.user.id);
+    await run("UPDATE lobby_profiles SET featured_admiral_id = ?, updated_at = ? WHERE user_id = ?", [admiralId, Date.now(), req.user.id]);
+    return res.json({ message: "대표 제독을 지정했습니다.", ...(await getLobbyAdmiralsState(req.user.id)) });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "대표 제독 지정 중 오류가 발생했습니다." });
+  }
+});
+
+app.post("/lobby/select-session-admiral", requireAuth, async (req, res) => {
+  try {
+    const admiralId = Number.parseInt(req.body.admiralId, 10);
+    const admiral = await get("SELECT id FROM admirals WHERE id = ? AND user_id = ? AND status = 'active'", [admiralId, req.user.id]);
+    if (!admiral) return res.status(404).json({ error: "다음 세션 제독을 찾을 수 없습니다." });
+    await ensureLobbyProfile(req.user.id);
+    await run("UPDATE lobby_profiles SET selected_session_admiral_id = ?, updated_at = ? WHERE user_id = ?", [admiralId, Date.now(), req.user.id]);
+    return res.json({ message: "다음 세션 제독을 지정했습니다.", ...(await getLobbyAdmiralsState(req.user.id)) });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "다음 세션 제독 지정 중 오류가 발생했습니다." });
+  }
+});
+
+app.get("/lobby/recruit-logs", requireAuth, async (req, res) => {
+  try {
+    const rows = await all(
+      `
+        SELECT l.id, l.recruit_type, l.cost_credit, l.created_at,
+               a.id AS admiral_id, a.name, a.rarity
+        FROM lobby_recruit_logs l
+        LEFT JOIN admirals a ON a.id = l.admiral_id
+        WHERE l.user_id = ?
+        ORDER BY l.id DESC
+        LIMIT 20
+      `,
+      [req.user.id]
+    );
+    return res.json({
+      logs: rows.map((row) => ({
+        id: row.id,
+        recruitType: row.recruit_type,
+        costCredit: Number(row.cost_credit || 0),
+        createdAt: row.created_at,
+        admiral: row.admiral_id ? { id: row.admiral_id, name: row.name, rarity: row.rarity } : null
+      }))
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "제독 영입 기록을 불러오는 중 오류가 발생했습니다." });
   }
 });
 
@@ -4125,7 +6314,7 @@ app.get("/fleet", requireAuth, async (req, res) => {
   }
 });
 
-app.get("/ships", (req, res) => {
+app.get("/legacy-ships", (req, res) => {
   return res.json({
     ships: SHIP_TYPES.map((type) => ({
       type,
@@ -4141,7 +6330,8 @@ app.get("/shipyard/options", requireAuth, async (req, res) => {
   try {
     const research = await getResearch(req.user.id);
     const hulls = await all("SELECT * FROM hulls ORDER BY id");
-    const components = await all("SELECT * FROM components ORDER BY category, id");
+    const rawComponents = await all("SELECT * FROM components ORDER BY category, id");
+    const components = toVisibleComponents(rawComponents);
 
     return res.json({
       hulls: hulls.map((hull) => {
@@ -4158,22 +6348,28 @@ app.get("/shipyard/options", requireAuth, async (req, res) => {
         metalCost: hull.metal_cost,
         fuelCost: hull.fuel_cost,
         slots: {
-          engine: Number(hull.slot_engine || 1),
-          weapon: Number(hull.slot_weapon || 1),
-          defense: Number(hull.slot_defense || 1),
-          utility: Number(hull.slot_utility || 1)
+          engine: Number(hull.slot_engine ?? 1),
+          weapon: Number(hull.slot_weapon ?? 1),
+          defense: Number(hull.slot_defense ?? 1),
+          utility: Number(hull.slot_utility ?? 0)
         },
         unlocked: isUnlockedByResearch(requirement, research),
-        unlockRequirement: requirement
+        unlockRequirement: requirement,
+        unlockRequirementText: formatRequirementText(requirement)
       });
       }),
       components: components.map((component) => {
         const requirement = componentUnlockRequirement(component);
+        const familyKey = componentFamilyKey(component);
+        const mk = componentMkByPower(Number(component.power_cost || 0), component.key);
         return ({
         id: component.id,
         key: component.key,
-        name: component.name,
+        name: component.display_name || component.name,
         category: component.category,
+        familyKey: component.family_key || familyKey,
+        familyName: component.family_name || componentFamilyName(familyKey),
+        mk: Number(component.mk || mk),
         hpBonus: component.hp_bonus,
         attackBonus: component.attack_bonus,
         defenseBonus: component.defense_bonus,
@@ -4184,10 +6380,11 @@ app.get("/shipyard/options", requireAuth, async (req, res) => {
         fuelCost: component.fuel_cost,
         techRequirement: component.tech_requirement,
         unlocked: isUnlockedByResearch(requirement, research),
-        unlockRequirement: requirement
+        unlockRequirement: requirement,
+        unlockRequirementText: formatRequirementText(requirement)
       });
       }),
-      unlockSummary: buildUnlockSummary(research, hulls, components)
+      unlockSummary: buildUnlockSummary(research, hulls, rawComponents)
     });
   } catch (err) {
     console.error(err);
@@ -4337,7 +6534,7 @@ app.delete("/designs/:id", requireAuth, async (req, res) => {
     if (inQueue) {
       return res.status(400).json({ error: "\uc0dd\uc0b0 \uc911\uc778 \uc124\uacc4\uc548\uc740 \uc0ad\uc81c\ud560 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4." });
     }
-    const owned = await get("SELECT quantity FROM owned_ships WHERE user_id = ? AND design_id = ?", [req.user.id, designId]);
+    const owned = await get("SELECT COUNT(*) AS quantity FROM ships WHERE user_id = ? AND design_id = ? AND status != 'destroyed'", [req.user.id, designId]);
     if (Number(owned?.quantity || 0) > 0) {
       return res.status(400).json({ error: "보유 함선이 있는 설계안은 삭제할 수 없습니다. 함선을 먼저 소모하거나 다른 설계로 전환하세요." });
     }
@@ -4554,6 +6751,100 @@ app.get("/owned-ships", requireAuth, async (req, res) => {
   }
 });
 
+app.get("/ships", requireAuth, async (req, res) => {
+  try {
+    await processMissionQueueForUser(req.user.id);
+    return res.json({ ships: await getShips(req.user.id), ownedShips: await getOwnedShips(req.user.id) });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "함선 상태 조회 중 오류가 발생했습니다." });
+  }
+});
+
+app.get("/repairs", requireAuth, async (req, res) => {
+  try {
+    await processRepairJobs(req.user.id);
+    const rows = await all(
+      `
+        SELECT r.*, s.current_hp, s.max_hp, s.damage_state, d.name AS design_name
+        FROM repair_jobs r
+        JOIN ships s ON s.id = r.ship_id
+        JOIN ship_designs d ON d.id = s.design_id
+        WHERE r.user_id = ?
+        ORDER BY r.id DESC
+        LIMIT 50
+      `,
+      [req.user.id]
+    );
+    return res.json({
+      jobs: rows.map((row) => ({
+        id: Number(row.id),
+        shipId: Number(row.ship_id),
+        designName: row.design_name,
+        status: row.status,
+        startTime: Number(row.start_time || 0),
+        lastProcessedAt: Number(row.last_processed_at || 0),
+        currentHp: Number(row.current_hp || 0),
+        maxHp: Number(row.max_hp || 0),
+        damageState: row.damage_state,
+        damageStateLabel: damageStateLabel(row.damage_state)
+      })),
+      ships: await getShips(req.user.id)
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "수리 목록 조회 중 오류가 발생했습니다." });
+  }
+});
+
+app.post("/repairs", requireAuth, async (req, res) => {
+  try {
+    await processRepairJobs(req.user.id);
+    const shipId = Number.parseInt(req.body.shipId, 10);
+    const ship = await get("SELECT * FROM ships WHERE id = ? AND user_id = ?", [shipId, req.user.id]);
+    if (!ship || ship.status === "destroyed") return res.status(404).json({ error: "수리할 함선을 찾을 수 없습니다." });
+    if (Number(ship.current_hp || 0) >= Number(ship.max_hp || 0)) return res.status(400).json({ error: "이미 완전 수리된 함선입니다." });
+    if (!["reserve", "repairing"].includes(String(ship.status || ""))) return res.status(400).json({ error: "대기 중인 함선만 수리할 수 있습니다." });
+    const existing = await get("SELECT id FROM repair_jobs WHERE ship_id = ? AND user_id = ? AND status = 'repairing'", [shipId, req.user.id]);
+    if (existing) return res.status(400).json({ error: "이미 수리 중인 함선입니다." });
+    const now = Date.now();
+    await run("BEGIN TRANSACTION");
+    try {
+      await run("UPDATE ships SET status = 'repairing', updated_at = ? WHERE id = ?", [now, shipId]);
+      await run("INSERT INTO repair_jobs (user_id, ship_id, start_time, last_processed_at, status) VALUES (?, ?, ?, ?, 'repairing')", [req.user.id, shipId, now, now]);
+      await run("COMMIT");
+    } catch (err) {
+      await run("ROLLBACK");
+      throw err;
+    }
+    return res.status(201).json({ message: "수리를 시작했습니다.", jobs: (await getShips(req.user.id)).filter((item) => item.status === "repairing") });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "수리 시작 중 오류가 발생했습니다." });
+  }
+});
+
+app.post("/repairs/:id/cancel", requireAuth, async (req, res) => {
+  try {
+    const id = Number.parseInt(req.params.id, 10);
+    const job = await get("SELECT * FROM repair_jobs WHERE id = ? AND user_id = ? AND status IN ('repairing', 'paused')", [id, req.user.id]);
+    if (!job) return res.status(404).json({ error: "취소할 수리 작업을 찾을 수 없습니다." });
+    await run("BEGIN TRANSACTION");
+    try {
+      await run("UPDATE repair_jobs SET status = 'cancelled' WHERE id = ?", [id]);
+      await run("UPDATE ships SET status = 'reserve', updated_at = ? WHERE id = ? AND user_id = ?", [Date.now(), job.ship_id, req.user.id]);
+      await run("COMMIT");
+    } catch (err) {
+      await run("ROLLBACK");
+      throw err;
+    }
+    return res.json({ message: "수리를 취소했습니다.", ships: await getShips(req.user.id) });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "수리 취소 중 오류가 발생했습니다." });
+  }
+});
+
 app.get("/base", requireAuth, async (req, res) => {
   try {
     const base = await ensureBase(req.user.id);
@@ -4645,6 +6936,12 @@ app.get("/zones", requireAuth, async (req, res) => {
         label: "제3제국",
         strongholds: thirdEmpireCount
       },
+      gameFlow: {
+        elapsedSeconds: gameElapsedSeconds(),
+        coreUnlockAfterSeconds: CORE_UNLOCK_AFTER_SECONDS,
+        targetEndSeconds: GAME_TARGET_END_SECONDS,
+        coreUnlocked: gameElapsedSeconds() >= CORE_UNLOCK_AFTER_SECONDS
+      },
       mapConfig: { maxX: MAP_MAX_X, maxY: MAP_MAX_Y, distanceUnit: MAP_DISTANCE_UNIT }
     });
   } catch (err) {
@@ -4656,6 +6953,7 @@ app.get("/zones", requireAuth, async (req, res) => {
 app.get("/map", requireAuth, async (req, res) => {
   try {
     await processMissionQueueForUser(req.user.id);
+    await processZoneCaptures();
     const rows = await all(
       `
         SELECT z.*,
@@ -4720,10 +7018,47 @@ app.get("/map", requireAuth, async (req, res) => {
         // ignore bad garrison rows
       }
     }
+    const allZoneGarrisonRows = await all(
+      `
+        SELECT s.zone_id, s.design_id, COUNT(*) AS quantity,
+               d.name, d.final_hp, d.final_attack, d.final_defense, d.final_speed,
+               h.class_type
+        FROM ships s
+        JOIN ship_designs d ON d.id = s.design_id
+        JOIN hulls h ON h.id = d.hull_id
+        WHERE s.status = 'garrison' AND s.zone_id IS NOT NULL
+        GROUP BY s.zone_id, s.design_id
+      `
+    );
+    const allZoneGarrisonMap = new Map();
+    for (const row of allZoneGarrisonRows) {
+      const zoneId = Number(row.zone_id);
+      const current = allZoneGarrisonMap.get(zoneId) || { fleet: [], legacy: { corvette: 0, destroyer: 0, cruiser: 0, battleship: 0, carrier: 0 } };
+      const quantity = Number(row.quantity || 0);
+      current.fleet.push({
+        designId: Number(row.design_id),
+        name: row.name,
+        quantity,
+        finalHp: Number(row.final_hp || 0),
+        finalAttack: Number(row.final_attack || 0),
+        finalDefense: Number(row.final_defense || 0),
+        finalSpeed: Number(row.final_speed || 0)
+      });
+      const classType = String(row.class_type || "");
+      if (Object.prototype.hasOwnProperty.call(current.legacy, classType)) {
+        current.legacy[classType] += quantity;
+      }
+      allZoneGarrisonMap.set(zoneId, current);
+    }
     return res.json({
       base,
       zones: rows.map((row) => {
         const item = formatZone(row);
+        if (allZoneGarrisonMap.has(Number(item.id))) {
+          const zoneGarrison = allZoneGarrisonMap.get(Number(item.id));
+          item.actualPower = Math.floor(designFleetPower(zoneGarrison.fleet));
+          item.garrison = zoneGarrison.legacy;
+        }
         if (item.ownedByMe && myZoneGarrisonMap.has(Number(item.id))) {
           const myGarrison = myZoneGarrisonMap.get(Number(item.id));
           item.actualPower = Number(myGarrison.totalPower || item.actualPower || 0);
@@ -4737,6 +7072,12 @@ app.get("/map", requireAuth, async (req, res) => {
         label: "제3제국",
         strongholds: thirdEmpireCount,
         message: "제3제국 거점을 공격하면 PvP 외에도 성장 루트를 확보할 수 있습니다."
+      },
+      gameFlow: {
+        elapsedSeconds: gameElapsedSeconds(),
+        coreUnlockAfterSeconds: CORE_UNLOCK_AFTER_SECONDS,
+        targetEndSeconds: GAME_TARGET_END_SECONDS,
+        coreUnlocked: gameElapsedSeconds() >= CORE_UNLOCK_AFTER_SECONDS
       },
       players,
       activeMissions: await getActiveMissions(req.user.id),
@@ -4898,6 +7239,7 @@ app.post("/zones/:id/garrison/dispatch", requireAuth, async (req, res) => {
         launch.admiral?.id || null
       ]
     );
+    await markFleetSlotShipsForMission(req.user.id, slot);
 
     return res.json({
       message: `${zone.name} \uc8fc\ub454 \ucd9c\ubc1c. \uc608\uc0c1 \uc774\ub3d9 ${travelSeconds}\ucd08`,
@@ -4977,9 +7319,7 @@ app.get("/garrison/overview", requireAuth, async (req, res) => {
           };
         })
         .filter((item) => item && Number(item.quantity || 0) > 0);
-      const power = Math.floor(assigned.reduce((sum, item) => {
-        return sum + Number(item.quantity || 0) * (Number(item.finalAttack || 0) + Number(item.finalDefense || 0) * 0.45 + Number(item.finalHp || 0) * 0.12);
-      }, 0));
+      const power = Math.floor(designFleetPower(assigned));
       return {
         zoneId: Number(zone.id),
         zoneName: zone.name,
@@ -5033,7 +7373,7 @@ app.get("/research", requireAuth, async (req, res) => {
     const bonuses = await getPlayerBonuses(req.user.id);
     const city = bonuses.city;
     const hulls = await all("SELECT key, name FROM hulls ORDER BY id");
-    const components = await all("SELECT category, name, power_cost FROM components ORDER BY id");
+    const components = await all("SELECT key, category, name, power_cost FROM components ORDER BY id");
 
     return res.json({
       research: formatResearchState(research),
@@ -5052,9 +7392,24 @@ app.get("/research", requireAuth, async (req, res) => {
   }
 });
 
+app.get("/research/unlocks", requireAuth, async (req, res) => {
+  try {
+    const research = await getResearch(req.user.id);
+    const hulls = await all("SELECT * FROM hulls ORDER BY id ASC");
+    const components = await all("SELECT * FROM components ORDER BY category ASC, id ASC");
+    return res.json({
+      tracks: formatResearchState(research),
+      unlockSummary: buildUnlockSummary(research, hulls, components)
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "연구 해금 목록 조회 중 오류가 발생했습니다." });
+  }
+});
+
 app.post("/research/:type/upgrade", requireAuth, async (req, res) => {
   try {
-    const type = String(req.params.type || "");
+    const type = normalizeResearchTrack(req.params.type);
     if (!RESEARCH[type]) {
       return res.status(400).json({ error: "\uc5f0\uad6c\ud560 \uc218 \uc5c6\ub294 \ud56d\ubaa9\uc785\ub2c8\ub2e4." });
     }
@@ -5090,7 +7445,7 @@ app.post("/research/:type/upgrade", requireAuth, async (req, res) => {
     const nextState = await getUpdatedResources(req.user.id);
     const bonuses = await getPlayerBonuses(req.user.id);
     const hulls = await all("SELECT key, name FROM hulls ORDER BY id");
-    const components = await all("SELECT category, name, power_cost FROM components ORDER BY id");
+    const components = await all("SELECT key, category, name, power_cost FROM components ORDER BY id");
 
     return res.json({
       message: `${RESEARCH[type].name} Lv.${nextResearch[type]} \uc5f0\uad6c \uc644\ub8cc.`,
@@ -5118,14 +7473,17 @@ app.post("/research/:type/upgrade", requireAuth, async (req, res) => {
 app.get("/tech-tree", requireAuth, async (req, res) => {
   try {
     const tree = await getTechTreeState(req.user.id);
+    const hulls = await all("SELECT key, name FROM hulls ORDER BY id");
+    const components = await all("SELECT key, category, name, power_cost FROM components ORDER BY id");
+    const unlockSummary = buildUnlockSummary(tree.research, hulls, components);
     const bonuses = await getPlayerBonuses(req.user.id);
     const settings = bonuses.settings || await getUserSettings(req.user.id);
     return res.json({
-      mode: "tech_tree",
+      mode: "research_tracks",
       labLevel: tree.labLevel,
-      labTierUnlocked: tree.labTierUnlocked,
+      tracks: tree.tracks,
+      unlockSummary,
       activeResearch: tree.activeResearch,
-      nodes: tree.nodes,
       policies: {
         source: "government+strategic",
         governmentLevel: Number(bonuses.city?.levels?.government || 1),
@@ -5151,45 +7509,40 @@ app.get("/tech-tree", requireAuth, async (req, res) => {
 
 app.post("/tech-tree/:key/start", requireAuth, async (req, res) => {
   try {
-    const key = String(req.params.key || "").trim();
-    const node = await get("SELECT * FROM tech_nodes WHERE key = ?", [key]);
-    if (!node) return res.status(404).json({ error: "\uae30\uc220 \ub178\ub4dc\ub97c \ucc3e\uc744 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4." });
-
-    const tree = await getTechTreeState(req.user.id);
-    if (tree.activeResearch) {
+    const type = normalizeResearchTrack(req.params.key);
+    if (!RESEARCH[type]) {
+      return res.status(400).json({ error: "\uc5f0\uad6c \ud56d\ubaa9\uc774 \uc798\ubabb\ub418\uc5c8\uc2b5\ub2c8\ub2e4." });
+    }
+    const research = await getResearch(req.user.id);
+    const city = await getCityState(req.user.id);
+    const cap = Math.max(1, Number(city?.bonuses?.researchCap || 10));
+    const currentLevel = Number(research[type] || 0);
+    if (currentLevel >= cap) {
+      return res.status(400).json({ error: `\uc5f0\uad6c \uc0c1\ud55c(Lv.${cap})\uc5d0 \ub3c4\ub2ec\ud588\uc2b5\ub2c8\ub2e4.` });
+    }
+    const queue = await get(
+      "SELECT id FROM tech_queue WHERE user_id = ? AND status = 'researching' ORDER BY id DESC LIMIT 1",
+      [req.user.id]
+    );
+    if (queue) {
       return res.status(400).json({ error: "\uc774\ubbf8 \uc9c4\ud589 \uc911\uc778 \uc5f0\uad6c\uac00 \uc788\uc2b5\ub2c8\ub2e4." });
     }
-    if (Number(tree.labLevel || 1) < Number(node.tier || 1)) {
-      return res.status(400).json({ error: `\uc5f0\uad6c\uc18c Lv.${Number(node.tier || 1)} \uc774\uc0c1\uc5d0\uc11c\ub9cc \uc2dc\uc791 \uac00\ub2a5\ud569\ub2c8\ub2e4.` });
-    }
-    if ((tree.researchedKeys || []).includes(key)) {
-      return res.status(400).json({ error: "\uc774\ubbf8 \uc644\ub8cc\ub41c \uae30\uc220\uc785\ub2c8\ub2e4." });
-    }
-    const requires = (() => {
-      try {
-        const parsed = JSON.parse(node.requires_json || "[]");
-        return Array.isArray(parsed) ? parsed.map((v) => String(v)) : [];
-      } catch (err) {
-        return [];
-      }
-    })();
-    if (!requires.every((reqKey) => (tree.researchedKeys || []).includes(reqKey))) {
-      return res.status(400).json({ error: "\uc120\ud589 \uae30\uc220\uc774 \ucda9\uc871\ub418\uc9c0 \uc54a\uc558\uc2b5\ub2c8\ub2e4." });
-    }
-    const cost = { metal: Number(node.metal_cost || 0), fuel: Number(node.fuel_cost || 0) };
+    const nextLevel = currentLevel + 1;
+    const cost = researchCost(type, currentLevel);
+    const durationSeconds = researchDurationSeconds(type, currentLevel);
     const state = await getUpdatedResources(req.user.id);
     if (Number(state.resources.metal || 0) < cost.metal || Number(state.resources.fuel || 0) < cost.fuel) {
       return res.status(400).json({ error: `\uc790\uc6d0\uc774 \ubd80\uc871\ud569\ub2c8\ub2e4. \ud544\uc694: \uae08\uc18d ${cost.metal}, \uc5f0\ub8cc ${cost.fuel}` });
     }
 
     const now = Date.now();
-    const end = now + (Math.max(30, Number(node.research_time || 60)) * 1000);
+    const end = now + (Math.max(30, durationSeconds) * 1000);
     await run("BEGIN TRANSACTION");
     try {
       await run("UPDATE resources SET metal = metal - ?, fuel = fuel - ? WHERE user_id = ?", [cost.metal, cost.fuel, req.user.id]);
       await run(
         "INSERT INTO tech_queue (user_id, tech_key, start_time, end_time, status) VALUES (?, ?, ?, ?, 'researching')",
-        [req.user.id, key, now, end]
+        [req.user.id, buildResearchQueueKey(type, nextLevel), now, end]
       );
       await run("COMMIT");
     } catch (err) {
@@ -5198,16 +7551,19 @@ app.post("/tech-tree/:key/start", requireAuth, async (req, res) => {
     }
 
     const treeAfter = await getTechTreeState(req.user.id);
+    const hulls = await all("SELECT key, name FROM hulls ORDER BY id");
+    const components = await all("SELECT key, category, name, power_cost FROM components ORDER BY id");
+    const unlockSummary = buildUnlockSummary(treeAfter.research, hulls, components);
     const nextState = await getUpdatedResources(req.user.id);
     const bonuses = await getPlayerBonuses(req.user.id);
     const settings = bonuses.settings || await getUserSettings(req.user.id);
     return res.json({
-      message: `${node.name} \uc5f0\uad6c\ub97c \uc2dc\uc791\ud588\uc2b5\ub2c8\ub2e4.`,
-      mode: "tech_tree",
+      message: `${RESEARCH[type].name} Lv.${nextLevel} \uc5f0\uad6c\ub97c \uc2dc\uc791\ud588\uc2b5\ub2c8\ub2e4.`,
+      mode: "research_tracks",
       labLevel: treeAfter.labLevel,
-      labTierUnlocked: treeAfter.labTierUnlocked,
+      tracks: treeAfter.tracks,
+      unlockSummary,
       activeResearch: treeAfter.activeResearch,
-      nodes: treeAfter.nodes,
       resources: {
         metal: nextState.resources.metal,
         fuel: nextState.resources.fuel,
@@ -5277,16 +7633,19 @@ app.post("/tech-tree/speedup", requireAuth, async (req, res) => {
     }
 
     const tree = await getTechTreeState(req.user.id);
+    const hulls = await all("SELECT key, name FROM hulls ORDER BY id");
+    const components = await all("SELECT key, category, name, power_cost FROM components ORDER BY id");
+    const unlockSummary = buildUnlockSummary(tree.research, hulls, components);
     const bonuses = await getPlayerBonuses(req.user.id);
     const settings = bonuses.settings || await getUserSettings(req.user.id);
     const nextState = await getUpdatedResources(req.user.id);
     return res.json({
       message: `${resourceType} ${amount} 사용: 연구 ${speed.reducedSeconds}초 단축 (현재 1초=${speed.resourcePerSecond} 재화)`,
-      mode: "tech_tree",
+      mode: "research_tracks",
       labLevel: tree.labLevel,
-      labTierUnlocked: tree.labTierUnlocked,
+      tracks: tree.tracks,
+      unlockSummary,
       activeResearch: tree.activeResearch,
-      nodes: tree.nodes,
       resources: {
         metal: nextState.resources.metal,
         fuel: nextState.resources.fuel,
@@ -5373,6 +7732,12 @@ app.get("/fleet-groups", requireAuth, async (req, res) => {
   try {
     const groups = await getFleetGroups(req.user.id);
     const ownedShips = await getOwnedShips(req.user.id);
+    const availableById = new Map();
+    for (const group of groups) {
+      for (const ship of Array.isArray(group.availableShips) ? group.availableShips : []) {
+        availableById.set(Number(ship.shipId), ship);
+      }
+    }
     const admirals = await all(
       "SELECT id, name, rarity, status, combat_bonus AS combatBonus, resource_bonus AS resourceBonus, cost_bonus AS costBonus FROM admirals WHERE user_id = ? ORDER BY assigned DESC, id DESC",
       [req.user.id]
@@ -5381,6 +7746,7 @@ app.get("/fleet-groups", requireAuth, async (req, res) => {
     return res.json({
       groups,
       ownedShips,
+      availableShips: Array.from(availableById.values()),
       admirals,
       commander: bonuses.commander,
       fleetSlotLimit: bonuses.city?.bonuses?.fleetSlotLimit || 3
@@ -5403,8 +7769,40 @@ app.put("/fleet-groups/:slot", requireAuth, async (req, res) => {
     }
     await ensureFleetGroups(req.user.id);
     const name = String(req.body.name || `함대 ${slot}`).trim().slice(0, 24) || `함대 ${slot}`;
-    const ships = normalizeShipPlan(req.body.ships);
-    const ownedShips = await all("SELECT design_id, quantity FROM owned_ships WHERE user_id = ?", [req.user.id]);
+    const individualShips = normalizeIndividualShipPlan(req.body.ships);
+    const ships = individualShips.length ? individualShips : normalizeShipPlan(req.body.ships);
+    if (individualShips.length) {
+      const ids = individualShips.map((item) => item.shipId);
+      const placeholders = ids.map(() => "?").join(",");
+      const rows = await all(
+        `
+          SELECT id, status, fleet_slot
+          FROM ships
+          WHERE user_id = ? AND id IN (${placeholders})
+        `,
+        [req.user.id, ...ids]
+      );
+      if (rows.length !== ids.length) {
+        return res.status(400).json({ error: "보유하지 않은 함선이 포함되어 있습니다." });
+      }
+      for (const row of rows) {
+        const status = String(row.status || "");
+        const sameSlot = status === "fleet" && Number(row.fleet_slot || 0) === slot;
+        if (status !== "reserve" && !sameSlot) {
+          return res.status(400).json({ error: `#${row.id} 함선은 현재 ${status} 상태라 편성할 수 없습니다.` });
+        }
+      }
+    }
+    if (!individualShips.length) {
+    const ownedShips = await all(
+      `
+        SELECT design_id, COUNT(*) AS quantity
+        FROM ships
+        WHERE user_id = ? AND status IN ('reserve', 'fleet') AND (status = 'reserve' OR fleet_slot = ?)
+        GROUP BY design_id
+      `,
+      [req.user.id, slot]
+    );
     const ownedMap = new Map();
     for (const row of ownedShips) {
       ownedMap.set(Number(row.design_id), Number(row.quantity || 0));
@@ -5444,6 +7842,7 @@ app.put("/fleet-groups/:slot", requireAuth, async (req, res) => {
         });
       }
     }
+    }
 
     let admiralId = req.body.admiralId == null ? null : Number.parseInt(req.body.admiralId, 10);
     if (!Number.isInteger(admiralId)) admiralId = null;
@@ -5459,6 +7858,7 @@ app.put("/fleet-groups/:slot", requireAuth, async (req, res) => {
       "INSERT INTO fleet_groups (user_id, slot_index, name, admiral_id, ship_plan_json) VALUES (?, ?, ?, ?, ?) ON CONFLICT(user_id, slot_index) DO UPDATE SET name = excluded.name, admiral_id = excluded.admiral_id, ship_plan_json = excluded.ship_plan_json",
       [req.user.id, slot, name, admiralId, JSON.stringify(ships)]
     );
+    await assignFleetSlotShips(req.user.id, slot, ships);
     const groups = await getFleetGroups(req.user.id);
     const saved = groups.find((item) => Number(item.slot) === slot);
     return res.json({
@@ -5592,41 +7992,7 @@ app.post("/admirals/:id/assign", requireAuth, async (req, res) => {
 });
 
 app.post("/admirals/:id/revive", requireAuth, async (req, res) => {
-  try {
-    const admiralId = Number.parseInt(req.params.id, 10);
-    const admiral = await get("SELECT id, status FROM admirals WHERE id = ? AND user_id = ?", [admiralId, req.user.id]);
-    if (!admiral) {
-      return res.status(404).json({ error: "제독을 찾을 수 없습니다." });
-    }
-    if (admiral.status !== "dead") {
-      return res.status(400).json({ error: "부활 가능한 상태의 제독이 아닙니다." });
-    }
-
-    const reviveCost = { metal: 1200, fuel: 700 };
-    const state = await getUpdatedResources(req.user.id);
-    if (state.resources.metal < reviveCost.metal || state.resources.fuel < reviveCost.fuel) {
-      return res.status(400).json({ error: `부활 자원이 부족합니다. 필요: 금속 ${reviveCost.metal}, 연료 ${reviveCost.fuel}` });
-    }
-
-    await run("BEGIN TRANSACTION");
-    try {
-      await run("UPDATE resources SET metal = metal - ?, fuel = fuel - ? WHERE user_id = ?", [reviveCost.metal, reviveCost.fuel, req.user.id]);
-      await run("UPDATE admirals SET status = 'active', dead_at = NULL WHERE id = ? AND user_id = ?", [admiralId, req.user.id]);
-      await run("COMMIT");
-    } catch (err) {
-      await run("ROLLBACK");
-      throw err;
-    }
-
-    const admirals = await all(
-      "SELECT id, name, rarity, combat_bonus AS combatBonus, resource_bonus AS resourceBonus, cost_bonus AS costBonus, assigned, status, dead_at AS deadAt FROM admirals WHERE user_id = ? ORDER BY assigned DESC, status ASC, id DESC",
-      [req.user.id]
-    );
-    return res.json({ message: "제독을 부활시켰습니다.", admirals });
-  } catch (err) {
-    console.error(err);
-    return res.status(500).json({ error: "제독 부활 중 오류가 발생했습니다." });
-  }
+  return res.status(410).json({ error: "제독 사망/부활 시스템은 제거되었습니다." });
 });
 
 app.post("/admirals/:id/exile", requireAuth, async (req, res) => {
@@ -5717,7 +8083,7 @@ app.post("/policies", requireAuth, async (req, res) => {
     await run(
       `
         INSERT INTO user_settings (user_id, admiral_policy, economy_policy, industry_policy, military_policy, policy_locked_until)
-        VALUES (?, 'capture', ?, ?, ?, ?)
+        VALUES (?, 'none', ?, ?, ?, ?)
         ON CONFLICT(user_id) DO UPDATE SET
           economy_policy = excluded.economy_policy,
           industry_policy = excluded.industry_policy,
@@ -5746,29 +8112,11 @@ app.post("/policies", requireAuth, async (req, res) => {
 });
 
 app.get("/admiral-policy", requireAuth, async (req, res) => {
-  try {
-    return res.json(await getUserSettings(req.user.id));
-  } catch (err) {
-    console.error(err);
-    return res.status(500).json({ error: "제독 정책 조회 중 오류가 발생했습니다." });
-  }
+  return res.status(410).json({ error: "제독 생포/사망/방면 정책은 제거되었습니다." });
 });
 
 app.post("/admiral-policy", requireAuth, async (req, res) => {
-  try {
-    const policy = String(req.body.policy || "").trim().toLowerCase();
-    if (!["capture", "kill", "release"].includes(policy)) {
-      return res.status(400).json({ error: "정책은 capture / kill / release 중 하나여야 합니다." });
-    }
-    await run(
-      "INSERT INTO user_settings (user_id, admiral_policy) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET admiral_policy = excluded.admiral_policy",
-      [req.user.id, policy]
-    );
-    return res.json({ message: "제독 전투 정책을 변경했습니다.", settings: await getUserSettings(req.user.id) });
-  } catch (err) {
-    console.error(err);
-    return res.status(500).json({ error: "제독 정책 저장 중 오류가 발생했습니다." });
-  }
+  return res.status(410).json({ error: "제독 생포/사망/방면 정책은 제거되었습니다." });
 });
 
 app.get("/players", requireAuth, async (req, res) => {
@@ -5895,10 +8243,10 @@ app.post("/trade/ships", requireAuth, async (req, res) => {
     }
     const owned = await get(
       `
-        SELECT os.quantity, d.name AS design_name
-        FROM owned_ships os
-        JOIN ship_designs d ON d.id = os.design_id
-        WHERE os.user_id = ? AND os.design_id = ?
+        SELECT COUNT(s.id) AS quantity, d.name AS design_name
+        FROM ships s
+        JOIN ship_designs d ON d.id = s.design_id
+        WHERE s.user_id = ? AND s.design_id = ? AND s.status = 'reserve'
       `,
       [req.user.id, designId]
     );
@@ -5913,12 +8261,15 @@ app.post("/trade/ships", requireAuth, async (req, res) => {
 
     await run("BEGIN TRANSACTION");
     try {
-      await run("UPDATE owned_ships SET quantity = quantity - ? WHERE user_id = ? AND design_id = ?", [quantity, req.user.id, designId]);
-      await run(
-        "INSERT INTO owned_ships (user_id, design_id, quantity) VALUES (?, ?, ?) ON CONFLICT(user_id, design_id) DO UPDATE SET quantity = owned_ships.quantity + excluded.quantity",
-        [toUserId, designId, quantity]
+      const transferShips = await all(
+        "SELECT id FROM ships WHERE user_id = ? AND design_id = ? AND status = 'reserve' ORDER BY id ASC LIMIT ?",
+        [req.user.id, designId, quantity]
       );
-      await run("DELETE FROM owned_ships WHERE user_id = ? AND design_id = ? AND quantity <= 0", [req.user.id, designId]);
+      for (const ship of transferShips) {
+        await run("UPDATE ships SET user_id = ?, status = 'reserve', fleet_slot = NULL, zone_id = NULL, updated_at = ? WHERE id = ?", [toUserId, Date.now(), ship.id]);
+      }
+      await syncOwnedShipsFromShips(req.user.id);
+      await syncOwnedShipsFromShips(toUserId);
       await run(
         "INSERT INTO ship_trade_logs (from_user_id, to_user_id, design_id, design_name, quantity, created_at) VALUES (?, ?, ?, ?, ?, ?)",
         [req.user.id, toUserId, designId, String(owned.design_name || "설계안"), quantity, Date.now()]
@@ -6010,6 +8361,7 @@ app.post("/missions/:id/cancel", requireAuth, async (req, res) => {
     const mission = await get("SELECT * FROM missions WHERE id = ? AND user_id = ? AND status = 'traveling'", [id, req.user.id]);
     if (!mission) return res.status(404).json({ error: "\ucde8\uc18c\ud560 \uc784\ubb34\ub97c \ucc3e\uc744 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4." });
     await run("UPDATE missions SET status = 'failed', result = 'cancelled', log_json = ? WHERE id = ?", [JSON.stringify(["[\uc784\ubb34 \ucde8\uc18c] \uc720\uc800\uac00 \ucd9c\uaca9\uc744 \ucde8\uc18c\ud588\uc2b5\ub2c8\ub2e4."]), id]);
+    await returnMissionShipsToReserve(req.user.id, Number(mission.attacker_fleet_slot || 1));
     if ((mission.mission_type === "pvp" || mission.mission_type === "zone") && mission.target_user_id) {
       await run("UPDATE incoming_alerts SET status = 'cancelled' WHERE mission_id = ?", [id]);
     }
@@ -6065,6 +8417,7 @@ app.post("/missions/:id/speedup", requireAuth, async (req, res) => {
 app.get("/battle-records", requireAuth, async (req, res) => {
   try {
     await processMissionQueueForUser(req.user.id);
+    await processBattleSessionsForUser(req.user.id);
     return res.json({ records: await getBattleRecords(req.user.id) });
   } catch (err) {
     console.error(err);
@@ -6072,9 +8425,49 @@ app.get("/battle-records", requireAuth, async (req, res) => {
   }
 });
 
+app.get("/battle-sessions", requireAuth, async (req, res) => {
+  try {
+    return res.json({ sessions: await getBattleSessionsForUser(req.user.id) });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "전투 세션 조회 중 오류가 발생했습니다." });
+  }
+});
+
+app.post("/battle-sessions/:id/retreat", requireAuth, async (req, res) => {
+  try {
+    const id = Number.parseInt(req.params.id, 10);
+    const session = await get(
+      "SELECT * FROM battle_sessions WHERE id = ? AND attacker_user_id = ? AND state IN ('active', 'retreating')",
+      [id, req.user.id]
+    );
+    if (!session) return res.status(404).json({ error: "후퇴 가능한 전투 세션을 찾을 수 없습니다." });
+    const logs = (() => {
+      try {
+        return JSON.parse(session.log_json || "[]");
+      } catch (err) {
+        return [];
+      }
+    })();
+    if (String(session.state || "") === "retreating") {
+      return res.json({ message: "이미 후퇴 중입니다.", sessions: await getBattleSessionsForUser(req.user.id) });
+    }
+    logs.push("[후퇴 명령] 함대가 후퇴 준비에 들어갔습니다.");
+    await run(
+      "UPDATE battle_sessions SET state = 'retreating', retreat_side = 'attacker', retreat_ticks_remaining = ?, log_json = ? WHERE id = ?",
+      [Number(balance.combatLoop?.retreatDelayTicks || 2), JSON.stringify(logs), id]
+    );
+    return res.json({ message: "후퇴 명령을 내렸습니다.", sessions: await getBattleSessionsForUser(req.user.id) });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "후퇴 처리 중 오류가 발생했습니다." });
+  }
+});
+
 app.delete("/battle-records", requireAuth, async (req, res) => {
   try {
     await run("DELETE FROM battle_records WHERE user_id = ?", [req.user.id]);
+    await run("DELETE FROM battle_sessions WHERE attacker_user_id = ? OR defender_user_id = ?", [req.user.id, req.user.id]);
     return res.json({ message: "전투기록을 초기화했습니다.", records: [] });
   } catch (err) {
     console.error(err);
@@ -6154,6 +8547,7 @@ app.post("/pvp/attack", requireAuth, async (req, res) => {
         launch.admiral?.id || null
       ]
     );
+    await markFleetSlotShipsForMission(req.user.id, launch.slot);
     await run(
       `
         INSERT INTO incoming_alerts
@@ -6219,6 +8613,11 @@ app.post("/zones/:id/capture", requireAuth, async (req, res) => {
     if (!zone) {
       return res.status(404).json({ error: "\uc911\ub9bd \uad6c\uc5ed\uc744 \ucc3e\uc744 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4." });
     }
+    const unlockAfterSeconds = Number(zone.unlock_after_seconds || 0);
+    const remainingUnlockSeconds = Math.max(0, unlockAfterSeconds - gameElapsedSeconds());
+    if (remainingUnlockSeconds > 0) {
+      return res.status(400).json({ error: `중앙 구역은 ${formatTravelTime(remainingUnlockSeconds)} 후 개방됩니다.` });
+    }
 
     const owner = await get(
       `
@@ -6231,6 +8630,9 @@ app.post("/zones/:id/capture", requireAuth, async (req, res) => {
     );
     if (owner?.user_id === req.user.id) {
       return res.status(400).json({ error: "\uc774\ubbf8 \uc810\ub839\ud55c \uad6c\uc5ed\uc785\ub2c8\ub2e4." });
+    }
+    if (owner?.user_id && String(zone.zone_layer || "") === "outer") {
+      return res.status(400).json({ error: "외곽 영역은 초반 보호 구역이라 다른 플레이어가 탈취할 수 없습니다." });
     }
     const city = playerBonuses.city;
     const occupiedCount = await get("SELECT COUNT(*) AS cnt FROM occupied_zones WHERE user_id = ?", [req.user.id]);
@@ -6289,6 +8691,7 @@ app.post("/zones/:id/capture", requireAuth, async (req, res) => {
         launch.admiral?.id || null
       ]
     );
+    await markFleetSlotShipsForMission(req.user.id, launch.slot);
     if (owner?.user_id) {
       const attackerPower = Math.floor(designFleetPower(fleet) * playerBonuses.combatMultiplier * (1 + Number(launch.admiral?.combatBonus || 0) * 0.9));
       const attackerShipCount = fleet.reduce((sum, ship) => sum + Number(ship.quantity || 0), 0);
@@ -6372,11 +8775,23 @@ app.post("/admin/users/:id/reset", requireAuth, requireAdmin, async (req, res) =
     try {
       await run("UPDATE resources SET metal = 1000, fuel = 500, last_update = ? WHERE user_id = ?", [Date.now(), userId]);
       await run("UPDATE commander_progress SET level = 1, xp = 0 WHERE user_id = ?", [userId]);
-      await run("UPDATE research SET resource_level = 0, logistics_level = 0, tactics_level = 0 WHERE user_id = ?", [userId]);
+      await run(
+        `
+          UPDATE research
+          SET engine_level = 0, weapon_level = 0, armor_level = 0, industry_level = 0, tactics_level = 0,
+              engineering_level = 0, defense_level = 0, energy_level = 0, command_level = 0,
+              resource_level = 0, logistics_level = 0
+          WHERE user_id = ?
+        `,
+        [userId]
+      );
       await run("DELETE FROM production_queue WHERE user_id = ?", [userId]);
       await run("DELETE FROM owned_ships WHERE user_id = ?", [userId]);
+      await run("DELETE FROM repair_jobs WHERE user_id = ?", [userId]);
+      await run("DELETE FROM ships WHERE user_id = ?", [userId]);
       await run("DELETE FROM ship_designs WHERE user_id = ?", [userId]);
       await run("DELETE FROM battle_records WHERE user_id = ?", [userId]);
+      await run("DELETE FROM battle_sessions WHERE attacker_user_id = ? OR defender_user_id = ?", [userId, userId]);
       await run("DELETE FROM missions WHERE user_id = ? OR target_user_id = ?", [userId, userId]);
       await run("DELETE FROM incoming_alerts WHERE target_user_id = ? OR attacker_user_id = ?", [userId, userId]);
       await run("DELETE FROM speedup_usage WHERE user_id = ?", [userId]);
@@ -6387,6 +8802,7 @@ app.post("/admin/users/:id/reset", requireAuth, requireAdmin, async (req, res) =
       await run("DELETE FROM ship_trade_logs WHERE from_user_id = ? OR to_user_id = ?", [userId, userId]);
       await run("DELETE FROM admirals WHERE user_id = ?", [userId]);
       await ensureStarterDesign(userId);
+      await backfillShipsFromOwnedShips(userId);
       await run(
         "INSERT OR IGNORE INTO city_buildings (user_id, shipyard_level, government_level, housing_level, research_lab_level, tactical_center_level) VALUES (?, 1, 1, 1, 1, 1)",
         [userId]

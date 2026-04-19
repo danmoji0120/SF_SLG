@@ -95,6 +95,10 @@ body:has(#gamePanel:not(.hidden)) {
   overflow: hidden;
 }
 
+body:has(#lobbyPanel:not(.hidden)) {
+  overflow: auto;
+}
+
 .panel,
 .card {
   background: rgba(10, 17, 24, 0.82);
@@ -121,6 +125,72 @@ body:has(#gamePanel:not(.hidden)) {
   transform-origin: top left;
   width: calc(100% / var(--ui-scale));
   height: calc(100% / var(--ui-scale));
+}
+
+.lobby-panel {
+  width: min(1180px, calc(100vw - 32px));
+  margin: 0 auto;
+}
+
+.lobby-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 18px;
+}
+
+.lobby-credit-card {
+  min-width: 180px;
+  padding: 14px;
+  background: rgba(15, 118, 110, 0.2);
+  border: 1px solid rgba(32, 163, 151, 0.45);
+  border-radius: 8px;
+  text-align: right;
+}
+
+.lobby-credit-card span,
+.lobby-credit-card strong {
+  display: block;
+}
+
+.lobby-credit-card strong {
+  margin-top: 4px;
+  color: #f2d36b;
+  font-size: 28px;
+}
+
+.lobby-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.lobby-grid .card,
+.lobby-room-card {
+  padding: 16px;
+}
+
+.lobby-main-card {
+  border-color: rgba(242, 211, 107, 0.4);
+}
+
+.lobby-room-card {
+  margin-top: 14px;
+}
+
+.inline-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 12px;
+}
+
+.inline-check input {
+  width: auto;
+  min-height: 0;
+  margin: 0;
 }
 
 #gamePanel .topbar {
@@ -320,14 +390,16 @@ body:has(#gamePanel:not(.hidden)) {
 .tab-nav {
   position: fixed;
   left: 50%;
-  bottom: 14px;
+  bottom: 10px;
   z-index: 50;
-  display: grid;
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  overflow-x: auto;
   width: min(760px, calc(100vw - 28px));
-  grid-template-columns: repeat(auto-fit, minmax(84px, 1fr));
-  gap: 8px;
+  gap: 6px;
   margin: 0;
-  padding: 6px;
+  padding: 4px 6px;
   transform: translateX(-50%);
   background: rgba(8, 13, 17, 0.88);
   border: 1px solid rgba(155, 183, 201, 0.28);
@@ -337,6 +409,10 @@ body:has(#gamePanel:not(.hidden)) {
 }
 
 .tab-button {
+  flex: 0 0 auto;
+  min-height: 30px;
+  padding: 4px 10px;
+  font-size: 13px;
   background: transparent;
   border-color: transparent;
 }
@@ -385,7 +461,7 @@ body:has(#gamePanel:not(.hidden)) {
   left: 14px;
   right: 14px;
   top: 112px;
-  bottom: 92px;
+  bottom: 64px;
   z-index: 30;
   overflow: auto;
   padding: 0;
@@ -402,7 +478,7 @@ body:has(#gamePanel:not(.hidden)) {
   left: 10px;
   right: 10px;
   top: 104px;
-  bottom: 84px;
+  bottom: 64px;
   overflow: hidden;
 }
 
@@ -422,6 +498,9 @@ body:has(#gamePanel:not(.hidden)) {
   flex-direction: column;
   gap: 10px;
   height: 100%;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 8px;
 }
 
 #gamePanel .research-panel .tech-graph-viewport {
@@ -663,10 +742,11 @@ body:has(#gamePanel:not(.hidden)) {
   position: absolute;
   inset: 0;
   background-image:
+    radial-gradient(circle at 50% 50%, transparent 0 13%, rgba(197, 156, 255, 0.28) 13.2% 13.7%, transparent 14% 32%, rgba(242, 211, 107, 0.22) 32.2% 32.7%, transparent 33% 43%, rgba(157, 231, 217, 0.18) 43.2% 43.7%, transparent 44%),
     radial-gradient(circle, rgba(245, 247, 251, 0.7) 1px, transparent 1px),
     linear-gradient(rgba(129, 199, 189, 0.07) 1px, transparent 1px),
     linear-gradient(90deg, rgba(129, 199, 189, 0.07) 1px, transparent 1px);
-  background-size: 37px 37px, 72px 72px, 72px 72px;
+  background-size: 100% 100%, 37px 37px, 72px 72px, 72px 72px;
   opacity: 0.42;
   pointer-events: none;
 }
@@ -787,6 +867,35 @@ body:has(#gamePanel:not(.hidden)) {
 
 .map-node.level-5 {
   background: #c59cff;
+}
+
+.map-node.layer-outer {
+  border-color: #9de7d9;
+}
+
+.map-node.layer-mid {
+  border-color: #f2d36b;
+}
+
+.map-node.layer-core {
+  width: 42px;
+  height: 42px;
+  min-height: 42px;
+  border-color: #f5f7fb;
+  box-shadow: 0 0 0 10px rgba(197, 156, 255, 0.12), 0 0 34px rgba(197, 156, 255, 0.48);
+}
+
+.map-node.role-production span,
+.map-node.role-mobility span,
+.map-node.role-combat span,
+.map-node.role-titan_core span,
+.map-node.role-command_hub span {
+  letter-spacing: 0;
+}
+
+.map-node.locked {
+  filter: grayscale(0.7) brightness(0.7);
+  border-style: dashed;
 }
 
 .map-node.occupied {
@@ -1202,7 +1311,8 @@ body:has(#gamePanel:not(.hidden)) {
 .research-tree-card #researchView {
   height: 100%;
   max-height: none;
-  overflow: hidden;
+  min-height: 0;
+  overflow: auto;
   padding-right: 0;
 }
 
@@ -1294,6 +1404,25 @@ body:has(#gamePanel:not(.hidden)) {
 
 .growth-item button {
   flex: 0 0 auto;
+}
+
+.unlock-family-group {
+  margin-bottom: 8px;
+  padding: 6px 8px;
+  background: rgba(17, 25, 34, 0.7);
+  border: 1px solid #3b5364;
+  border-radius: 8px;
+}
+
+.unlock-family-title {
+  margin-bottom: 4px;
+  color: #9de7d9;
+  font-weight: 700;
+}
+
+.unlock-family-item {
+  padding: 2px 0;
+  font-size: 13px;
 }
 
 .fleet-builder {
@@ -1463,6 +1592,19 @@ pre {
     padding: 18px;
   }
 
+  .lobby-header {
+    flex-direction: column;
+  }
+
+  .lobby-credit-card {
+    width: 100%;
+    text-align: left;
+  }
+
+  .lobby-grid {
+    grid-template-columns: 1fr;
+  }
+
   .grid,
   .research-grid,
   .cost-list,
@@ -1538,7 +1680,8 @@ pre {
 
   .tab-nav {
     bottom: 10px;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    width: calc(100vw - 20px);
+    justify-content: flex-start;
   }
 
   .tech-graph-toolbar {
@@ -1557,14 +1700,14 @@ pre {
 
   #gamePanel .tab-panel:not(.map-panel) {
     top: 178px;
-    bottom: 132px;
+    bottom: 84px;
     left: 10px;
     right: 10px;
   }
 
   #gamePanel .research-panel {
     top: 170px;
-    bottom: 124px;
+    bottom: 84px;
     left: 8px;
     right: 8px;
   }

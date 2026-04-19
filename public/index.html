@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="ko">
 <head>
   <meta charset="UTF-8">
@@ -25,6 +25,100 @@
       </div>
     </section>
 
+    <section class="panel hidden lobby-panel" id="lobbyPanel">
+      <header class="lobby-header">
+        <div>
+          <p class="eyebrow">LOBBY</p>
+          <h1 id="lobbyCommanderName">Commander Lobby</h1>
+          <p class="lead">Create or join a room, then start a session.</p>
+        </div>
+        <div class="lobby-credit-card">
+          <span>Credits</span>
+          <strong id="lobbyCreditView">0</strong>
+        </div>
+      </header>
+
+      <div class="lobby-grid">
+        <article class="card lobby-main-card">
+          <h3>Quick Start</h3>
+          <p>Create a solo session and enter the war map.</p>
+          <button id="quickStartButton" type="button" class="primary">Quick Start</button>
+          <button id="enterCurrentSessionButton" type="button" class="hidden">Enter Active Session</button>
+          <div id="lobbySessionView" class="hint"></div>
+        </article>
+
+        <article class="card">
+          <h3>Lobby Status</h3>
+          <div id="lobbyProfileView" class="growth-list"></div>
+        </article>
+
+        <article class="card">
+          <h3>Create Room</h3>
+          <label for="roomNameInput">Room Name</label>
+          <input id="roomNameInput" type="text" maxlength="40" placeholder="Outer Ring">
+          <label for="roomModeSelect">Mode</label>
+          <select id="roomModeSelect">
+            <option value="solo">Solo</option>
+            <option value="multi">Multi</option>
+          </select>
+          <label for="roomMaxPlayersInput">Max Players</label>
+          <input id="roomMaxPlayersInput" type="number" min="2" max="8" value="4">
+          <label class="inline-check"><input id="roomPrivateInput" type="checkbox"> Private Room</label>
+          <label for="roomPasswordInput">Password</label>
+          <input id="roomPasswordInput" type="password" placeholder="Optional">
+          <button id="createRoomButton" type="button" class="primary">Create Room</button>
+        </article>
+
+        <article class="card">
+          <h3>Invite Code</h3>
+          <label for="inviteCodeInput">Code</label>
+          <input id="inviteCodeInput" type="text" maxlength="12" placeholder="ABC123">
+          <label for="invitePasswordInput">Password</label>
+          <input id="invitePasswordInput" type="password" placeholder="If needed">
+          <button id="joinInviteButton" type="button">Join by Code</button>
+        </article>
+      </div>
+
+      <section class="card lobby-room-card">
+        <div class="panel-head">
+          <div>
+            <h3>Rooms</h3>
+            <p class="hint">Join a waiting room, ready up, then start the session.</p>
+          </div>
+          <button id="refreshLobbyButton" type="button">Refresh</button>
+        </div>
+        <div id="currentRoomView" class="growth-list"></div>
+        <div id="roomListView" class="growth-list"></div>
+      </section>
+
+      <section class="card lobby-room-card">
+        <div class="panel-head">
+          <div>
+            <h3>Session Result</h3>
+            <p class="hint">Recent settlement and credit rewards.</p>
+          </div>
+        </div>
+        <div id="sessionSummaryView" class="growth-list"></div>
+        <div id="lobbyRewardLogView" class="growth-list"></div>
+      </section>
+
+      <section class="card lobby-room-card">
+        <div class="panel-head">
+          <div>
+            <h3>Lobby Admirals</h3>
+            <p class="hint">Spend credits to recruit admirals and choose lobby/session leaders.</p>
+          </div>
+          <div class="button-row">
+            <button id="lobbyRecruitNormalButton" type="button">Normal Recruit</button>
+            <button id="lobbyRecruitPremiumButton" type="button" class="primary">Premium Recruit</button>
+          </div>
+        </div>
+        <div id="lobbyRecruitInfoView" class="growth-list"></div>
+        <div id="lobbyAdmiralView" class="growth-list"></div>
+        <div id="lobbyRecruitLogView" class="growth-list"></div>
+      </section>
+    </section>
+
     <section class="panel hidden" id="gamePanel">
       <div class="topbar draggable-window" id="topbarWindow">
         <div>
@@ -39,6 +133,7 @@
         <button id="refreshFleetButton" type="button">&#54632;&#45824; &#51312;&#54924;</button>
         <button id="refreshZonesButton" type="button">&#51473;&#47549; &#44396;&#50669;</button>
         <button id="battleButton" type="button" class="primary">&#51204;&#53804;&#44592;&#47197;</button>
+        <button id="endSessionButton" type="button">End Session</button>
       </div>
 
       <section id="floatingHud" class="floating-hud draggable-window">
@@ -171,6 +266,15 @@
                 </select>
               </div>
               <div>
+                <label for="zoneLayerFilter">&#50689;&#50669;</label>
+                <select id="zoneLayerFilter">
+                  <option value="">&#51204;&#52404;</option>
+                  <option value="outer">&#50808;&#44285;</option>
+                  <option value="mid">&#51473;&#44036;</option>
+                  <option value="core">&#51473;&#50521;</option>
+                </select>
+              </div>
+              <div>
                 <label for="zoneOwnerFilter">&#49548;&#50976;</label>
                 <select id="zoneOwnerFilter">
                   <option value="">&#51204;&#52404;</option>
@@ -266,6 +370,7 @@
             </div>
             <div id="productionQueueView" class="growth-list"></div>
             <div id="ownedShipsView" class="growth-list"></div>
+            <div id="repairView" class="growth-list"></div>
           </article>
         </section>
 
@@ -300,14 +405,6 @@
           <article class="card">
             <h3>&#51228;&#46021;</h3>
             <p class="hint">&#51228;&#46021; &#50689;&#51077; &#48708;&#50857;: &#44552;&#49549; 600, &#50672;&#47308; 300</p>
-            <div class="speedup-controls">
-              <select id="admiralPolicySelect">
-                <option value="capture">&#49373;&#54252; &#50976;&#51648;</option>
-                <option value="kill">&#49324;&#49345; &#52376;&#47532;</option>
-                <option value="release">&#49332;&#47140;&#46160;&#44592;</option>
-              </select>
-              <button id="saveAdmiralPolicyButton" type="button">&#51221;&#52293; &#51200;&#51109;</button>
-            </div>
             <button id="drawAdmiralButton" type="button" class="primary">&#51228;&#46021; &#50689;&#51077;</button>
             <div id="admiralView" class="growth-list">&#48372;&#50976; &#51228;&#46021;&#51060; &#50630;&#49845;&#45768;&#45796;.</div>
           </article>
@@ -366,6 +463,7 @@
           <div class="button-row">
             <button id="resetBattleRecordsButton" type="button">&#44592;&#47197; &#52488;&#44592;&#54868;</button>
           </div>
+          <div id="battleSessionsView" class="growth-list"></div>
           <pre id="battleLog">&#50500;&#51649; &#51204;&#53804; &#44592;&#47197;&#51060; &#50630;&#49845;&#45768;&#45796;.</pre>
         </article>
       </section>
@@ -384,6 +482,6 @@
     </section>
   </main>
 
-  <script src="/app.js?v=18"></script>
+  <script src="/app.js?v=20"></script>
 </body>
 </html>

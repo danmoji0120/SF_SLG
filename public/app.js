@@ -20,12 +20,14 @@ const MAP_WIDTH = 8000;
 const MAP_HEIGHT = 5333;
 let mapZoom = 0.7;
 let mapConfig = { maxX: 2000, maxY: 2000, distanceUnit: 20 };
+let gameFlowState = { elapsedSeconds: 0, coreUnlockAfterSeconds: 10800, targetEndSeconds: 18000, coreUnlocked: false };
 let shipyardOptions = { hulls: [], components: [] };
 let shipDesigns = [];
 let zoneSearchOpen = false;
 let activeRouteTimer = null;
 let activeMissions = [];
 let missionPoller = null;
+let battleSessionPoller = null;
 let productionQueueState = [];
 let productionTickTimer = null;
 let productionSyncTimer = null;
@@ -51,134 +53,192 @@ let researchCategoryFilter = "all";
 let researchExpandedKeys = new Set();
 let researchHubState = null;
 let researchTickTimer = null;
-let techGraphView = { scale: 1, x: 40, y: 40 };
+let filteredUnlocked = [];
+let filteredLocked = [];
+let lobbyState = { profile: null, rooms: [], joinedRoom: null, currentSession: null };
+let lobbyAdmiralState = { admirals: [], recruitTypes: [], logs: [] };
+
+// Groups research unlock rows by hull/module family.
+function groupUnlockItems(items, includeRequirement) {
+  const source = Array.isArray(items) ? items : [];
+  const categoryLabel = { hull: "\ud568\uae09", engine: "\uc5d4\uc9c4", weapon: "\ubb34\uae30", defense: "\ubc29\uc5b4", utility: "\ubcf4\uc870", other: "\uae30\ud0c0" };
+  const map = new Map();
+  for (const item of source) {
+    const type = String(item?.type || item?.category || "other").toLowerCase();
+    const label = type === "hull" ? "\ud568\uae09" : String(item?.familyName || categoryLabel[type] || categoryLabel.other).trim();
+    const key = type === "hull" ? `hull:${String(item?.name || "")}` : `${type}:${label}`;
+    if (!map.has(key)) map.set(key, { label, items: [] });
+    map.get(key).items.push(item);
+  }
+  const groups = Array.from(map.values())
+    .map((group) => ({ label: group.label, items: group.items.slice().sort((a, b) => Number(a?.mk ?? 0) - Number(b?.mk ?? 0)) }))
+    .sort((a, b) => a.label.localeCompare(b.label, "ko"));
+  if (!groups.length) return "<div>\uc5c6\uc74c</div>";
+  return groups.map((group) => `
+    <div class="unlock-family-group">
+      <div class="unlock-family-title">${group.label}</div>
+      ${group.items.map((item) => `
+        <div class="unlock-family-item">${item.name}${includeRequirement ? ` - ${item.requirement || ""}` : ""}</div>
+      `).join("")}
+    </div>
+  `).join("");
+}
+
 
 const elements = {
+  admiralView: document.getElementById("admiralView"),
   authPanel: document.getElementById("authPanel"),
-  gamePanel: document.getElementById("gamePanel"),
-  usernameInput: document.getElementById("usernameInput"),
-  passwordInput: document.getElementById("passwordInput"),
-  signupButton: document.getElementById("signupButton"),
-  loginButton: document.getElementById("loginButton"),
-  logoutButton: document.getElementById("logoutButton"),
-  refreshResourcesButton: document.getElementById("refreshResourcesButton"),
-  refreshFleetButton: document.getElementById("refreshFleetButton"),
-  refreshZonesButton: document.getElementById("refreshZonesButton"),
-  refreshPlayersButton: document.getElementById("refreshPlayersButton"),
-  battleButton: document.getElementById("battleButton"),
-  floatingHud: document.getElementById("floatingHud"),
-  hudResources: document.getElementById("hudResources"),
-  hudPower: document.getElementById("hudPower"),
-  hudCommander: document.getElementById("hudCommander"),
-  hudCityBonus: document.getElementById("hudCityBonus"),
-  missionHud: document.getElementById("missionHud"),
-  missionHudText: document.getElementById("missionHudText"),
-  missionSpeedupResource: document.getElementById("missionSpeedupResource"),
-  missionSpeedupAmount: document.getElementById("missionSpeedupAmount"),
-  cancelMissionButton: document.getElementById("cancelMissionButton"),
-  speedupMissionButton: document.getElementById("speedupMissionButton"),
-  incomingAlertHud: document.getElementById("incomingAlertHud"),
-  incomingAlertList: document.getElementById("incomingAlertList"),
-  closeAlertHudButton: document.getElementById("closeAlertHudButton"),
-  zoomInButton: document.getElementById("zoomInButton"),
-  zoomOutButton: document.getElementById("zoomOutButton"),
-  centerBaseButton: document.getElementById("centerBaseButton"),
-  mapZoomLabel: document.getElementById("mapZoomLabel"),
-  toggleDetailButton: document.getElementById("toggleDetailButton"),
-  toggleAlertButton: document.getElementById("toggleAlertButton"),
-  closeBaseOverlayButton: document.getElementById("closeBaseOverlayButton"),
-  uiScaleRange: document.getElementById("uiScaleRange"),
-  uiScaleLabel: document.getElementById("uiScaleLabel"),
-  tradeLogView: document.getElementById("tradeLogView"),
-  shipTradeLogView: document.getElementById("shipTradeLogView"),
-  tradeTargetUserIdInput: document.getElementById("tradeTargetUserIdInput"),
-  tradeMetalAmountInput: document.getElementById("tradeMetalAmountInput"),
-  tradeFuelAmountInput: document.getElementById("tradeFuelAmountInput"),
-  tradeResourceButton: document.getElementById("tradeResourceButton"),
-  tradeShipDesignSelect: document.getElementById("tradeShipDesignSelect"),
-  tradeShipQtyInput: document.getElementById("tradeShipQtyInput"),
-  tradeShipButton: document.getElementById("tradeShipButton"),
-  toggleDevButton: document.getElementById("toggleDevButton"),
-  devPanel: document.getElementById("devPanel"),
-  devView: document.getElementById("devView"),
-  devPasscodeInput: document.getElementById("devPasscodeInput"),
-  devLoginButton: document.getElementById("devLoginButton"),
-  devManager: document.getElementById("devManager"),
-  refreshDevUsersButton: document.getElementById("refreshDevUsersButton"),
-  devUsersView: document.getElementById("devUsersView"),
-  toggleZoneSearchButton: document.getElementById("toggleZoneSearchButton"),
-  zoneSearchPanel: document.getElementById("zoneSearchPanel"),
-  zoneSearchInput: document.getElementById("zoneSearchInput"),
-  zoneLevelFilter: document.getElementById("zoneLevelFilter"),
-  zoneOwnerFilter: document.getElementById("zoneOwnerFilter"),
-  playerSearchInput: document.getElementById("playerSearchInput"),
-  playerSearchView: document.getElementById("playerSearchView"),
-  drawAdmiralButton: document.getElementById("drawAdmiralButton"),
-  moveBaseButton: document.getElementById("moveBaseButton"),
-  saveDesignButton: document.getElementById("saveDesignButton"),
-  deleteDesignButton: document.getElementById("deleteDesignButton"),
-  resetDesignButton: document.getElementById("resetDesignButton"),
-  startProductionButton: document.getElementById("startProductionButton"),
-  speedupProductionButton: document.getElementById("speedupProductionButton"),
-  cancelProductionButton: document.getElementById("cancelProductionButton"),
-  resetProductionLogsButton: document.getElementById("resetProductionLogsButton"),
-  productionSpeedupResource: document.getElementById("productionSpeedupResource"),
-  productionSpeedupAmount: document.getElementById("productionSpeedupAmount"),
-  resetBattleRecordsButton: document.getElementById("resetBattleRecordsButton"),
-  saveAdmiralPolicyButton: document.getElementById("saveAdmiralPolicyButton"),
-  admiralPolicySelect: document.getElementById("admiralPolicySelect"),
-  economyPolicySelect: document.getElementById("economyPolicySelect"),
-  industryPolicySelect: document.getElementById("industryPolicySelect"),
-  militaryPolicySelect: document.getElementById("militaryPolicySelect"),
-  savePolicyButton: document.getElementById("savePolicyButton"),
-  policyLockInfo: document.getElementById("policyLockInfo"),
-  policyEffectInfo: document.getElementById("policyEffectInfo"),
-  designSubtabButton: document.getElementById("designSubtabButton"),
-  buildSubtabButton: document.getElementById("buildSubtabButton"),
-  designSection: document.getElementById("designSection"),
-  buildSection: document.getElementById("buildSection"),
-  editingDesignId: document.getElementById("editingDesignId"),
-  designListView: document.getElementById("designListView"),
+  baseMoveCostView: document.getElementById("baseMoveCostView"),
   baseMoveX: document.getElementById("baseMoveX"),
   baseMoveY: document.getElementById("baseMoveY"),
-  designNameInput: document.getElementById("designNameInput"),
-  hullSelect: document.getElementById("hullSelect"),
-  engineSlots: document.getElementById("engineSlots"),
-  weaponSlots: document.getElementById("weaponSlots"),
+  baseView: document.getElementById("baseView"),
+  battleButton: document.getElementById("battleButton"),
+  battleLog: document.getElementById("battleLog"),
+  battleSessionsView: document.getElementById("battleSessionsView"),
+  buildSection: document.getElementById("buildSection"),
+  buildSubtabButton: document.getElementById("buildSubtabButton"),
+  cancelMissionButton: document.getElementById("cancelMissionButton"),
+  cancelProductionButton: document.getElementById("cancelProductionButton"),
+  centerBaseButton: document.getElementById("centerBaseButton"),
+  cityView: document.getElementById("cityView"),
+  closeAlertHudButton: document.getElementById("closeAlertHudButton"),
+  closeBaseOverlayButton: document.getElementById("closeBaseOverlayButton"),
+  commanderName: document.getElementById("commanderName"),
   defenseSlots: document.getElementById("defenseSlots"),
-  utilitySlots: document.getElementById("utilitySlots"),
+  deleteDesignButton: document.getElementById("deleteDesignButton"),
+  designListView: document.getElementById("designListView"),
+  designNameInput: document.getElementById("designNameInput"),
   designPreview: document.getElementById("designPreview"),
-  productionDesignSelect: document.getElementById("productionDesignSelect"),
+  designSection: document.getElementById("designSection"),
+  designSubtabButton: document.getElementById("designSubtabButton"),
+  devLoginButton: document.getElementById("devLoginButton"),
+  devManager: document.getElementById("devManager"),
+  devPanel: document.getElementById("devPanel"),
+  devPasscodeInput: document.getElementById("devPasscodeInput"),
+  devUsersView: document.getElementById("devUsersView"),
+  devView: document.getElementById("devView"),
+  drawAdmiralButton: document.getElementById("drawAdmiralButton"),
+  economyPolicySelect: document.getElementById("economyPolicySelect"),
+  editingDesignId: document.getElementById("editingDesignId"),
+  empireView: document.getElementById("empireView"),
+  endSessionButton: document.getElementById("endSessionButton"),
+  engineSlots: document.getElementById("engineSlots"),
+  errorMessage: document.getElementById("errorMessage"),
+  fleetGroupView: document.getElementById("fleetGroupView"),
+  fleetView: document.getElementById("fleetView"),
+  gamePanel: document.getElementById("gamePanel"),
+  garrisonBattleView: document.getElementById("garrisonBattleView"),
+  hudCityBonus: document.getElementById("hudCityBonus"),
+  hudCommander: document.getElementById("hudCommander"),
+  hudPower: document.getElementById("hudPower"),
+  hudResources: document.getElementById("hudResources"),
+  hullSelect: document.getElementById("hullSelect"),
+  incomingAlertHud: document.getElementById("incomingAlertHud"),
+  incomingAlertList: document.getElementById("incomingAlertList"),
+  industryPolicySelect: document.getElementById("industryPolicySelect"),
+  inviteCodeInput: document.getElementById("inviteCodeInput"),
+  invitePasswordInput: document.getElementById("invitePasswordInput"),
+  joinInviteButton: document.getElementById("joinInviteButton"),
+  loginButton: document.getElementById("loginButton"),
+  lobbyCommanderName: document.getElementById("lobbyCommanderName"),
+  lobbyCreditView: document.getElementById("lobbyCreditView"),
+  lobbyPanel: document.getElementById("lobbyPanel"),
+  lobbyAdmiralView: document.getElementById("lobbyAdmiralView"),
+  lobbyProfileView: document.getElementById("lobbyProfileView"),
+  lobbyRecruitInfoView: document.getElementById("lobbyRecruitInfoView"),
+  lobbyRecruitLogView: document.getElementById("lobbyRecruitLogView"),
+  lobbyRecruitNormalButton: document.getElementById("lobbyRecruitNormalButton"),
+  lobbyRecruitPremiumButton: document.getElementById("lobbyRecruitPremiumButton"),
+  lobbyRewardLogView: document.getElementById("lobbyRewardLogView"),
+  lobbySessionView: document.getElementById("lobbySessionView"),
+  logoutButton: document.getElementById("logoutButton"),
+  mapBaseOverlay: document.getElementById("mapBaseOverlay"),
+  mapZoomLabel: document.getElementById("mapZoomLabel"),
+  militaryPolicySelect: document.getElementById("militaryPolicySelect"),
+  missionHud: document.getElementById("missionHud"),
+  missionHudText: document.getElementById("missionHudText"),
+  missionSpeedupAmount: document.getElementById("missionSpeedupAmount"),
+  missionSpeedupResource: document.getElementById("missionSpeedupResource"),
+  moveBaseButton: document.getElementById("moveBaseButton"),
+  ownedShipsView: document.getElementById("ownedShipsView"),
+  passwordInput: document.getElementById("passwordInput"),
+  playerSearchInput: document.getElementById("playerSearchInput"),
+  playerSearchView: document.getElementById("playerSearchView"),
+  playerTargetView: document.getElementById("playerTargetView"),
+  policyEffectInfo: document.getElementById("policyEffectInfo"),
+  policyLockInfo: document.getElementById("policyLockInfo"),
   productionDesignDetail: document.getElementById("productionDesignDetail"),
+  productionDesignSelect: document.getElementById("productionDesignSelect"),
   productionQuantityInput: document.getElementById("productionQuantityInput"),
   productionQueueView: document.getElementById("productionQueueView"),
-  ownedShipsView: document.getElementById("ownedShipsView"),
-  baseView: document.getElementById("baseView"),
-  mapBaseOverlay: document.getElementById("mapBaseOverlay"),
-  baseMoveCostView: document.getElementById("baseMoveCostView"),
-  commanderName: document.getElementById("commanderName"),
-  resourcesView: document.getElementById("resourcesView"),
+  productionSpeedupAmount: document.getElementById("productionSpeedupAmount"),
+  productionSpeedupResource: document.getElementById("productionSpeedupResource"),
   productionView: document.getElementById("productionView"),
-  fleetView: document.getElementById("fleetView"),
-  fleetGroupView: document.getElementById("fleetGroupView"),
-  shipCostView: document.getElementById("shipCostView"),
+  currentRoomView: document.getElementById("currentRoomView"),
+  createRoomButton: document.getElementById("createRoomButton"),
+  enterCurrentSessionButton: document.getElementById("enterCurrentSessionButton"),
+  quickStartButton: document.getElementById("quickStartButton"),
+  refreshDevUsersButton: document.getElementById("refreshDevUsersButton"),
+  refreshFleetButton: document.getElementById("refreshFleetButton"),
+  refreshLobbyButton: document.getElementById("refreshLobbyButton"),
+  refreshPlayersButton: document.getElementById("refreshPlayersButton"),
+  refreshResourcesButton: document.getElementById("refreshResourcesButton"),
+  refreshZonesButton: document.getElementById("refreshZonesButton"),
+  repairView: document.getElementById("repairView"),
   researchView: document.getElementById("researchView"),
-  cityView: document.getElementById("cityView"),
-  garrisonBattleView: document.getElementById("garrisonBattleView"),
-  admiralView: document.getElementById("admiralView"),
-  playerTargetView: document.getElementById("playerTargetView"),
-  zoneMapView: document.getElementById("zoneMapView"),
-  zoneDetailView: document.getElementById("zoneDetailView"),
-  zoneView: document.getElementById("zoneView"),
-  empireView: document.getElementById("empireView"),
-  battleLog: document.getElementById("battleLog"),
+  resetBattleRecordsButton: document.getElementById("resetBattleRecordsButton"),
+  resetDesignButton: document.getElementById("resetDesignButton"),
+  resetProductionLogsButton: document.getElementById("resetProductionLogsButton"),
+  resourcesView: document.getElementById("resourcesView"),
+  roomListView: document.getElementById("roomListView"),
+  roomMaxPlayersInput: document.getElementById("roomMaxPlayersInput"),
+  roomModeSelect: document.getElementById("roomModeSelect"),
+  roomNameInput: document.getElementById("roomNameInput"),
+  roomPasswordInput: document.getElementById("roomPasswordInput"),
+  roomPrivateInput: document.getElementById("roomPrivateInput"),
+  saveDesignButton: document.getElementById("saveDesignButton"),
+  savePolicyButton: document.getElementById("savePolicyButton"),
+  sessionSummaryView: document.getElementById("sessionSummaryView"),
+  shipCostView: document.getElementById("shipCostView"),
+  shipTradeLogView: document.getElementById("shipTradeLogView"),
+  signupButton: document.getElementById("signupButton"),
+  speedupMissionButton: document.getElementById("speedupMissionButton"),
+  speedupProductionButton: document.getElementById("speedupProductionButton"),
+  startProductionButton: document.getElementById("startProductionButton"),
   statusMessage: document.getElementById("statusMessage"),
-  errorMessage: document.getElementById("errorMessage")
+  toggleAlertButton: document.getElementById("toggleAlertButton"),
+  toggleDetailButton: document.getElementById("toggleDetailButton"),
+  toggleDevButton: document.getElementById("toggleDevButton"),
+  toggleZoneSearchButton: document.getElementById("toggleZoneSearchButton"),
+  tradeFuelAmountInput: document.getElementById("tradeFuelAmountInput"),
+  tradeLogView: document.getElementById("tradeLogView"),
+  tradeMetalAmountInput: document.getElementById("tradeMetalAmountInput"),
+  tradeResourceButton: document.getElementById("tradeResourceButton"),
+  tradeShipButton: document.getElementById("tradeShipButton"),
+  tradeShipDesignSelect: document.getElementById("tradeShipDesignSelect"),
+  tradeShipQtyInput: document.getElementById("tradeShipQtyInput"),
+  tradeTargetUserIdInput: document.getElementById("tradeTargetUserIdInput"),
+  uiScaleLabel: document.getElementById("uiScaleLabel"),
+  uiScaleRange: document.getElementById("uiScaleRange"),
+  usernameInput: document.getElementById("usernameInput"),
+  utilitySlots: document.getElementById("utilitySlots"),
+  weaponSlots: document.getElementById("weaponSlots"),
+  zoneDetailView: document.getElementById("zoneDetailView"),
+  zoneLayerFilter: document.getElementById("zoneLayerFilter"),
+  zoneLevelFilter: document.getElementById("zoneLevelFilter"),
+  zoneMapView: document.getElementById("zoneMapView"),
+  zoneOwnerFilter: document.getElementById("zoneOwnerFilter"),
+  zoneSearchInput: document.getElementById("zoneSearchInput"),
+  zoneSearchPanel: document.getElementById("zoneSearchPanel"),
+  zoneView: document.getElementById("zoneView"),
+  zoomInButton: document.getElementById("zoomInButton"),
+  zoomOutButton: document.getElementById("zoomOutButton")
 };
 
 const tabButtons = Array.from(document.querySelectorAll("[data-tab]"));
 const tabPanels = Array.from(document.querySelectorAll("[data-tab-panel]"));
 
+// Shared status/error helpers used by API actions.
 function setStatus(message) {
   elements.statusMessage.textContent = message || "";
 }
@@ -219,12 +279,19 @@ function setBusy(isBusy) {
     elements.devLoginButton,
     elements.refreshDevUsersButton,
     elements.resetBattleRecordsButton,
-    elements.saveAdmiralPolicyButton,
     elements.savePolicyButton,
     elements.toggleZoneSearchButton,
     elements.tradeResourceButton,
     elements.tradeShipButton,
     elements.centerBaseButton,
+    elements.endSessionButton,
+    elements.quickStartButton,
+    elements.enterCurrentSessionButton,
+    elements.createRoomButton,
+    elements.joinInviteButton,
+    elements.refreshLobbyButton,
+    elements.lobbyRecruitNormalButton,
+    elements.lobbyRecruitPremiumButton,
     ...captureButtons,
     ...researchButtons,
     ...admiralButtons,
@@ -234,6 +301,7 @@ function setBusy(isBusy) {
   });
 }
 
+// Fetch wrapper that attaches JWT/admin headers and normalizes errors.
 async function api(path, options = {}) {
   const headers = {
     "Content-Type": "application/json",
@@ -267,13 +335,417 @@ function getCredentials() {
   };
 }
 
+function roomStatusLabel(status) {
+  const labels = { waiting: "대기", starting: "시작 중", in_game: "진행 중", ended: "종료" };
+  return labels[String(status || "waiting")] || "대기";
+}
+
+function renderLobby(data) {
+  lobbyState = {
+    profile: data?.profile || null,
+    rooms: Array.isArray(data?.rooms) ? data.rooms : [],
+    joinedRoom: data?.joinedRoom || null,
+    currentSession: data?.currentSession || null
+  };
+  const profile = lobbyState.profile || {};
+  if (elements.lobbyCreditView) elements.lobbyCreditView.textContent = Number(profile.credit || 0).toLocaleString();
+  if (elements.lobbyProfileView) {
+    const recent = Array.isArray(profile.recentRewards) && profile.recentRewards.length
+      ? profile.recentRewards.map((item) => `<span>세션 #${item.sessionId || "-"}: +${Number(item.creditReward || 0).toLocaleString()} 크레딧</span>`).join("")
+      : "<span>최근 정산 기록 없음</span>";
+    elements.lobbyProfileView.innerHTML = `
+      <div class="growth-item">
+        <div>
+          <strong>${profile.featuredAdmiralName || "대표 제독 미지정"}</strong>
+          <span>다음 세션 제독: ${profile.selectedSessionAdmiralName || "미선택"}</span>
+          ${recent}
+        </div>
+      </div>
+    `;
+  }
+  if (elements.lobbySessionView) {
+    elements.lobbySessionView.textContent = lobbyState.currentSession
+      ? `진행 중: ${lobbyState.currentSession.roomName} / ${lobbyState.currentSession.mode}`
+      : "진행 중인 세션 없음";
+  }
+  elements.enterCurrentSessionButton?.classList.toggle("hidden", !lobbyState.currentSession);
+  renderCurrentRoom(lobbyState.joinedRoom);
+  renderRoomList(lobbyState.rooms);
+  renderRewardLogs(lobbyState.profile?.recentRewards || []);
+}
+
+function renderSessionSummary(summary) {
+  if (!elements.sessionSummaryView) return;
+  if (!summary) {
+    elements.sessionSummaryView.innerHTML = `<div class="growth-item"><div>No settled session yet.</div></div>`;
+    return;
+  }
+  const meName = localStorage.getItem(USERNAME_KEY) || "";
+  const me = (summary.players || []).find((player) => player.username === meName) || (summary.players || [])[0] || {};
+  const score = me.detail?.score || {};
+  const reward = me.detail?.reward || {};
+  elements.sessionSummaryView.innerHTML = `
+    <div class="growth-item assigned">
+      <div>
+        <strong>${summary.roomName || "Session"} / Rank ${me.rank || "-"}</strong>
+        <span>Total Score ${Number(me.finalScore || score.totalScore || 0).toLocaleString()}</span>
+        <span>Credits +${Number(me.creditReward || reward.creditTotal || 0).toLocaleString()}</span>
+        <span>Outposts ${Number(score.occupiedZones || 0)} / Battles Won ${Number(score.battleWins || 0)}</span>
+      </div>
+    </div>
+  `;
+}
+
+function renderRewardLogs(logs) {
+  if (!elements.lobbyRewardLogView) return;
+  const list = Array.isArray(logs) ? logs : [];
+  elements.lobbyRewardLogView.innerHTML = list.length
+    ? list.map((item) => {
+      const detail = item.detail || {};
+      const rank = detail.rank ? `Rank ${detail.rank}` : "Settlement";
+      return `<div class="growth-item"><div><strong>${rank}</strong><span>Session #${item.sessionId || "-"} / +${Number(item.creditReward || 0).toLocaleString()} credits</span></div></div>`;
+    }).join("")
+    : `<div class="growth-item"><div>No reward logs yet.</div></div>`;
+}
+
+function renderLobbyAdmirals(data, recruitLogsData = null) {
+  const state = data || lobbyAdmiralState;
+  lobbyAdmiralState = {
+    profile: state.profile || lobbyState.profile || null,
+    recruitTypes: Array.isArray(state.recruitTypes) ? state.recruitTypes : [],
+    admirals: Array.isArray(state.admirals) ? state.admirals : [],
+    logs: Array.isArray(recruitLogsData?.logs) ? recruitLogsData.logs : lobbyAdmiralState.logs
+  };
+  if (elements.lobbyRecruitInfoView) {
+    elements.lobbyRecruitInfoView.innerHTML = lobbyAdmiralState.recruitTypes.length
+      ? lobbyAdmiralState.recruitTypes.map((type) => `
+        <div class="growth-item">
+          <div>
+            <strong>${type.name}</strong>
+            <span>Cost ${Number(type.costCredit || 0).toLocaleString()} credits</span>
+            <span>R ${Math.round(Number(type.chances?.R || 0) * 100)}% / SR ${Math.round(Number(type.chances?.SR || 0) * 100)}% / SSR ${Math.round(Number(type.chances?.SSR || 0) * 100)}%</span>
+          </div>
+        </div>
+      `).join("")
+      : `<div class="growth-item"><div>Recruit options unavailable.</div></div>`;
+  }
+  if (elements.lobbyAdmiralView) {
+    elements.lobbyAdmiralView.innerHTML = lobbyAdmiralState.admirals.length
+      ? lobbyAdmiralState.admirals.map((admiral) => `
+        <div class="growth-item ${admiral.isFeatured || admiral.isSessionSelected ? "assigned" : ""}">
+          <div>
+            <strong>[${admiral.rarity}] ${admiral.name}</strong>
+            <span>Combat ${percent(admiral.combatBonus)}, Resource ${percent(admiral.resourceBonus)}, Cost -${Number(admiral.costBonus || 0).toFixed(2)}</span>
+            <span>${admiral.isFeatured ? "Featured / " : ""}${admiral.isSessionSelected ? "Next Session" : ""}</span>
+          </div>
+          <div class="button-row">
+            <button type="button" data-featured-admiral="${admiral.id}" ${admiral.isFeatured ? "disabled" : ""}>Featured</button>
+            <button type="button" data-session-admiral="${admiral.id}" ${admiral.isSessionSelected ? "disabled" : ""}>Use Next</button>
+          </div>
+        </div>
+      `).join("")
+      : `<div class="growth-item"><div>No lobby admirals yet.</div></div>`;
+    Array.from(elements.lobbyAdmiralView.querySelectorAll("[data-featured-admiral]")).forEach((button) => {
+      button.addEventListener("click", () => selectLobbyAdmiral("featured", Number(button.dataset.featuredAdmiral)));
+    });
+    Array.from(elements.lobbyAdmiralView.querySelectorAll("[data-session-admiral]")).forEach((button) => {
+      button.addEventListener("click", () => selectLobbyAdmiral("session", Number(button.dataset.sessionAdmiral)));
+    });
+  }
+  if (elements.lobbyRecruitLogView) {
+    elements.lobbyRecruitLogView.innerHTML = lobbyAdmiralState.logs.length
+      ? lobbyAdmiralState.logs.map((log) => `<div class="growth-item"><div><strong>${log.recruitType}</strong><span>[${log.admiral?.rarity || "-"}] ${log.admiral?.name || "-"} / -${Number(log.costCredit || 0).toLocaleString()} credits</span></div></div>`).join("")
+      : `<div class="growth-item"><div>No recruit logs yet.</div></div>`;
+  }
+}
+
+async function loadLobbyAdmirals() {
+  const [admirals, logs] = await Promise.all([
+    api("/lobby/admirals"),
+    api("/lobby/recruit-logs")
+  ]);
+  renderLobbyAdmirals(admirals, logs);
+  return admirals;
+}
+
+function renderCurrentRoom(room) {
+  if (!elements.currentRoomView) return;
+  if (!room) {
+    elements.currentRoomView.innerHTML = `<div class="growth-item"><div>참가 중인 방이 없습니다.</div></div>`;
+    return;
+  }
+  const players = (room.players || []).map((player) => `
+    <span>${player.isHost ? "방장 " : ""}${player.username}${player.isMe ? " (나)" : ""} - ${player.isReady ? "준비" : "대기"}</span>
+  `).join("");
+  const startButton = room.isHost && room.status === "waiting"
+    ? `<button type="button" class="primary" data-start-room="${room.id}">세션 시작</button>`
+    : "";
+  const readyButton = room.status === "waiting"
+    ? `<button type="button" data-ready-room="${room.id}">준비 전환</button>`
+    : "";
+  const enterButton = room.status === "in_game"
+    ? `<button type="button" class="primary" data-enter-session="1">게임 입장</button>`
+    : "";
+  const leaveButton = room.status === "waiting"
+    ? `<button type="button" data-leave-room="${room.id}">나가기</button>`
+    : "";
+  elements.currentRoomView.innerHTML = `
+    <div class="growth-item assigned">
+      <div>
+        <strong>${room.roomName} (${roomStatusLabel(room.status)})</strong>
+        <span>초대 코드: ${room.inviteCode} / ${room.currentPlayers}/${room.maxPlayers} / ${room.mode}</span>
+        ${players}
+      </div>
+      <div class="button-row">${readyButton}${startButton}${enterButton}${leaveButton}</div>
+    </div>
+  `;
+  elements.currentRoomView.querySelector("[data-ready-room]")?.addEventListener("click", () => toggleRoomReady(room.id));
+  elements.currentRoomView.querySelector("[data-start-room]")?.addEventListener("click", () => startRoom(room.id));
+  elements.currentRoomView.querySelector("[data-leave-room]")?.addEventListener("click", () => leaveRoom(room.id));
+  elements.currentRoomView.querySelector("[data-enter-session]")?.addEventListener("click", enterCurrentSession);
+}
+
+function renderRoomList(rooms) {
+  if (!elements.roomListView) return;
+  const list = (Array.isArray(rooms) ? rooms : []).filter((room) => !room.isJoined);
+  elements.roomListView.innerHTML = list.length
+    ? list.map((room) => `
+      <div class="growth-item">
+        <div>
+          <strong>${room.roomName}</strong>
+          <span>방장 ${room.hostUsername || "-"} / ${room.currentPlayers}/${room.maxPlayers} / ${room.mode} / ${roomStatusLabel(room.status)}</span>
+          <span>${room.isPrivate ? "비공개" : "공개"} / 코드 ${room.inviteCode}</span>
+        </div>
+        <button type="button" ${room.status === "waiting" ? "" : "disabled"} data-join-room="${room.id}">참가</button>
+      </div>
+    `).join("")
+    : `<div class="growth-item"><div>참가 가능한 방이 없습니다.</div></div>`;
+  Array.from(elements.roomListView.querySelectorAll("[data-join-room]")).forEach((button) => {
+    button.addEventListener("click", () => joinRoom(Number(button.dataset.joinRoom)));
+  });
+}
+
+async function loadLobby() {
+  const data = await api("/lobby");
+  renderLobby(data);
+  await loadLobbyAdmirals();
+  return data;
+}
+
+async function recruitLobbyAdmiral(type) {
+  clearMessages();
+  setBusy(true);
+  try {
+    const data = await api("/lobby/recruit-admiral", {
+      method: "POST",
+      body: JSON.stringify({ type })
+    });
+    setStatus(data.message || "Admiral recruited.");
+    renderLobbyAdmirals(data, await api("/lobby/recruit-logs"));
+    await loadLobby();
+  } catch (err) {
+    handleAuthError(err);
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function selectLobbyAdmiral(kind, admiralId) {
+  clearMessages();
+  setBusy(true);
+  try {
+    const path = kind === "featured" ? "/lobby/select-featured-admiral" : "/lobby/select-session-admiral";
+    const data = await api(path, {
+      method: "POST",
+      body: JSON.stringify({ admiralId })
+    });
+    setStatus(data.message || "Admiral selected.");
+    renderLobbyAdmirals(data, await api("/lobby/recruit-logs"));
+    await loadLobby();
+  } catch (err) {
+    handleAuthError(err);
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function quickStart() {
+  clearMessages();
+  setBusy(true);
+  try {
+    const created = await api("/rooms", {
+      method: "POST",
+      body: JSON.stringify({ mode: "solo", roomName: "Solo Run", maxPlayers: 1 })
+    });
+    const started = await api(`/rooms/${created.room.id}/start`, { method: "POST" });
+    lobbyState.currentSession = started.session;
+    setStatus(started.message || "세션을 시작했습니다.");
+    await enterCurrentSession();
+  } catch (err) {
+    handleAuthError(err);
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function createRoom() {
+  clearMessages();
+  setBusy(true);
+  try {
+    const data = await api("/rooms", {
+      method: "POST",
+      body: JSON.stringify({
+        roomName: elements.roomNameInput?.value || "",
+        mode: elements.roomModeSelect?.value || "solo",
+        maxPlayers: Number(elements.roomMaxPlayersInput?.value || 4),
+        isPrivate: Boolean(elements.roomPrivateInput?.checked),
+        password: elements.roomPasswordInput?.value || ""
+      })
+    });
+    setStatus(data.message || "방을 만들었습니다.");
+    await loadLobby();
+  } catch (err) {
+    handleAuthError(err);
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function joinRoom(roomId) {
+  clearMessages();
+  const password = window.prompt("비공개 방이면 비밀번호를 입력하세요. 공개 방이면 비워두세요.") || "";
+  setBusy(true);
+  try {
+    const data = await api(`/rooms/${roomId}/join`, { method: "POST", body: JSON.stringify({ password }) });
+    setStatus(data.message || "방에 참가했습니다.");
+    await loadLobby();
+  } catch (err) {
+    handleAuthError(err);
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function joinInviteRoom() {
+  clearMessages();
+  setBusy(true);
+  try {
+    const data = await api("/rooms/join-code", {
+      method: "POST",
+      body: JSON.stringify({
+        inviteCode: elements.inviteCodeInput?.value || "",
+        password: elements.invitePasswordInput?.value || ""
+      })
+    });
+    setStatus(data.message || "방에 참가했습니다.");
+    await loadLobby();
+  } catch (err) {
+    handleAuthError(err);
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function toggleRoomReady(roomId) {
+  clearMessages();
+  setBusy(true);
+  try {
+    const data = await api(`/rooms/${roomId}/ready`, { method: "POST", body: JSON.stringify({}) });
+    setStatus(data.message || "준비 상태를 변경했습니다.");
+    await loadLobby();
+  } catch (err) {
+    handleAuthError(err);
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function leaveRoom(roomId) {
+  clearMessages();
+  setBusy(true);
+  try {
+    const data = await api(`/rooms/${roomId}/leave`, { method: "POST", body: JSON.stringify({}) });
+    setStatus(data.message || "방을 나갔습니다.");
+    await loadLobby();
+  } catch (err) {
+    handleAuthError(err);
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function startRoom(roomId) {
+  clearMessages();
+  setBusy(true);
+  try {
+    const data = await api(`/rooms/${roomId}/start`, { method: "POST", body: JSON.stringify({}) });
+    setStatus(data.message || "세션을 시작했습니다.");
+    lobbyState.currentSession = data.session;
+    await enterCurrentSession();
+  } catch (err) {
+    handleAuthError(err);
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function enterCurrentSession() {
+  if (!lobbyState.currentSession) {
+    const current = await api("/sessions/current");
+    lobbyState.currentSession = current.session || null;
+  }
+  const username = localStorage.getItem(USERNAME_KEY) || "사령관";
+  showGame(username);
+  await refreshAll();
+  showTab(activeTab);
+  showProductionSubtab("design");
+  ensureAlertPolling();
+}
+
+async function endCurrentSession() {
+  clearMessages();
+  setBusy(true);
+  try {
+    const current = lobbyState.currentSession || (await api("/sessions/current")).session;
+    if (!current?.id) {
+      setError("종료할 진행 중 세션이 없습니다.");
+      return;
+    }
+    const data = await api(`/sessions/${current.id}/end`, { method: "POST", body: JSON.stringify({}) });
+    clearRealtimeTimers();
+    lobbyState.currentSession = null;
+    showLobby(localStorage.getItem(USERNAME_KEY) || "사령관");
+    renderSessionSummary(data.summary);
+    const lobby = await loadLobby();
+    renderSessionSummary(data.summary);
+    setStatus(data.message || "세션 정산을 완료했습니다.");
+    updateDebug({ sessionSummary: data.summary, lobby });
+  } catch (err) {
+    handleAuthError(err);
+  } finally {
+    setBusy(false);
+  }
+}
+
 function showAuth() {
   elements.authPanel.classList.remove("hidden");
+  elements.lobbyPanel?.classList.add("hidden");
   elements.gamePanel.classList.add("hidden");
+}
+
+function showLobby(username) {
+  clearRealtimeTimers();
+  elements.authPanel.classList.add("hidden");
+  elements.lobbyPanel?.classList.remove("hidden");
+  elements.gamePanel.classList.add("hidden");
+  if (elements.lobbyCommanderName) {
+    elements.lobbyCommanderName.textContent = `${username || "사령관"} 로비`;
+  }
 }
 
 function showGame(username) {
   elements.authPanel.classList.add("hidden");
+  elements.lobbyPanel?.classList.add("hidden");
   elements.gamePanel.classList.remove("hidden");
   elements.commanderName.textContent = `${username || "\uc0ac\ub839\uad00"} \uae30\uc9c0`;
 }
@@ -330,6 +802,7 @@ function renderMoveCost() {
   elements.baseMoveCostView.textContent = `\uc608\uc0c1 \uc774\ub3d9 \ube44\uc6a9: \uc5f0\ub8cc ${cost.toLocaleString()}`;
 }
 
+// Lazy-load tab data only when a tab becomes active.
 function showTab(tabName) {
   activeTab = tabName;
   tabButtons.forEach((button) => {
@@ -372,7 +845,7 @@ function mapCoordY(percent) {
 function fleetSlotOptionsHtml() {
   const limit = Math.min(5, Math.max(1, Number(cityState?.bonuses?.fleetSlotLimit || 3)));
   return Array.from({ length: limit }, (_, idx) => idx + 1)
-    .map((slot) => `<option value="${slot}">함대 ${slot}</option>`)
+    .map((slot) => `<option value="${slot}">\ud568\ub300 ${slot}</option>`)
     .join("");
 }
 
@@ -634,9 +1107,6 @@ function renderResources(resources) {
   renderHud();
   startResourceRealtimeTick();
   renderIncomingAlerts(safeResources.incomingAlerts);
-  if (safeResources.settings?.admiralPolicy && elements.admiralPolicySelect) {
-    elements.admiralPolicySelect.value = safeResources.settings.admiralPolicy;
-  }
   updateDebug({
     resources: {
       metal: Math.floor(currentResourcesState.metal),
@@ -647,17 +1117,14 @@ function renderResources(resources) {
   });
 }
 
+// Keeps floating resource and city summary HUD in sync with local ticks.
 function renderHud() {
-  const commanderLevel = Number(currentRatesState?.commander?.level || 1);
-  const commanderXp = Number(currentRatesState?.commander?.xp || 0);
-  const nextXp = Number(currentRatesState?.commander?.nextXp || 0);
-  const cityBonuses = currentRatesState?.city?.bonuses || {};
   elements.hudResources.textContent = `\uae08\uc18d ${Math.floor(currentResourcesState.metal).toLocaleString()} / \uc5f0\ub8cc ${Math.floor(currentResourcesState.fuel).toLocaleString()}`;
-  elements.hudCommander.textContent = `\uc0ac\ub839\uad00 Lv.${commanderLevel} (${commanderXp}/${nextXp})`;
+  if (elements.hudCommander) elements.hudCommander.textContent = `\uc0ac\ub839\uad00 Lv.${Number(currentRatesState?.commanderLevel || 1)}`;
+  const cityBonuses = currentRatesState?.city?.bonuses || cityState?.bonuses || {};
   if (elements.hudCityBonus) {
     const colonyCurrent = Number(currentRatesState?.city?.colonyCount || 0);
-    elements.hudCityBonus.textContent =
-      `도시: 제작라인 ${Number(cityBonuses.buildLines || 1)}, 식민지 ${colonyCurrent}/${Number(cityBonuses.colonyCap || 0)}, 함대슬롯 ${Number(cityBonuses.fleetSlotLimit || 3)}`;
+    elements.hudCityBonus.textContent = `\ub3c4\uc2dc: \uc0dd\uc0b0\ub77c\uc778 ${Number(cityBonuses.buildLines || 1)}, \uc2dd\ubbfc\uc9c0 ${colonyCurrent}/${Number(cityBonuses.colonyCap || 0)}, \ud568\ub300\uc2ac\ub86f ${Number(cityBonuses.fleetSlotLimit || 3)}`;
   }
 }
 
@@ -670,18 +1137,14 @@ function renderIncomingAlerts(alerts) {
     return;
   }
   elements.incomingAlertHud.classList.remove("hidden");
-  elements.incomingAlertList.innerHTML = incomingAlerts
-    .map((alert) => {
-      return `
-        <div class="alert-item">
-          <strong>${alert.attackerUsername}</strong>
-          <span>${alert.targetKind === "outpost" ? `목표: 전초기지 ${alert.targetName || ""}` : "목표: 본진"}</span>
-          <span>\uc804\ud22c\ub825 ${Number(alert.attackPower || 0).toLocaleString()} / \ud568\uc120 ${Number(alert.shipCount || 0)}\ucc99</span>
-          <span>\ub3c4\ucc29 \uc608\uc815 ${formatSeconds(Math.max(0, Number(alert.remainingSeconds || 0)))}</span>
-        </div>
-      `;
-    })
-    .join("");
+  elements.incomingAlertList.innerHTML = incomingAlerts.map((alert) => `
+    <div class="alert-item">
+      <strong>${alert.attackerUsername}</strong>
+      <span>${alert.targetKind === "outpost" ? `\ubaa9\ud45c: \uc804\ucd08\uae30\uc9c0 ${alert.targetName || ""}` : "\ubaa9\ud45c: \ubcf8\uc9c4"}</span>
+      <span>\uc804\ud22c\ub825 ${Number(alert.attackPower || 0).toLocaleString()} / \ud568\uc120 ${Number(alert.shipCount || 0)}\ucc99</span>
+      <span>\ub3c4\ucc29 \uc608\uc815 ${formatSeconds(Math.max(0, Number(alert.remainingSeconds || 0)))}</span>
+    </div>
+  `).join("");
 }
 
 function setBaseOverlayVisible(visible) {
@@ -730,23 +1193,6 @@ function renderShipCosts() {
   if (elements.shipCostView) elements.shipCostView.textContent = "";
 }
 
-function optionLabel(component) {
-  const bonus = Number(component.powerBonus || 0) > 0 ? `, +전력한계 ${component.powerBonus}` : "";
-  return `${component.name} / +\uacf5 ${component.attackBonus}, +\ubc29 ${component.defenseBonus}, +HP ${component.hpBonus}, +\uc18d ${component.speedBonus}${bonus} / \uc804\ub825 ${component.powerCost}, \uae08\uc18d ${component.metalCost}, \uc5f0\ub8cc ${component.fuelCost}`;
-}
-
-function fillSelect(select, items, labelFn) {
-  select.innerHTML = items
-    .map((item) => {
-      const lockedText = item.unlocked === false
-        ? ` (잠금: ${item.unlockRequirement?.type || "research"} Lv.${item.unlockRequirement?.level || 0})`
-        : "";
-      const disabled = item.unlocked === false ? "disabled" : "";
-      return `<option value="${item.id}" ${disabled}>${labelFn(item)}${lockedText}</option>`;
-    })
-    .join("");
-}
-
 function getSelectedHull() {
   return shipyardOptions.hulls.find((item) => Number(item.id) === Number(elements.hullSelect.value));
 }
@@ -755,6 +1201,7 @@ function getCategoryOptions(category) {
   return shipyardOptions.components.filter((item) => item.category === category && item.unlocked !== false);
 }
 
+// Rebuilds module slot selects whenever the selected hull changes.
 function createSlotSelects() {
   const hull = getSelectedHull();
   if (!hull) return;
@@ -767,7 +1214,8 @@ function createSlotSelects() {
   };
 
   for (const [category, container] of Object.entries(slotMap)) {
-    const count = Number(hull.slots?.[category] || 1);
+    if (!container) continue;
+    const count = Number(hull.slots?.[category] ?? 0);
     const options = getCategoryOptions(category);
     container.innerHTML = Array.from({ length: count }, (_, idx) => {
       const emptyOption = `<option value="">(\ube48 \uc2ac\ub86f)</option>`;
@@ -779,12 +1227,14 @@ function createSlotSelects() {
 
 function getSelectedComponents(category) {
   const container = elements[`${category}Slots`];
+  if (!container) return [];
   const options = getCategoryOptions(category);
   return Array.from(container.querySelectorAll("select"))
     .map((select) => options.find((item) => Number(item.id) === Number(select.value)))
     .filter(Boolean);
 }
 
+// Client-side ship design preview before the server validates and saves it.
 function calculateDesignPreview() {
   const hull = getSelectedHull();
   if (!hull) return null;
@@ -812,7 +1262,11 @@ function calculateDesignPreview() {
   const finalDefense = components.reduce((sum, item) => sum + item.defenseBonus, 0);
   const finalSpeed = Math.max(1, hull.baseSpeed + components.reduce((sum, item) => sum + item.speedBonus, 0));
   const complexity = Math.pow(1 + totalPower / 110, 1.45);
-  const slotWeight = hull.slots.engine * 0.6 + hull.slots.weapon * 1.2 + hull.slots.defense + hull.slots.utility * 0.7;
+  const slotWeight =
+    (Number(hull.slots?.engine || 0) * 0.6) +
+    (Number(hull.slots?.weapon || 0) * 1.2) +
+    Number(hull.slots?.defense || 0) +
+    (Number(hull.slots?.utility || 0) * 0.7);
   const totalBuildTime = Math.max(20, Math.floor(hull.baseBuildTime * complexity + slotWeight * 25));
   const monitorDefenseNeeded = Math.min(Number(hull.slots.defense || 0), 4);
   const monitorRuleFailed = hull.key === "monitor" && (
@@ -853,7 +1307,7 @@ function renderDesignPreview() {
       <span>\ubc29\uc5b4 ${preview.finalDefense}</span>
       <span>\uc18d\ub3c4 ${preview.finalSpeed}</span>
       <span class="${overPower ? "danger-text" : ""}">\uc804\ub825 ${preview.totalPower}/${preview.effectivePowerLimit}</span>
-      <span>전력한계 보너스 +${preview.bonusPowerLimit}</span>
+      <span>\uc804\ub825\ud55c\uacc4 \ubcf4\ub108\uc2a4 +${preview.bonusPowerLimit}</span>
       <span>\ube44\uc6a9 \uae08\uc18d ${preview.totalMetalCost}, \uc5f0\ub8cc ${preview.totalFuelCost}</span>
       <span>\uc0dd\uc0b0 \uc2dc\uac04 ${formatBuildHours(preview.totalBuildTime)}</span>
       <span>\uacf5\uaca9 \ubaa8\ub4c8 \ud569 +${preview.byCategory.weapons.reduce((sum, w) => sum + Number(w.attackBonus || 0), 0)}</span>
@@ -863,6 +1317,7 @@ function renderDesignPreview() {
   `;
 }
 
+// Renders hull/component options using server-side unlock state.
 function renderShipyardOptions() {
   fillSelect(elements.hullSelect, shipyardOptions.hulls, (hull) => `${hull.name} / \uc804\ub825 ${hull.powerLimit}`);
   const firstUnlockedHull = shipyardOptions.hulls.find((hull) => hull.unlocked !== false);
@@ -873,10 +1328,10 @@ function renderShipyardOptions() {
     const summary = shipyardOptions.unlockSummary;
     elements.designPreview.innerHTML = `
       <div class="stat-grid">
-        <span>선체 해금 ${summary.hulls.unlocked}/${summary.hulls.total}</span>
-        <span>다음 선체 ${summary.hulls.next}</span>
-        <span>모듈 해금 ${summary.components.unlocked}/${summary.components.total}</span>
-        <span>다음 모듈 ${summary.components.next}</span>
+        <span>\uc120\uccb4 \ud574\uae08 ${summary.hulls.unlocked}/${summary.hulls.total}</span>
+        <span>\ub2e4\uc74c \uc120\uccb4 ${summary.hulls.next}</span>
+        <span>\ubaa8\ub4c8 \ud574\uae08 ${summary.components.unlocked}/${summary.components.total}</span>
+        <span>\ub2e4\uc74c \ubaa8\ub4c8 ${summary.components.next}</span>
       </div>
     `;
   }
@@ -918,10 +1373,22 @@ function getDesignById(id) {
   return shipDesigns.find((design) => Number(design.id) === Number(id));
 }
 
+function fillSelect(select, items, labelFn) {
+  select.innerHTML = items
+    .map((item) => {
+      const lockedText = item.unlocked === false
+        ? ` (\uc7a0\uae08: ${item.unlockRequirementText || ""})`
+        : "";
+      const disabled = item.unlocked === false ? "disabled" : "";
+      return `<option value="${item.id}" ${disabled}>${labelFn(item)}${lockedText}</option>`;
+    })
+    .join("");
+}
+
 function renderSelectedProductionDesign() {
   const design = getDesignById(elements.productionDesignSelect.value);
   if (!design) {
-    elements.productionDesignDetail.textContent = `\uc124\uacc4\uc548\uc744 \uc120\ud0dd\ud558\uc138\uc694. (\uc0dd\uc0b0\ub77c\uc778 ${Number(cityState?.bonuses?.buildLines || 1)})`;
+    elements.productionDesignDetail.textContent = `\uc0dd\uc0b0\ud560 \uc124\uacc4\uc548\uc744 \uc120\ud0dd\ud558\uc138\uc694. (\ud65c\uc131 \uc0dd\uc0b0\ub77c\uc778 ${Number(cityState?.bonuses?.buildLines || 1)})`;
     elements.startProductionButton.disabled = true;
     return;
   }
@@ -938,6 +1405,10 @@ function renderSelectedProductionDesign() {
       <span>\uc5f0\ub8cc ${design.totalFuelCost}</span>
       <span>\uc0dd\uc0b0\uc2dc\uac04 ${formatBuildHours(design.totalBuildTime)}</span>
       <span>\ud65c\uc131 \uc0dd\uc0b0\ub77c\uc778 ${Number(cityState?.bonuses?.buildLines || 1)}</span>
+      <span>\uc5d4\uc9c4: ${(design.components?.engines || []).map((id) => componentNameById(id)).join(", ") || "\uc5c6\uc74c"}</span>
+      <span>\ubb34\uae30: ${(design.components?.weapons || []).map((id) => componentNameById(id)).join(", ") || "\uc5c6\uc74c"}</span>
+      <span>\ubc29\uc5b4: ${(design.components?.defenses || []).map((id) => componentNameById(id)).join(", ") || "\uc5c6\uc74c"}</span>
+      <span>\ubcf4\uc870: ${(design.components?.utilities || []).map((id) => componentNameById(id)).join(", ") || "\uc5c6\uc74c"}</span>
     </div>
   `;
 }
@@ -959,6 +1430,7 @@ function formatBuildHours(seconds) {
   return `${(hours * 60).toFixed(1)}\ubd84`;
 }
 
+// Renders production queue, owned ships, and selected design summary.
 function renderProduction(data) {
   const queue = Array.isArray(data?.queue) ? data.queue : [];
   const owned = Array.isArray(data?.ownedShips) ? data.ownedShips : [];
@@ -982,18 +1454,105 @@ function renderProduction(data) {
         <div>
           <strong>${item.name} ${item.quantity}\ucc99</strong>
           <span>HP ${item.finalHp}, \uacf5\uaca9 ${item.finalAttack}, \ubc29\uc5b4 ${item.finalDefense}, \uc18d\ub3c4 ${item.finalSpeed}</span>
+          <span>\ub300\uae30 ${Number(item.reserveQuantity || 0)} / \ud568\ub300 ${Number(item.fleetQuantity || 0)} / \ucd9c\uaca9 ${Number(item.missionQuantity || 0)} / \uc8fc\ub454 ${Number(item.garrisonQuantity || 0)} / \uc218\ub9ac ${Number(item.repairingQuantity || 0)}</span>
+          <span>\ud3c9\uade0 HP ${Math.round(Number(item.avgHpRatio || 0) * 100)}% / \uc190\uc0c1 \uc911파 ${Number(item.damageSummary?.heavy || 0)}, \ub300파 ${Number(item.damageSummary?.critical || 0)}</span>
         </div>
       </div>
     `).join("")
     : `<div class="growth-item"><div>\ubcf4\uc720\ud55c \uc124\uacc4\ubcc4 \ud568\uc120\uc774 \uc5c6\uc2b5\ub2c8\ub2e4.</div></div>`;
   if (elements.tradeShipDesignSelect) {
     elements.tradeShipDesignSelect.innerHTML = owned.length
-      ? owned.map((item) => `<option value="${item.designId}">${item.designName || item.name} (${item.quantity}척)</option>`).join("")
-      : `<option value="">설계안 없음</option>`;
+      ? owned.map((item) => `<option value="${item.designId}">${item.designName || item.name} (${item.quantity}\ucc99)</option>`).join("")
+      : `<option value="">\uc124\uacc4\uc548 \uc5c6\uc74c</option>`;
   }
   updateDebug({ productionQueueCount: queue.length, ownedDesignFleetCount: owned.length });
 }
 
+function renderRepairs(data) {
+  if (!elements.repairView) return;
+  const ships = Array.isArray(data?.ships) ? data.ships : [];
+  const jobs = Array.isArray(data?.jobs) ? data.jobs : [];
+  const damaged = ships.filter((ship) => Number(ship.currentHp || 0) < Number(ship.maxHp || 0) && ship.status !== "destroyed");
+  elements.repairView.innerHTML = `
+    <div class="growth-item"><div><strong>함선 상태 / 수리</strong><span>개별 함선 HP가 전투 후 유지됩니다.</span></div></div>
+    <div class="growth-item">
+      <div>
+        <strong>진행 중인 수리</strong>
+        <span>자원은 수리 틱마다 차감되며, 부족하면 일시정지됩니다.</span>
+      </div>
+    </div>
+    ${jobs.length ? jobs.map((job) => {
+      const progress = Number(job.maxHp || 0) > 0 ? Math.min(100, Math.round(Number(job.currentHp || 0) / Number(job.maxHp || 1) * 100)) : 0;
+      const canCancel = ["repairing", "paused"].includes(String(job.status || ""));
+      return `
+        <div class="growth-item">
+          <div>
+            <strong>#${job.shipId} ${job.designName}</strong>
+            <span>${job.damageStateLabel || job.damageState} / HP ${Number(job.currentHp || 0)} / ${Number(job.maxHp || 0)} (${progress}%)</span>
+            <span>상태 ${job.status}</span>
+          </div>
+          ${canCancel ? `<button type="button" data-cancel-repair="${job.id}">수리 취소</button>` : ""}
+        </div>
+      `;
+    }).join("") : `<div class="growth-item"><div>진행 중인 수리 작업이 없습니다.</div></div>`}
+    ${damaged.length ? damaged.map((ship) => `
+      <div class="growth-item">
+        <div>
+          <strong>#${ship.id} ${ship.designName}</strong>
+          <span>${ship.damageStateLabel || ship.damageState} / HP ${Number(ship.currentHp || 0)} / ${Number(ship.maxHp || 0)} / 상태 ${ship.status}</span>
+          <span>수리 예상: 금속 ${Number(ship.repairCost?.metal || 0).toLocaleString()} / 연료 ${Number(ship.repairCost?.fuel || 0).toLocaleString()}</span>
+        </div>
+        ${ship.status === "repairing" ? `<span>수리 중</span>` : `<button type="button" data-repair-ship="${ship.id}">수리</button>`}
+      </div>
+    `).join("") : `<div class="growth-item"><div>수리할 손상 함선이 없습니다.</div></div>`}
+  `;
+  Array.from(elements.repairView.querySelectorAll("[data-repair-ship]")).forEach((button) => {
+    button.addEventListener("click", () => startRepair(Number(button.dataset.repairShip)));
+  });
+  Array.from(elements.repairView.querySelectorAll("[data-cancel-repair]")).forEach((button) => {
+    button.addEventListener("click", () => cancelRepair(Number(button.dataset.cancelRepair)));
+  });
+}
+
+async function loadRepairs() {
+  const data = await api("/repairs");
+  renderRepairs(data);
+}
+
+async function startRepair(shipId) {
+  clearMessages();
+  setBusy(true);
+  try {
+    const data = await api("/repairs", {
+      method: "POST",
+      body: JSON.stringify({ shipId })
+    });
+    setStatus(data.message || "수리를 시작했습니다.");
+    const production = await api("/production");
+    renderProduction(production);
+    await Promise.all([loadRepairs(), loadFleetGroups()]);
+  } catch (err) {
+    handleAuthError(err);
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function cancelRepair(jobId) {
+  clearMessages();
+  setBusy(true);
+  try {
+    const data = await api(`/repairs/${jobId}/cancel`, { method: "POST" });
+    setStatus(data.message || "수리를 취소했습니다.");
+    await Promise.all([loadRepairs(), loadFleetGroups()]);
+  } catch (err) {
+    handleAuthError(err);
+  } finally {
+    setBusy(false);
+  }
+}
+
+// Updates production queue countdowns once per second.
 function renderProductionQueueRealtime() {
   const queue = productionQueueState;
   if (!queue.length) {
@@ -1052,6 +1611,10 @@ function clearRealtimeTimers() {
   if (missionPoller) {
     clearInterval(missionPoller);
     missionPoller = null;
+  }
+  if (battleSessionPoller) {
+    clearInterval(battleSessionPoller);
+    battleSessionPoller = null;
   }
   if (alertPoller) {
     clearInterval(alertPoller);
@@ -1115,188 +1678,7 @@ function percent(value) {
   return `+${Number(value || 0).toFixed(2)}`;
 }
 
-function renderResearch(data) {
-  const items = Array.isArray(data?.research) ? data.research : [];
-
-  if (!items.length) {
-    elements.researchView.textContent = "\uc5f0\uad6c \uc815\ubcf4\ub97c \ubd88\ub7ec\uc624\uc9c0 \ubabb\ud588\uc2b5\ub2c8\ub2e4.";
-    researchButtons = [];
-    return;
-  }
-
-  const unlockSummary = data?.unlockSummary;
-  elements.researchView.innerHTML = `
-    ${unlockSummary ? `
-      <div class="growth-item">
-        <div>
-          <strong>해금 현황</strong>
-          <span>선체 ${unlockSummary.hulls.unlocked}/${unlockSummary.hulls.total} / 다음: ${unlockSummary.hulls.next}</span>
-          <span>모듈 ${unlockSummary.components.unlocked}/${unlockSummary.components.total} / 다음: ${unlockSummary.components.next}</span>
-        </div>
-      </div>
-    ` : ""}
-    <div class="tech-tree">
-      ${items
-    .map((item) => {
-      return `
-        <div class="tech-node level-${Math.min(5, Number(item.level || 0) + 1)}">
-          <div>
-            <strong>${item.name} Lv.${item.level}</strong>
-            <p>${item.description}</p>
-            <span>\ub808\ubca8\ub2f9 \ud6a8\uacfc ${percent(item.effectPerLevel)}</span>
-            <span>\ub2e4\uc74c \ube44\uc6a9: \uae08\uc18d ${item.nextCost.metal.toLocaleString()}, \uc5f0\ub8cc ${item.nextCost.fuel.toLocaleString()}</span>
-          </div>
-          <button type="button" data-research-type="${item.type}">\uc5f0\uad6c</button>
-        </div>
-      `;
-    })
-    .join("")}
-    </div>
-  `;
-
-  researchButtons = Array.from(document.querySelectorAll("[data-research-type]"));
-  researchButtons.forEach((button) => {
-    button.addEventListener("click", () => upgradeResearch(button.dataset.researchType));
-  });
-}
-
-function renderResearchV2(data) {
-  const nodes = Array.isArray(data?.nodes) ? data.nodes : [];
-  if (!nodes.length) {
-    elements.researchView.textContent = "테크트리 정보를 불러오지 못했습니다.";
-    researchButtons = [];
-    return;
-  }
-  const active = data?.activeResearch;
-  const policy = data?.policies || {};
-  const tiers = [1, 2, 3, 4];
-  elements.researchView.innerHTML = `
-    <div class="growth-item">
-      <div>
-        <strong>정책(중앙정부 연동)</strong>
-        <span>중앙정부 Lv.${Number(policy.governmentLevel || 1)} / 자원 x${Number(policy.resourceMultiplier || 1).toFixed(2)} / 생산비 x${Number(policy.buildCostMultiplier || 1).toFixed(2)}</span>
-        <span>전투 x${Number(policy.combatMultiplier || 1).toFixed(2)} / 이동 x${Number(policy.movementMultiplier || 1).toFixed(2)}</span>
-        <span>연구소 Lv.${Number(data?.labLevel || 1)} (해금 티어 ${Number(data?.labTierUnlocked || 1)})</span>
-        <span>${active ? `진행중 연구: ${active.key} / 남은 ${formatSeconds(active.remainingSeconds || 0)}` : "진행중 연구 없음"}</span>
-      </div>
-    </div>
-    ${tiers.map((tier) => `
-      <div class="growth-item">
-        <div><strong>Tier ${tier}</strong></div>
-        <div class="tech-tree">
-          ${nodes.filter((node) => Number(node.tier) === tier).map((node) => {
-            const state = node.researched ? "완료" : node.lockedByBranch ? "분기잠금" : node.available ? "연구 가능" : "잠김";
-            const disabled = node.available ? "" : "disabled";
-            return `
-              <div class="tech-node level-${Math.min(5, tier + 1)}">
-                <div>
-                  <strong>${node.name}</strong>
-                  <p>${node.description}</p>
-                  <span>상태: ${state}</span>
-                  <span>비용: 금속 ${Number(node.cost?.metal || 0).toLocaleString()}, 연료 ${Number(node.cost?.fuel || 0).toLocaleString()}</span>
-                  <span>시간: ${formatSeconds(Number(node.researchTime || 0))}</span>
-                  <span>선행: ${(node.requires || []).length ? node.requires.join(", ") : "없음"}</span>
-                </div>
-                <button type="button" data-tech-start="${node.key}" ${disabled}>연구 시작</button>
-              </div>
-            `;
-          }).join("")}
-        </div>
-      </div>
-    `).join("")}
-  `;
-
-  researchButtons = Array.from(document.querySelectorAll("[data-tech-start]"));
-  researchButtons.forEach((button) => {
-    button.addEventListener("click", () => upgradeResearch(button.dataset.techStart));
-  });
-}
-
-function renderResearchHubLegacy(data) {
-  const nodes = Array.isArray(data?.nodes) ? data.nodes : [];
-  if (!nodes.length) {
-    elements.researchView.textContent = "테크트리 정보를 불러오지 못했습니다.";
-    researchButtons = [];
-    return;
-  }
-  const active = data?.activeResearch;
-  const policy = data?.policies || {};
-  policyState = policy;
-
-  const options = policy.options || {};
-  const fillPolicySelect = (select, category) => {
-    if (!select) return;
-    const items = Array.isArray(options[category]) ? options[category] : [];
-    const selected = String(policy.selection?.[category] || "");
-    select.innerHTML = items
-      .map((item) => {
-        const chosen = String(item.key) === selected ? "selected" : "";
-        const desc = String(item.description || "").trim();
-        return `<option value="${item.key}" ${chosen}>${item.name}${desc ? ` - ${desc}` : ""}</option>`;
-      })
-      .join("");
-  };
-  fillPolicySelect(elements.economyPolicySelect, "economy");
-  fillPolicySelect(elements.industryPolicySelect, "industry");
-  fillPolicySelect(elements.militaryPolicySelect, "military");
-
-  if (elements.policyLockInfo) {
-    const remain = Math.max(0, Number(policy.lock?.remainingSeconds || 0));
-    elements.policyLockInfo.textContent = remain > 0
-      ? `정책 변경 잠금: ${formatSeconds(remain)}`
-      : `정책 변경 가능 (변경 시 ${Number(policy.lock?.lockMinutes || 30)}분 고정)`;
-  }
-  if (elements.savePolicyButton) {
-    elements.savePolicyButton.disabled = Math.max(0, Number(policy.lock?.remainingSeconds || 0)) > 0;
-  }
-  if (elements.policyEffectInfo) {
-    const effects = policy.effects || {};
-    elements.policyEffectInfo.textContent =
-      `정책 효과: 자원 ${percent(effects.resourcePct)}, 생산비 -${Number(effects.buildCostPct || 0).toFixed(2)}, 전투 ${percent(effects.combatPct)}, 이동 ${percent(effects.movementPct)}`;
-  }
-
-  const tiers = [1, 2, 3, 4];
-  elements.researchView.innerHTML = `
-    <div class="growth-item">
-      <div>
-        <strong>연구 현황</strong>
-        <span>중앙정부 Lv.${Number(policy.governmentLevel || 1)} / 연구소 Lv.${Number(data?.labLevel || 1)} (해금 티어 ${Number(data?.labTierUnlocked || 1)})</span>
-        <span>자원 x${Number(policy.resourceMultiplier || 1).toFixed(2)} / 생산비 x${Number(policy.buildCostMultiplier || 1).toFixed(2)} / 전투 x${Number(policy.combatMultiplier || 1).toFixed(2)} / 이동 x${Number(policy.movementMultiplier || 1).toFixed(2)}</span>
-        <span>${active ? `진행 중 연구: ${active.key} / 남은 ${formatSeconds(active.remainingSeconds || 0)}` : "진행 중 연구 없음"}</span>
-      </div>
-    </div>
-    ${tiers.map((tier) => `
-      <div class="growth-item">
-        <div><strong>Tier ${tier}</strong></div>
-        <div class="tech-tree">
-          ${nodes.filter((node) => Number(node.tier) === tier).map((node) => {
-            const state = node.researched ? "완료" : node.lockedByBranch ? "분기잠금" : node.available ? "연구 가능" : "잠김";
-            const disabled = node.available ? "" : "disabled";
-            return `
-              <div class="tech-node level-${Math.min(5, tier + 1)}">
-                <div>
-                  <strong>${node.name}</strong>
-                  <p>${node.description}</p>
-                  <span>상태: ${state}</span>
-                  <span>비용: 금속 ${Number(node.cost?.metal || 0).toLocaleString()}, 연료 ${Number(node.cost?.fuel || 0).toLocaleString()}</span>
-                  <span>시간: ${formatSeconds(Number(node.researchTime || 0))}</span>
-                  <span>선행: ${(node.requires || []).length ? node.requires.join(", ") : "없음"}</span>
-                </div>
-                <button type="button" data-tech-start="${node.key}" ${disabled}>연구 시작</button>
-              </div>
-            `;
-          }).join("")}
-        </div>
-      </div>
-    `).join("")}
-  `;
-
-  researchButtons = Array.from(document.querySelectorAll("[data-tech-start]"));
-  researchButtons.forEach((button) => {
-    button.addEventListener("click", () => upgradeResearch(button.dataset.techStart));
-  });
-}
-
+// Growth-tab policy renderer; policies are separate from research and time-locked.
 function renderPolicyPanel(data) {
   const payload = data || {};
   policyState = payload;
@@ -1321,141 +1703,19 @@ function renderPolicyPanel(data) {
   const remain = Math.max(0, Number(lock.remainingSeconds || 0));
   if (elements.policyLockInfo) {
     elements.policyLockInfo.textContent = remain > 0
-      ? `정책 변경 잠금: ${formatSeconds(remain)}`
-      : `정책 변경 가능 (변경 시 ${Number(lock.lockMinutes || 30)}분 고정)`;
+      ? `\uc815\ucc45 \ubcc0\uacbd \uc7a0\uae08: ${formatSeconds(remain)}`
+      : `\uc815\ucc45 \ubcc0\uacbd \uac00\ub2a5 (\ubcc0\uacbd \uc2dc ${Number(lock.lockMinutes || 30)}\ubd84 \uace0\uc815)`;
   }
-  if (elements.savePolicyButton) {
-    elements.savePolicyButton.disabled = remain > 0;
-  }
+  if (elements.savePolicyButton) elements.savePolicyButton.disabled = remain > 0;
   if (elements.policyEffectInfo) {
     elements.policyEffectInfo.textContent =
-      `정책 효과: 자원 ${percent(effects.resourcePct)}, 생산비 -${Number(effects.buildCostPct || 0).toFixed(2)}, 전투 ${percent(effects.combatPct)}, 이동 ${percent(effects.movementPct)}`;
+      `\uc815\ucc45 \ud6a8\uacfc: \uc790\uc6d0 ${percent(effects.resourcePct)}, \uc0dd\uc0b0\ube44 -${Number(effects.buildCostPct || 0).toFixed(2)}, \uc804\ud22c ${percent(effects.combatPct)}, \uc774\ub3d9 ${percent(effects.movementPct)}`;
   }
 }
 
-function renderResearchHub(data) {
-  const nodes = Array.isArray(data?.nodes) ? data.nodes : [];
-  if (!nodes.length) {
-    elements.researchView.textContent = "테크트리 정보를 불러오지 못했습니다.";
-    researchButtons = [];
-    return;
-  }
-  const active = data?.activeResearch;
-  const policy = data?.policies || {};
-  const tiers = [1, 2, 3, 4];
-  const filterOptions = [
-    { key: "all", label: "전체" },
-    { key: "engine", label: "엔진" },
-    { key: "weapon", label: "무기" },
-    { key: "defense", label: "방어" },
-    { key: "utility", label: "보조" },
-    { key: "industry", label: "산업" },
-    { key: "tactics", label: "전술" },
-    { key: "hull", label: "함급" },
-    { key: "special", label: "특수" }
-  ];
-  if (!filterOptions.some((item) => item.key === researchCategoryFilter)) {
-    researchCategoryFilter = "all";
-  }
-  const groupLabel = {
-    engine: "엔진",
-    weapon: "무기",
-    defense: "방어",
-    utility: "보조",
-    other: "기타"
-  };
-  const coreCategories = ["engine", "weapon", "defense", "utility"];
-  const normalizeGroup = (node) => {
-    const cat = String(node.category || "");
-    return coreCategories.includes(cat) ? cat : "other";
-  };
-  const renderNode = (node, tier) => {
-    const state = node.researched ? "완료" : node.lockedByBranch ? "분기잠금" : node.available ? "연구 가능" : "잠김";
-    const disabled = node.available ? "" : "disabled";
-    return `
-      <div class="tech-node level-${Math.min(5, tier + 1)}">
-        <div>
-          <strong>${node.name}</strong>
-          <p>${node.description}</p>
-          <span>상태: ${state}</span>
-          <span>비용: 금속 ${Number(node.cost?.metal || 0).toLocaleString()}, 연료 ${Number(node.cost?.fuel || 0).toLocaleString()}</span>
-          <span>시간: ${formatSeconds(Number(node.researchTime || 0))}</span>
-          <span>선행: ${(node.requires || []).length ? node.requires.join(", ") : "없음"}</span>
-        </div>
-        <button type="button" data-tech-start="${node.key}" ${disabled}>연구 시작</button>
-      </div>
-    `;
-  };
-
-  elements.researchView.innerHTML = `
-    <div class="growth-item">
-      <div>
-        <strong>연구 현황</strong>
-        <span>중앙정부 Lv.${Number(policy.governmentLevel || 1)} / 연구소 Lv.${Number(data?.labLevel || 1)} (해금 티어 ${Number(data?.labTierUnlocked || 1)})</span>
-        <span>진행 중 연구: ${active ? `${active.key} / 남은 ${formatSeconds(active.remainingSeconds || 0)}` : "없음"}</span>
-      </div>
-    </div>
-    <div class="growth-item">
-      <div class="tech-filter-bar">
-        ${filterOptions.map((item) => `
-          <button type="button" class="tech-filter-button ${researchCategoryFilter === item.key ? "active" : ""}" data-tech-filter="${item.key}">
-            ${item.label}
-          </button>
-        `).join("")}
-      </div>
-    </div>
-    ${tiers.map((tier) => {
-      const tierNodes = nodes.filter((node) => Number(node.tier) === tier);
-      const filteredTier = researchCategoryFilter === "all"
-        ? tierNodes
-        : tierNodes.filter((node) => normalizeGroup(node) === researchCategoryFilter);
-      if (!filteredTier.length) {
-        return `
-          <div class="growth-item">
-            <div><strong>Tier ${tier}</strong><span>표시할 연구가 없습니다.</span></div>
-          </div>
-        `;
-      }
-      const groups = ["engine", "weapon", "defense", "utility", "other"]
-        .map((key) => ({
-          key,
-          items: filteredTier.filter((node) => normalizeGroup(node) === key)
-        }))
-        .filter((entry) => entry.items.length > 0);
-      return `
-        <div class="growth-item">
-          <div><strong>Tier ${tier}</strong></div>
-          <div class="tech-group-wrap">
-            ${groups.map((entry) => `
-              <section class="tech-group-section">
-                <h4>${groupLabel[entry.key]}</h4>
-                <div class="tech-node-grid">
-                  ${entry.items.map((node) => renderNode(node, tier)).join("")}
-                </div>
-              </section>
-            `).join("")}
-          </div>
-        </div>
-      `;
-    }).join("")}
-  `;
-  researchButtons = Array.from(document.querySelectorAll("[data-tech-start]"));
-  researchButtons.forEach((button) => {
-    button.addEventListener("click", () => upgradeResearch(button.dataset.techStart));
-  });
-  Array.from(document.querySelectorAll("[data-tech-filter]")).forEach((button) => {
-    button.addEventListener("click", () => {
-      researchCategoryFilter = String(button.dataset.techFilter || "all");
-      renderResearchHub(data);
-    });
-  });
-}
-
+// Growth-tab admiral renderer with assign, revive, and exile actions.
 function renderAdmirals(data) {
   const admirals = Array.isArray(data?.admirals) ? data.admirals : [];
-  if (data?.settings?.admiralPolicy && elements.admiralPolicySelect) {
-    elements.admiralPolicySelect.value = data.settings.admiralPolicy;
-  }
 
   if (!admirals.length) {
     elements.admiralView.textContent = "\ubcf4\uc720 \uc81c\ub3c5\uc774 \uc5c6\uc2b5\ub2c8\ub2e4.";
@@ -1466,16 +1726,14 @@ function renderAdmirals(data) {
   elements.admiralView.innerHTML = admirals
     .map((admiral) => {
       const assigned = Number(admiral.assigned) === 1;
-      const isDead = String(admiral.status || "active") === "dead";
       return `
         <div class="growth-item ${assigned ? "assigned" : ""}">
           <div>
-            <strong>[${admiral.rarity}] ${admiral.name}${assigned ? " / \ubc30\uce58 \uc911" : ""}${isDead ? " / \uc0ac\ub9dd" : ""}</strong>
+            <strong>[${admiral.rarity}] ${admiral.name}${assigned ? " / \ubc30\uce58 \uc911" : ""}</strong>
             <span>\uc804\ud22c ${percent(admiral.combatBonus)}, \uc0dd\uc0b0 ${percent(admiral.resourceBonus)}, \ube44\uc6a9 -${Number(admiral.costBonus || 0).toFixed(2)}</span>
           </div>
           <div class="button-row">
-            <button type="button" data-assign-admiral="${admiral.id}" ${assigned || isDead ? "disabled" : ""}>\ubc30\uce58</button>
-            <button type="button" data-revive-admiral="${admiral.id}" ${isDead ? "" : "disabled"}>\ubd80\ud65c</button>
+            <button type="button" data-assign-admiral="${admiral.id}" ${assigned ? "disabled" : ""}>\ubc30\uce58</button>
             <button type="button" data-exile-admiral="${admiral.id}" ${assigned ? "disabled" : ""}>\ucd94\ubc29</button>
           </div>
         </div>
@@ -1486,9 +1744,6 @@ function renderAdmirals(data) {
   admiralButtons = Array.from(document.querySelectorAll("[data-assign-admiral]"));
   admiralButtons.forEach((button) => {
     button.addEventListener("click", () => assignAdmiral(button.dataset.assignAdmiral));
-  });
-  Array.from(document.querySelectorAll("[data-revive-admiral]")).forEach((button) => {
-    button.addEventListener("click", () => reviveAdmiral(button.dataset.reviveAdmiral));
   });
   Array.from(document.querySelectorAll("[data-exile-admiral]")).forEach((button) => {
     button.addEventListener("click", () => exileAdmiral(button.dataset.exileAdmiral));
@@ -1547,7 +1802,16 @@ function fleetText(fleet) {
     .join(", ") || "\uc815\ubcf4 \uc5c6\uc74c";
 }
 
+// Renders the shared sector map, base, players, zones, and route overlay.
 function renderMap(data) {
+  if (data?.gameFlow) {
+    gameFlowState = {
+      elapsedSeconds: Number(data.gameFlow.elapsedSeconds || 0),
+      coreUnlockAfterSeconds: Number(data.gameFlow.coreUnlockAfterSeconds || 10800),
+      targetEndSeconds: Number(data.gameFlow.targetEndSeconds || 18000),
+      coreUnlocked: Boolean(data.gameFlow.coreUnlocked)
+    };
+  }
   if (data?.mapConfig) {
     mapConfig = {
       maxX: Number(data.mapConfig.maxX || mapConfig.maxX),
@@ -1585,6 +1849,118 @@ function renderBattleRecords(records) {
     .join("\n\n----------------\n\n");
 }
 
+function renderBattleSessions(sessions) {
+  if (!elements.battleSessionsView) return;
+  const list = Array.isArray(sessions) ? sessions : [];
+  const hasActive = list.some((session) => ["active", "retreating"].includes(String(session.state || "")));
+  elements.battleSessionsView.innerHTML = list.length
+    ? list.map((session) => {
+      const latest = Array.isArray(session.log) && session.log.length ? session.log[session.log.length - 1] : "";
+      const retreatButton = session.state === "active" || session.state === "retreating"
+        ? `<button type="button" data-retreat-session="${session.id}">후퇴</button>`
+        : "";
+      return `
+        <div class="growth-item">
+          <div>
+            <strong>${session.targetType} #${session.targetId || "-"} / ${session.state} / ${session.result || "진행"}</strong>
+            <span>틱 ${Number(session.tick || 0)} / ${latest}</span>
+          </div>
+          ${retreatButton}
+        </div>
+      `;
+    }).join("")
+    : `<div class="growth-item"><div>전투 세션 기록이 없습니다.</div></div>`;
+  Array.from(elements.battleSessionsView.querySelectorAll("[data-retreat-session]")).forEach((button) => {
+    button.addEventListener("click", () => retreatBattleSession(Number(button.dataset.retreatSession)));
+  });
+  if (hasActive) ensureBattleSessionPolling();
+  if (!hasActive && battleSessionPoller) {
+    clearInterval(battleSessionPoller);
+    battleSessionPoller = null;
+  }
+}
+
+async function loadBattleSessions() {
+  const data = await api("/battle-sessions");
+  renderBattleSessions(data?.sessions);
+}
+
+function renderBattleSessions(sessions) {
+  if (!elements.battleSessionsView) return;
+  const list = Array.isArray(sessions) ? sessions : [];
+  const hasActive = list.some((session) => ["active", "retreating"].includes(String(session.state || "")));
+  const stateLabel = { active: "전투 중", retreating: "후퇴 중", ended: "종료" };
+  const resultLabel = { victory: "승리", defeat: "패배", retreat: "후퇴", combat: "교전" };
+  elements.battleSessionsView.innerHTML = list.length
+    ? list.map((session) => {
+      const logs = Array.isArray(session.log) ? session.log : [];
+      const latest = logs.length ? logs[logs.length - 1] : "";
+      const retreatButton = session.state === "active" || session.state === "retreating"
+        ? `<button type="button" data-retreat-session="${session.id}">후퇴</button>`
+        : "";
+      return `
+        <div class="growth-item">
+          <div>
+            <strong>${session.targetName || `${session.targetType} #${session.targetId || "-"}`} / ${stateLabel[session.state] || session.state} / ${resultLabel[session.result] || session.result || "진행"}</strong>
+            <span>틱 ${Number(session.tick || 0)} / ${latest}</span>
+            <details>
+              <summary>전체 로그</summary>
+              <pre>${logs.join("\n") || "기록 없음"}</pre>
+            </details>
+          </div>
+          ${retreatButton}
+        </div>
+      `;
+    }).join("")
+    : `<div class="growth-item"><div>전투 세션 기록이 없습니다.</div></div>`;
+  Array.from(elements.battleSessionsView.querySelectorAll("[data-retreat-session]")).forEach((button) => {
+    button.addEventListener("click", () => retreatBattleSession(Number(button.dataset.retreatSession)));
+  });
+  if (hasActive) ensureBattleSessionPolling();
+  if (!hasActive && battleSessionPoller) {
+    clearInterval(battleSessionPoller);
+    battleSessionPoller = null;
+  }
+}
+
+function ensureBattleSessionPolling() {
+  if (battleSessionPoller || !authToken) return;
+  battleSessionPoller = setInterval(async () => {
+    try {
+      const [sessions, records, repairs, fleetGroups, zones, resources] = await Promise.all([
+        api("/battle-sessions"),
+        api("/battle-records"),
+        api("/repairs"),
+        api("/fleet-groups"),
+        api("/map"),
+        api("/resources")
+      ]);
+      renderBattleSessions(sessions?.sessions);
+      renderBattleRecords(records?.records);
+      renderRepairs(repairs);
+      renderFleetGroupsV2(fleetGroups);
+      renderMap(zones);
+      renderResources(resources);
+    } catch (err) {
+      // ignore transient battle polling failures
+    }
+  }, 2000);
+}
+
+async function retreatBattleSession(sessionId) {
+  clearMessages();
+  setBusy(true);
+  try {
+    const data = await api(`/battle-sessions/${sessionId}/retreat`, { method: "POST" });
+    setStatus(data.message || "후퇴 명령을 내렸습니다.");
+    renderBattleSessions(data?.sessions);
+  } catch (err) {
+    handleAuthError(err);
+  } finally {
+    setBusy(false);
+  }
+}
+
 function renderMissionRoute() {
   if (!activeMissions.length) {
     clearRoute();
@@ -1601,7 +1977,7 @@ function renderMissionRoute() {
   elements.missionHudText.textContent = activeMissions
     .map((item) => {
       const slot = Number(item.fleetSlot || 1);
-      return `함대 ${slot}: ${item.targetName} / ${formatSeconds(Number(item.remainingSeconds || 0))}`;
+      return `\ud568\ub300 ${slot}: ${item.targetName} / ${formatSeconds(Number(item.remainingSeconds || 0))}`;
     })
     .join(" | ");
   ensureMissionPolling();
@@ -1611,13 +1987,14 @@ function ensureMissionPolling() {
   if (!activeMissions.length || missionPoller) return;
   missionPoller = setInterval(async () => {
     try {
-      const [missions, records, alerts] = await Promise.all([api("/missions"), api("/battle-records"), api("/alerts/incoming")]);
+      const [missions, records, sessions, alerts] = await Promise.all([api("/missions"), api("/battle-records"), api("/battle-sessions"), api("/alerts/incoming")]);
       activeMissions = Array.isArray(missions?.activeMissions) ? missions.activeMissions : [];
       renderMissionRoute();
       renderBattleRecords(records?.records);
+      renderBattleSessions(sessions?.sessions);
       renderIncomingAlerts(alerts?.alerts);
       if (!activeMissions.length) {
-        await Promise.all([loadZones(), loadFleet()]);
+        await Promise.all([loadZones(), loadFleet(), loadBattleSessions()]);
       }
     } catch (err) {
       // ignore intermittent polling errors
@@ -1626,10 +2003,11 @@ function ensureMissionPolling() {
 }
 
 async function refreshMissionsAndRecords() {
-  const [missionData, recordData, alertData] = await Promise.all([api("/missions"), api("/battle-records"), api("/alerts/incoming")]);
+  const [missionData, recordData, sessionData, alertData] = await Promise.all([api("/missions"), api("/battle-records"), api("/battle-sessions"), api("/alerts/incoming")]);
   activeMissions = Array.isArray(missionData?.activeMissions) ? missionData.activeMissions : [];
   renderMissionRoute();
   renderBattleRecords(recordData?.records);
+  renderBattleSessions(sessionData?.sessions);
   renderIncomingAlerts(alertData?.alerts);
   ensureMissionPolling();
 }
@@ -1637,19 +2015,21 @@ async function refreshMissionsAndRecords() {
 function filteredZones() {
   const query = (elements.zoneSearchInput?.value || "").trim().toLowerCase();
   const level = elements.zoneLevelFilter?.value || "";
+  const layer = elements.zoneLayerFilter?.value || "";
   const owner = elements.zoneOwnerFilter?.value || "";
 
   return currentZones.filter((zone) => {
     const text = `${zone.name || ""} ${zone.ownerUsername || ""}`.toLowerCase();
     const matchesText = !query || text.includes(query);
     const matchesLevel = !level || String(zone.level) === level;
+    const matchesLayer = !layer || String(zone.layer || "") === layer;
     const matchesOwner =
       !owner ||
       (owner === "neutral" && !zone.occupied) ||
       (owner === "mine" && zone.ownedByMe) ||
       (owner === "enemy" && zone.occupied && !zone.ownedByMe);
 
-    return matchesText && matchesLevel && matchesOwner;
+    return matchesText && matchesLevel && matchesLayer && matchesOwner;
   });
 }
 
@@ -1688,24 +2068,13 @@ function centerOnBase() {
   elements.zoneMapView.scrollTop = Math.max(0, targetY - elements.zoneMapView.clientHeight / 2);
 }
 
-function renderPlayerSearchList() {
+function renderPlayerSearchList(){
   if (!elements.playerSearchView) return;
   const players = filteredPlayers();
   elements.playerSearchView.innerHTML = players.length
-    ? players.map((player) => `
-      <div class="zone-item compact">
-        <div>
-          <strong>${player.username}</strong>
-          <span>X ${player.base?.x}, Y ${player.base?.y} / 거리 ${player.distance}</span>
-        </div>
-        <button type="button" data-focus-player="${player.id}">찾기</button>
-      </div>
-    `).join("")
-    : `<div class="zone-item compact"><div>조건에 맞는 플레이어가 없습니다.</div></div>`;
-
-  Array.from(elements.playerSearchView.querySelectorAll("[data-focus-player]")).forEach((button) => {
-    button.addEventListener("click", () => focusPlayerOnMap(button.dataset.focusPlayer));
-  });
+    ? players.map((player) => `<div class="zone-item compact"><div><strong>${player.username}</strong><span>X ${player.base?.x}, Y ${player.base?.y} / \uac70\ub9ac ${player.distance}</span></div><button type="button" data-focus-player="${player.id}">\ucc3e\uae30</button></div>`).join("")
+    : `<div class="zone-item compact"><div>\uc870\uac74\uc5d0 \ub9de\ub294 \ud50c\ub808\uc774\uc5b4\uac00 \uc5c6\uc2b5\ub2c8\ub2e4.</div></div>`;
+  Array.from(elements.playerSearchView.querySelectorAll("[data-focus-player]")).forEach((button) => button.addEventListener("click", () => focusPlayerOnMap(button.dataset.focusPlayer)));
 }
 
 function renderZoneSearchList() {
@@ -1720,10 +2089,10 @@ function renderZoneSearchList() {
           return `
             <button type="button" class="zone-row ${Number(zone.id) === Number(selectedZoneId) ? "selected" : ""}" data-select-zone="${zone.id}" style="${zone.occupied ? `border-left: 6px solid ${zone.ownerColor || ownerColor(zone.ownerId)};` : ""}">
               <div>
-                <strong>Lv.${zone.level} ${zone.name}</strong>
-                <span>${zone.ownerUsername ? `\uc18c\uc720: ${zone.ownerUsername}` : "\uc911\ub9bd"} / \uae08\uc18d +${zone.metalRate}/s, \uc5f0\ub8cc +${zone.fuelRate}/s</span>
+                <strong>Lv.${zone.level} [${zone.layerLabel || ""}] ${zone.name}</strong>
+                <span>${zone.roleLabel || "\uac70\uc810"} / ${zone.roleEffect || ""} / ${zone.ownerUsername ? `\uc18c\uc720: ${zone.ownerUsername}` : "\uc911\ub9bd"} / ${zone.controlState === "capturing" ? `점령중 ${Math.round(Number(zone.captureProgress || 0) * 100)}%` : ""}</span>
               </div>
-              <span>${zone.ownedByMe ? "\ub0b4 \uc810\ub839\uc9c0" : zone.occupied ? "\ud0c8\ucde8 \uac00\ub2a5" : "\uc911\ub9bd \uac70\uc810"}</span>
+              <span>${zone.locked ? `\uc7a0\uae08 ${formatSeconds(Number(zone.remainingUnlockSeconds || 0))}` : zone.ownedByMe ? "\ub0b4 \uc810\ub839\uc9c0" : zone.occupied ? "\ud0c8\ucde8 \uac00\ub2a5" : "\uc911\ub9bd \uac70\uc810"}</span>
             </button>
           `;
         })
@@ -1810,9 +2179,13 @@ function renderZones(zones) {
       const classes = [
         "map-node",
         `level-${zone.level}`,
+        `layer-${zone.layer || "mid"}`,
+        `role-${zone.role || "metal"}`,
         zone.occupied ? "occupied" : "",
+        zone.locked ? "locked" : "",
         Number(zone.id) === Number(selectedZoneId) ? "selected" : ""
       ].filter(Boolean).join(" ");
+      const nodeLabel = zone.locked ? "\u25c7" : (zone.roleIcon || zone.level);
 
       return `
         <button
@@ -1820,9 +2193,9 @@ function renderZones(zones) {
           class="${classes}"
           data-select-zone="${zone.id}"
           style="--x: ${Number(zone.x || 0) / Math.max(1, Number(mapConfig.maxX || 2000))}; --y: ${Number(zone.y || 0) / Math.max(1, Number(mapConfig.maxY || 2000))}; --owner-color: ${zone.ownerColor || ownerColor(zone.ownerId)};"
-          title="${zone.name} / \uc794\uc874\ubcd1\ub825 ${garrisonTotal}"
+          title="${zone.name} / ${zone.layerLabel || ""} / ${zone.roleLabel || ""} / \uc794\uc874\ubcd1\ub825 ${garrisonTotal}"
         >
-          <span>${zone.level}</span>
+          <span>${nodeLabel}</span>
           <small>${garrisonTotal}</small>
         </button>
       `;
@@ -1900,109 +2273,35 @@ function selectPlayer(playerId) {
   renderZones(currentZones);
 }
 
-function renderSelectedZone() {
+// Detail panel for a selected zone: capture or assign garrison.
+function renderSelectedZone(){
   const zone = currentZones.find((item) => Number(item.id) === Number(selectedZoneId));
-
-  if (!zone) {
-    elements.zoneDetailView.textContent = "\uac70\uc810\uc744 \uc120\ud0dd\ud558\uc138\uc694.";
-    captureButtons = [];
-    return;
-  }
-
-  const action = zone.occupied
-    ? zone.ownedByMe
-      ? `
-        <div class="speedup-controls">
-          <label for="zoneGarrisonFleetSlot">주둔 함대</label>
-          <select id="zoneGarrisonFleetSlot">
-            ${fleetSlotOptionsHtml()}
-          </select>
-          <button type="button" data-garrison-zone="${zone.id}">주둔군 배치</button>
-        </div>
-      `
-      : `<button type="button" data-capture-zone="${zone.id}" class="primary">\uc810\ub839\uc9c0 \ud0c8\ucde8</button>`
-    : `<button type="button" data-capture-zone="${zone.id}" class="primary">\uc810\ub839 \ucd9c\uaca9</button>`;
-
-  elements.zoneDetailView.innerHTML = `
-    <div class="panel-head"><p class="eyebrow">Level ${zone.level}</p><button type="button" data-close-detail="1">X</button></div>
-    <h4>${zone.name}</h4>
-    <p>${zone.description}</p>
-    <div class="detail-stats">
-      <span>\uc0dd\uc0b0: \uae08\uc18d +${zone.metalRate}/s, \uc5f0\ub8cc +${zone.fuelRate}/s</span>
-      <span>\uc18c\uc720\uc790: ${zone.ownerUsername || "\uc911\ub9bd"}</span>
-      <span>\uc8fc\ub454\uad70 \uc804\ud22c\ub825: ${zone.actualPower}</span>
-      <span>\uc8fc\ub454\uad70: ${fleetText(zone.garrison)}</span>
-    </div>
-    <div class="speedup-controls">
-      <label for="zoneFleetSlotSelect">출격 함대</label>
-      <select id="zoneFleetSlotSelect">
-        ${fleetSlotOptionsHtml()}
-      </select>
-    </div>
-    ${action}
-  `;
-
+  if (!zone) { elements.zoneDetailView.textContent = "\uac70\uc810\uc744 \uc120\ud0dd\ud558\uc138\uc694."; captureButtons = []; return; }
+  const lockedText = zone.locked ? `<span>\uc911\uc559 \uad6c\uc5ed \uac1c\ubc29\uae4c\uc9c0 ${formatSeconds(Number(zone.remainingUnlockSeconds || 0))}</span>` : "";
+  const outerProtected = zone.occupied && !zone.ownedByMe && zone.layer === "outer";
+  const action = zone.locked
+    ? `<button type="button" class="primary" disabled>\uc544\uc9c1 \uc7a0\uae08</button>`
+    : outerProtected
+      ? `<button type="button" class="primary" disabled>\uc678\uacfd \ubcf4\ud638 \uad6c\uc5ed</button>`
+      : zone.occupied
+        ? (zone.ownedByMe ? `<div class="speedup-controls"><label for="zoneGarrisonFleetSlot">\uc8fc\ub454 \ud568\ub300</label><select id="zoneGarrisonFleetSlot">${fleetSlotOptionsHtml()}</select><button type="button" data-garrison-zone="${zone.id}">\uc8fc\ub454\uad70 \ubc30\uce58</button></div>` : `<button type="button" data-capture-zone="${zone.id}" class="primary">\uc810\ub839\uc9c0 \ud0c8\ucde8</button>`)
+        : `<button type="button" data-capture-zone="${zone.id}" class="primary">\uc810\ub839 \ucd9c\uaca9</button>`;
+  elements.zoneDetailView.innerHTML = `<div class="panel-head"><p class="eyebrow">${zone.layerLabel || ""} / Level ${zone.level}</p><button type="button" data-close-detail="1">X</button></div><h4>${zone.name}</h4><p>${zone.description}</p><div class="detail-stats"><span>\uc5ed\ud560: ${zone.roleLabel || "\uac70\uc810"} - ${zone.roleEffect || ""}</span><span>\uc0dd\uc0b0: \uae08\uc18d +${zone.metalRate}/s, \uc5f0\ub8cc +${zone.fuelRate}/s</span><span>\uc18c\uc720\uc790: ${zone.ownerUsername || "\uc911\ub9bd"}</span><span>점령 상태: ${zone.controlState || (zone.occupied ? "occupied" : "neutral")} ${zone.controlState === "capturing" ? `(${Math.round(Number(zone.captureProgress || 0) * 100)}%)` : ""}</span>${lockedText}<span>\uc8fc\ub454\uad70 \uc804\ud22c\ub825: ${Number(zone.actualPower || 0).toLocaleString()}</span><span>\uc8fc\ub454\uad70: ${fleetText(zone.garrison)}</span></div><div class="speedup-controls"><label for="zoneFleetSlotSelect">\ucd9c\uaca9 \ud568\ub300</label><select id="zoneFleetSlotSelect">${fleetSlotOptionsHtml()}</select></div>${action}`;
   captureButtons = Array.from(document.querySelectorAll("[data-capture-zone]"));
-  captureButtons.forEach((button) => {
-    button.addEventListener("click", () => {
-      const slot = Number(elements.zoneDetailView.querySelector("#zoneFleetSlotSelect")?.value || 1);
-      captureZone(button.dataset.captureZone, slot);
-    });
-  });
-  elements.zoneDetailView.querySelector("[data-garrison-zone]")?.addEventListener("click", () => {
-    const slot = Number(elements.zoneDetailView.querySelector("#zoneGarrisonFleetSlot")?.value || 1);
-    assignZoneGarrison(zone.id, slot);
-  });
+  captureButtons.forEach((button) => button.addEventListener("click", () => captureZone(button.dataset.captureZone, Number(elements.zoneDetailView.querySelector("#zoneFleetSlotSelect")?.value || 1))));
+  elements.zoneDetailView.querySelector("[data-garrison-zone]")?.addEventListener("click", () => assignZoneGarrison(zone.id, Number(elements.zoneDetailView.querySelector("#zoneGarrisonFleetSlot")?.value || 1)));
   elements.zoneDetailView.querySelector("[data-close-detail]")?.addEventListener("click", () => setDetailPanelVisible(false));
 }
 
-function renderSelectedPlayer() {
+// Detail panel for a selected player base: attack or trade.
+function renderSelectedPlayer(){
   const player = currentPlayers.find((item) => Number(item.id) === Number(selectedPlayerId));
-
-  if (!player) {
-    elements.zoneDetailView.textContent = "\uc0c1\ub300 \uae30\uc9c0\ub97c \uc120\ud0dd\ud558\uc138\uc694.";
-    pvpButtons = [];
-    return;
-  }
-
+  if (!player) { elements.zoneDetailView.textContent = "\uc0c1\ub300 \uae30\uc9c0\ub97c \uc120\ud0dd\ud558\uc138\uc694."; pvpButtons = []; return; }
   const admiral = player.assignedAdmiral ? `[${player.assignedAdmiral.rarity}] ${player.assignedAdmiral.name}` : "\uc5c6\uc74c";
-  elements.zoneDetailView.innerHTML = `
-    <div class="panel-head"><p class="eyebrow">Player Base</p><button type="button" data-close-detail="1">X</button></div>
-    <h4>${player.username}</h4>
-    <div class="detail-stats">
-      <span>\uae30\uc9c0 \uc88c\ud45c: X ${player.base?.x}, Y ${player.base?.y}</span>
-      <span>\ud568\ub300 \uc804\ud22c\ub825: ${Number(player.fleetPower || 0).toLocaleString()}</span>
-      <span>\uc810\ub839\uc9c0: ${player.occupiedZones}</span>
-      <span>\ucd94\uc815 \uc790\uc6d0: \uae08\uc18d ${Number(player.estimatedMetal || 0).toLocaleString()}, \uc5f0\ub8cc ${Number(player.estimatedFuel || 0).toLocaleString()}</span>
-      <span>\ubc30\uce58 \uc81c\ub3c5: ${admiral}</span>
-    </div>
-    <div class="speedup-controls">
-      <label for="pvpFleetSlotSelect">출격 함대</label>
-      <select id="pvpFleetSlotSelect">${fleetSlotOptionsHtml()}</select>
-    </div>
-    <div class="trade-box">
-      <label for="tradeMetalInput">거래 금속</label>
-      <input id="tradeMetalInput" type="number" min="0" value="0">
-      <label for="tradeFuelInput">거래 연료</label>
-      <input id="tradeFuelInput" type="number" min="0" value="0">
-      <button type="button" data-trade-target="${player.id}">자원 보내기</button>
-    </div>
-    <button type="button" data-pvp-target="${player.id}" class="primary">\uc0c1\ub300 \uae30\uc9c0 \uae30\uc2b5</button>
-  `;
-
+  elements.zoneDetailView.innerHTML = `<div class="panel-head"><p class="eyebrow">Player Base</p><button type="button" data-close-detail="1">X</button></div><h4>${player.username}</h4><div class="detail-stats"><span>\uae30\uc9c0 \uc88c\ud45c: X ${player.base?.x}, Y ${player.base?.y}</span><span>\ud568\ub300 \uc804\ud22c\ub825: ${Number(player.fleetPower || 0).toLocaleString()}</span><span>\uc810\ub839\uc9c0: ${player.occupiedZones}</span><span>\ucd94\uc815 \uc790\uc6d0: \uae08\uc18d ${Number(player.estimatedMetal || 0).toLocaleString()}, \uc5f0\ub8cc ${Number(player.estimatedFuel || 0).toLocaleString()}</span><span>\ubc30\uce58 \uc81c\ub3c5: ${admiral}</span></div><div class="speedup-controls"><label for="pvpFleetSlotSelect">\ucd9c\uaca9 \ud568\ub300</label><select id="pvpFleetSlotSelect">${fleetSlotOptionsHtml()}</select></div><div class="trade-box"><label for="tradeMetalInput">\uac70\ub798 \uae08\uc18d</label><input id="tradeMetalInput" type="number" min="0" value="0"><label for="tradeFuelInput">\uac70\ub798 \uc5f0\ub8cc</label><input id="tradeFuelInput" type="number" min="0" value="0"><button type="button" data-trade-target="${player.id}">\uc790\uc6d0 \uac70\ub798</button></div><button type="button" data-pvp-target="${player.id}" class="primary">\uc0c1\ub300 \uae30\uc9c0 \uae30\uc2b5</button>`;
   pvpButtons = Array.from(document.querySelectorAll("[data-pvp-target]"));
-  pvpButtons.forEach((button) => {
-    button.addEventListener("click", () => {
-      const slot = Number(elements.zoneDetailView.querySelector("#pvpFleetSlotSelect")?.value || 1);
-      attackPlayer(button.dataset.pvpTarget, slot);
-    });
-  });
-  elements.zoneDetailView.querySelector("[data-trade-target]")?.addEventListener("click", () => {
-    sendTrade(player.id);
-    if (elements.tradeTargetUserIdInput) {
-      elements.tradeTargetUserIdInput.value = String(player.id);
-    }
-  });
+  pvpButtons.forEach((button) => button.addEventListener("click", () => attackPlayer(button.dataset.pvpTarget, Number(elements.zoneDetailView.querySelector("#pvpFleetSlotSelect")?.value || 1))));
+  elements.zoneDetailView.querySelector("[data-trade-target]")?.addEventListener("click", () => { sendTrade(player.id); if (elements.tradeTargetUserIdInput) elements.tradeTargetUserIdInput.value = String(player.id); });
   elements.zoneDetailView.querySelector("[data-close-detail]")?.addEventListener("click", () => setDetailPanelVisible(false));
 }
 
@@ -2060,10 +2359,9 @@ async function login() {
   try {
     const data = await api("/login", { method: "POST", body: JSON.stringify(credentials) });
     saveSession(data.token, data.username);
-    showGame(data.username);
+    showLobby(data.username);
     setStatus("\ub85c\uadf8\uc778\ud588\uc2b5\ub2c8\ub2e4.");
-    await refreshAll();
-    ensureAlertPolling();
+    await loadLobby();
   } catch (err) {
     setError(err.message);
   } finally {
@@ -2211,7 +2509,9 @@ function loadDesignForEdit(designId) {
   setValues(elements.engineSlots, design.components.engines || []);
   setValues(elements.weaponSlots, design.components.weapons || []);
   setValues(elements.defenseSlots, design.components.defenses || []);
-  setValues(elements.utilitySlots, design.components.utilities || []);
+  if (elements.utilitySlots) {
+    setValues(elements.utilitySlots, design.components.utilities || []);
+  }
   renderDesignPreview();
   setStatus(`${design.name} \uc124\uacc4\uc548 \uc218\uc815 \ubaa8\ub4dc`);
 }
@@ -2365,254 +2665,81 @@ async function speedupMission() {
 }
 
 async function loadBattleRecords() {
-  const data = await api("/battle-records");
+  const [data, sessions] = await Promise.all([api("/battle-records"), api("/battle-sessions")]);
   renderBattleRecords(data?.records);
+  renderBattleSessions(sessions?.sessions);
   await loadTradeLogs();
 }
 
-async function loadTradeLogs() {
-  if (!elements.tradeLogView) return;
+// Loads and renders resource trade history.
+async function loadTradeLogs(){
   const data = await api("/trade/logs");
   const logs = Array.isArray(data?.logs) ? data.logs : [];
   elements.tradeLogView.innerHTML = logs.length
-    ? logs.map((item) => {
-      const time = new Date(item.createdAt).toLocaleString();
-      return `
-        <div class="growth-item">
-          <div>
-            <strong>${item.fromName} -> ${item.toName}</strong>
-            <span>금속 ${item.metal.toLocaleString()} / 연료 ${item.fuel.toLocaleString()}</span>
-            <span>${time}</span>
-          </div>
-        </div>
-      `;
-    }).join("")
-    : `<div class="growth-item"><div>거래 기록이 없습니다.</div></div>`;
+    ? logs.map((item) => `<div class="growth-item"><div><strong>${item.fromName} -> ${item.toName}</strong><span>\uae08\uc18d ${Number(item.metal || 0).toLocaleString()} / \uc5f0\ub8cc ${Number(item.fuel || 0).toLocaleString()}</span><span>${new Date(item.createdAt).toLocaleString()}</span></div></div>`).join("")
+    : `<div class="growth-item"><div>\uac70\ub798 \uae30\ub85d\uc774 \uc5c6\uc2b5\ub2c8\ub2e4.</div></div>`;
 }
 
-function renderShipTradeLogs(logs) {
+// Renders ship trade history.
+function renderShipTradeLogs(logs){
   if (!elements.shipTradeLogView) return;
   const items = Array.isArray(logs) ? logs : [];
-  elements.shipTradeLogView.innerHTML = items.length
-    ? items.map((item) => {
-      const time = new Date(item.createdAt).toLocaleString();
-      return `<div class="growth-item"><div><strong>${item.fromName} -> ${item.toName}</strong><span>${item.designName} ${Number(item.quantity || 0).toLocaleString()}척</span><span>${time}</span></div></div>`;
-    }).join("")
-    : `<div class="growth-item"><div>함선 거래 기록이 없습니다.</div></div>`;
+  elements.shipTradeLogView.innerHTML = items.length ? items.map((item) => `<div class="growth-item"><div><strong>${item.fromName} -> ${item.toName}</strong><span>${item.designName} ${Number(item.quantity || 0).toLocaleString()}\ucc99</span><span>${new Date(item.createdAt).toLocaleString()}</span></div></div>`).join("") : `<div class="growth-item"><div>\ud568\uc120 \uac70\ub798 \uae30\ub85d\uc774 \uc5c6\uc2b5\ub2c8\ub2e4.</div></div>`;
 }
 
-function renderFleetGroups(data) {
-  fleetGroupsState = Array.isArray(data?.groups) ? data.groups : [];
-  if (!elements.fleetGroupView) return;
-  const ownedMap = new Map((Array.isArray(data?.ownedShips) ? data.ownedShips : []).map((item) => [Number(item.designId), item]));
-  const admiralOptions = [`<option value="">없음</option>`]
-    .concat((Array.isArray(data?.admirals) ? data.admirals : [])
-      .filter((item) => String(item.status || "active") === "active")
-      .map((item) => `<option value="${item.id}">[${item.rarity}] ${item.name}</option>`))
-    .join("");
-
-  elements.fleetGroupView.innerHTML = fleetGroupsState.length
-    ? fleetGroupsState.map((group) => {
-      const preview = (group.ships || [])
-        .map((item) => {
-          const found = ownedMap.get(Number(item.designId));
-          return found ? `${found.designName} ${Number(item.quantity || 0)}척` : null;
-        })
-        .filter(Boolean)
-        .join(", ");
-      return `
-        <div class="growth-item">
-          <div>
-            <strong>함대 ${group.slot}: ${group.name}</strong>
-            <span>${preview || "편성 없음"}</span>
-            <span>제독: ${group.admiralName ? `[${group.admiralRarity}] ${group.admiralName}` : "없음"}</span>
-          </div>
-          <div class="button-row">
-            <button type="button" data-edit-fleet-group="${group.slot}">편성 수정</button>
-          </div>
-        </div>
-      `;
-    }).join("")
-    : `<div class="growth-item"><div>함대 편성 정보가 없습니다.</div></div>`;
-
-  Array.from(elements.fleetGroupView.querySelectorAll("[data-edit-fleet-group]")).forEach((button) => {
-    button.addEventListener("click", () => {
-      const slot = Number(button.dataset.editFleetGroup);
-      const group = fleetGroupsState.find((item) => Number(item.slot) === slot);
-      if (!group) return;
-      const raw = prompt(`함대 ${slot} 편성(JSON)\n예: [{\"designId\":1,\"quantity\":10}]`, JSON.stringify(group.ships || []));
-      if (raw == null) return;
-      const admiralRaw = prompt(`함대 ${slot} 제독 ID (없으면 빈칸)`, group.admiralId ? String(group.admiralId) : "");
-      let ships;
-      try {
-        ships = JSON.parse(raw);
-      } catch (err) {
-        setError("편성 JSON 형식이 올바르지 않습니다.");
-        return;
-      }
-      saveFleetGroup(slot, group.name, ships, admiralRaw ? Number(admiralRaw) : null);
-    });
-  });
-}
-
-function updateFleetPowerPreview(slot, ownedShips, admirals) {
-  const container = elements.fleetGroupView?.querySelector(`[data-fleet-power="${slot}"]`);
-  if (!container) return;
-  const selected = Array.from(elements.fleetGroupView.querySelectorAll(`[data-fleet-selected="${slot}"] [data-fleet-selected-item]`));
+// Shows fleet power preview including assigned admiral bonus.
+function updateFleetPowerPreview(slot, availableShips, admirals){
+  const container = elements.fleetGroupView?.querySelector(`[data-fleet-power="${slot}"]`); if (!container) return;
+  const selected = Array.from(elements.fleetGroupView.querySelectorAll(`[data-fleet-check="${slot}"]:checked`));
   let basePower = 0;
   selected.forEach((item) => {
-    const designId = Number(item.dataset.designId);
-    const ship = ownedShips.find((entry) => Number(entry.designId) === designId);
-    const qtyInput = elements.fleetGroupView.querySelector(`[data-fleet-qty="${slot}"][data-design-id="${designId}"]`);
-    const qty = Math.max(1, Number(qtyInput?.value || 1));
-    if (!ship) return;
-    basePower += qty * (Number(ship.finalAttack || 0) + Number(ship.finalDefense || 0) * 0.45 + Number(ship.finalHp || 0) * 0.12);
+    const shipId = Number(item.dataset.shipId);
+    const ship = availableShips.find((entry) => Number(entry.shipId) === shipId);
+    if (ship) basePower += Number(ship.combatPower || 0);
   });
-  const admiralSelect = elements.fleetGroupView.querySelector(`[data-fleet-admiral="${slot}"]`);
-  const selectedAdmiral = admirals.find((item) => String(item.id) === String(admiralSelect?.value || ""));
+  const selectedAdmiral = admirals.find((item) => String(item.id) === String(elements.fleetGroupView.querySelector(`[data-fleet-admiral="${slot}"]`)?.value || ""));
   const admiralBonus = Number(selectedAdmiral?.combatBonus || 0);
   const finalPower = Math.floor(basePower * (1 + admiralBonus * 0.9));
-  container.textContent = `예상 전투력 ${finalPower.toLocaleString()} (기본 ${Math.floor(basePower).toLocaleString()} / 제독 보너스 ${percent(admiralBonus)})`;
+  container.textContent = `\uc608\uc0c1 \uc804\ud22c\ub825 ${finalPower.toLocaleString()} (\uae30\ubcf8 ${Math.floor(basePower).toLocaleString()} / \uc81c\ub3c5 \ubcf4\ub108\uc2a4 ${percent(admiralBonus)})`;
 }
 
-function renderFleetGroupsV2(data) {
-  fleetGroupsState = Array.isArray(data?.groups) ? data.groups : [];
-  if (!elements.fleetGroupView) return;
-  const ownedShips = Array.isArray(data?.ownedShips) ? data.ownedShips : [];
+// Current fleet builder: individual ship checkbox assignment plus front/mid/back line selection.
+function renderFleetGroupsV2(data){
+  fleetGroupsState = Array.isArray(data?.groups) ? data.groups : []; if (!elements.fleetGroupView) return;
+  const globalAvailableShips = Array.isArray(data?.availableShips) ? data.availableShips : [];
   const admirals = (Array.isArray(data?.admirals) ? data.admirals : []).filter((item) => String(item.status || "active") === "active");
   const slotLimit = Math.min(5, Math.max(1, Number(data?.fleetSlotLimit || 3)));
   const bySlot = new Map(fleetGroupsState.map((item) => [Number(item.slot), item]));
-  const admiralOptions = [`<option value="">없음</option>`]
-    .concat(admirals.map((item) => `<option value="${item.id}">[${item.rarity}] ${item.name}</option>`))
-    .join("");
-
+  const admiralOptions = [`<option value="">\uc5c6\uc74c</option>`].concat(admirals.map((item) => `<option value="${item.id}">[${item.rarity}] ${item.name}</option>`)).join("");
   elements.fleetGroupView.innerHTML = Array.from({ length: slotLimit }, (_, idx) => {
     const slot = idx + 1;
-    const group = bySlot.get(slot) || { slot, name: `함대 ${slot}`, ships: [], admiralId: null };
-    const selectedMap = new Map((group.ships || []).map((item) => [Number(item.designId), Number(item.quantity || 0)]));
-    const rows = ownedShips.length
-      ? ownedShips.map((ship) => {
-        const qty = selectedMap.get(Number(ship.designId)) || 0;
-        return `
-          <label class="fleet-check-row">
-            <input type="checkbox" data-fleet-check="${slot}" data-design-id="${ship.designId}" ${qty > 0 ? "checked" : ""}>
-            <span>${ship.designName || ship.name} (보유 ${Number(ship.quantity || 0)}척)</span>
-            <input type="number" min="1" max="${Math.max(1, Number(ship.quantity || 1))}" value="${Math.max(1, qty || 1)}" data-fleet-qty="${slot}" data-design-id="${ship.designId}">
-          </label>
-        `;
-      }).join("")
-      : `<div class="hint">보유 함선이 없습니다.</div>`;
-
-    return `
-      <div class="growth-item fleet-builder">
-        <div>
-          <strong>함대 ${slot}</strong>
-          <span>체크 + 수량 입력, 선택 목록 드래그로 순서를 정하세요.</span>
-        </div>
-        <div class="design-grid">
-          <div>
-            <label>함대명</label>
-            <input type="text" data-fleet-name="${slot}" value="${group.name || `함대 ${slot}`}">
-          </div>
-          <div>
-            <label>배치 제독</label>
-            <select data-fleet-admiral="${slot}">${admiralOptions}</select>
-          </div>
-        </div>
-        <div class="fleet-checklist">${rows}</div>
-        <div>
-          <label>선택 목록(드래그)</label>
-          <ul class="fleet-selected-list" data-fleet-selected="${slot}"></ul>
-        </div>
-        <div class="hint" data-fleet-power="${slot}"></div>
-        <div class="button-row">
-          <button type="button" data-save-fleet="${slot}" class="primary">함대 ${slot} 저장</button>
-        </div>
-      </div>
-    `;
+    const group = bySlot.get(slot) || { slot, name: `\ud568\ub300 ${slot}`, assignedShips: [], availableShips: [], admiralId: null };
+    const assigned = Array.isArray(group.assignedShips) ? group.assignedShips : [];
+    const available = Array.isArray(group.availableShips) && group.availableShips.length ? group.availableShips : globalAvailableShips.concat(assigned);
+    const assignedMap = new Map(assigned.map((ship) => [Number(ship.shipId), ship]));
+    const rows = available.length ? available.map((ship) => {
+      const checked = assignedMap.has(Number(ship.shipId));
+      const line = assignedMap.get(Number(ship.shipId))?.line || ship.line || "front";
+      return `
+        <label class="fleet-check-row">
+          <input type="checkbox" data-fleet-check="${slot}" data-ship-id="${ship.shipId}" ${checked ? "checked" : ""}>
+          <span>#${ship.shipId} ${ship.designName} / ${ship.hullName} / HP ${Math.round(Number(ship.hpRatio || 0) * 100)}% / ${ship.damageStateLabel || ship.damageState}</span>
+          <select data-fleet-line="${slot}" data-ship-id="${ship.shipId}">
+            <option value="front" ${line === "front" ? "selected" : ""}>\uc804\uc5f4</option>
+            <option value="mid" ${line === "mid" ? "selected" : ""}>\uc911\uc5f4</option>
+            <option value="back" ${line === "back" ? "selected" : ""}>\ud6c4\uc5f4</option>
+          </select>
+        </label>`;
+    }).join("") : `<div class="hint">\ub300\uae30 \uc0c1\ud0dc\uc758 \uac1c\ubcc4 \ud568\uc120\uc774 \uc5c6\uc2b5\ub2c8\ub2e4.</div>`;
+    return `<div class="growth-item fleet-builder"><div><strong>\ud568\ub300 ${slot}</strong><span>\uac1c\ubcc4 \ud568\uc120\uc744 \uccb4\ud06c\ud558\uace0 \uc804\uc5f4/\uc911\uc5f4/\ud6c4\uc5f4\uc744 \uc9c0\uc815\ud558\uc138\uc694.</span><span>\ud604\uc7ac \uc800\uc7a5: ${Number(group.totalShips || 0)}\ucc99 / \uc804\ud22c\ub825 ${Number(group.fleetCombatPower || 0).toLocaleString()}</span></div><div class="design-grid"><div><label>\ud568\ub300\uba85</label><input type="text" data-fleet-name="${slot}" value="${group.name || `\ud568\ub300 ${slot}`}"></div><div><label>\ubc30\uce58 \uc81c\ub3c5</label><select data-fleet-admiral="${slot}">${admiralOptions}</select></div></div><div class="fleet-checklist">${rows}</div><div class="hint" data-fleet-power="${slot}"></div><div class="button-row"><button type="button" data-save-fleet="${slot}" class="primary">\ud568\ub300 ${slot} \uc800\uc7a5</button></div></div>`;
   }).join("");
-
-  for (let slot = 1; slot <= slotLimit; slot += 1) {
-    const group = bySlot.get(slot) || {};
-    const admiralSelect = elements.fleetGroupView.querySelector(`[data-fleet-admiral="${slot}"]`);
-    if (admiralSelect) admiralSelect.value = group.admiralId ? String(group.admiralId) : "";
-  }
-
-  const bindDrag = (slot) => {
-    const list = elements.fleetGroupView.querySelector(`[data-fleet-selected="${slot}"]`);
-    if (!list) return;
-    let dragging = null;
-    Array.from(list.querySelectorAll("[data-fleet-selected-item]")).forEach((item) => {
-      item.addEventListener("dragstart", () => {
-        dragging = item;
-        item.classList.add("dragging");
-      });
-      item.addEventListener("dragend", () => {
-        item.classList.remove("dragging");
-        dragging = null;
-      });
-      item.addEventListener("dragover", (event) => {
-        event.preventDefault();
-        if (!dragging || dragging === item) return;
-        const rect = item.getBoundingClientRect();
-        const shouldBefore = event.clientY < rect.top + rect.height / 2;
-        if (shouldBefore) list.insertBefore(dragging, item);
-        else list.insertBefore(dragging, item.nextSibling);
-      });
-    });
-  };
-
-  const refreshSelectedList = (slot) => {
-    const container = elements.fleetGroupView.querySelector(`[data-fleet-selected="${slot}"]`);
-    if (!container) return;
-    const existingOrder = Array.from(container.querySelectorAll("[data-fleet-selected-item]")).map((item) => Number(item.dataset.designId));
-    const checks = Array.from(elements.fleetGroupView.querySelectorAll(`[data-fleet-check="${slot}"]`));
-    const selectedIds = checks.filter((item) => item.checked).map((item) => Number(item.dataset.designId));
-    const orderedIds = [
-      ...existingOrder.filter((id) => selectedIds.includes(id)),
-      ...selectedIds.filter((id) => !existingOrder.includes(id))
-    ];
-    container.innerHTML = orderedIds.map((designId) => {
-      const ship = ownedShips.find((item) => Number(item.designId) === designId);
-      const qtyInput = elements.fleetGroupView.querySelector(`[data-fleet-qty="${slot}"][data-design-id="${designId}"]`);
-      const qty = Math.max(1, Number(qtyInput?.value || 1));
-      return ship
-        ? `<li class="fleet-drag-item" draggable="true" data-fleet-selected-item="${slot}" data-design-id="${designId}">
-            <span>::</span><span>${ship.designName || ship.name}</span><span>${qty}척</span>
-          </li>`
-        : "";
-    }).join("");
-    bindDrag(slot);
-    updateFleetPowerPreview(slot, ownedShips, admirals);
-  };
-
-  Array.from(elements.fleetGroupView.querySelectorAll("[data-fleet-check]")).forEach((input) => {
-    input.addEventListener("change", () => refreshSelectedList(Number(input.dataset.fleetCheck)));
-  });
-  Array.from(elements.fleetGroupView.querySelectorAll("[data-fleet-qty]")).forEach((input) => {
-    input.addEventListener("input", () => refreshSelectedList(Number(input.dataset.fleetQty)));
-  });
-  Array.from(elements.fleetGroupView.querySelectorAll("[data-fleet-admiral]")).forEach((input) => {
-    input.addEventListener("change", () => refreshSelectedList(Number(input.dataset.fleetAdmiral)));
-  });
-  for (let slot = 1; slot <= slotLimit; slot += 1) refreshSelectedList(slot);
-
-  Array.from(elements.fleetGroupView.querySelectorAll("[data-save-fleet]")).forEach((button) => {
-    button.addEventListener("click", () => {
-      const slot = Number(button.dataset.saveFleet);
-      const name = String(elements.fleetGroupView.querySelector(`[data-fleet-name="${slot}"]`)?.value || `함대 ${slot}`).trim();
-      const admiralIdRaw = elements.fleetGroupView.querySelector(`[data-fleet-admiral="${slot}"]`)?.value || "";
-      const selected = Array.from(elements.fleetGroupView.querySelectorAll(`[data-fleet-selected="${slot}"] [data-fleet-selected-item]`));
-      const ships = selected.map((item) => {
-        const designId = Number(item.dataset.designId);
-        const qtyInput = elements.fleetGroupView.querySelector(`[data-fleet-qty="${slot}"][data-design-id="${designId}"]`);
-        const maxOwned = Number(ownedShips.find((ship) => Number(ship.designId) === designId)?.quantity || 0);
-        const qty = Math.max(1, Math.min(maxOwned, Number(qtyInput?.value || 1)));
-        return { designId, quantity: qty };
-      }).filter((item) => Number(item.designId) > 0 && Number(item.quantity) > 0);
-      saveFleetGroup(slot, name, ships, admiralIdRaw ? Number(admiralIdRaw) : null);
-    });
-  });
+  for (let slot = 1; slot <= slotLimit; slot += 1) { const group = bySlot.get(slot) || {}; const admiralSelect = elements.fleetGroupView.querySelector(`[data-fleet-admiral="${slot}"]`); if (admiralSelect) admiralSelect.value = group.admiralId ? String(group.admiralId) : ""; }
+  const allVisibleShips = Array.from(new Map(fleetGroupsState.flatMap((group) => (Array.isArray(group.availableShips) ? group.availableShips : []).concat(Array.isArray(group.assignedShips) ? group.assignedShips : [])).map((ship) => [Number(ship.shipId), ship])).values());
+  Array.from(elements.fleetGroupView.querySelectorAll("[data-fleet-check]")).forEach((input) => input.addEventListener("change", () => updateFleetPowerPreview(Number(input.dataset.fleetCheck), allVisibleShips, admirals)));
+  Array.from(elements.fleetGroupView.querySelectorAll("[data-fleet-line]")).forEach((input) => input.addEventListener("change", () => updateFleetPowerPreview(Number(input.dataset.fleetLine), allVisibleShips, admirals)));
+  Array.from(elements.fleetGroupView.querySelectorAll("[data-fleet-admiral]")).forEach((input) => input.addEventListener("change", () => updateFleetPowerPreview(Number(input.dataset.fleetAdmiral), allVisibleShips, admirals)));
+  for (let slot = 1; slot <= slotLimit; slot += 1) updateFleetPowerPreview(slot, allVisibleShips, admirals);
+  Array.from(elements.fleetGroupView.querySelectorAll("[data-save-fleet]")).forEach((button) => { button.addEventListener("click", () => { const slot = Number(button.dataset.saveFleet); const name = String(elements.fleetGroupView.querySelector(`[data-fleet-name="${slot}"]`)?.value || `\ud568\ub300 ${slot}`).trim(); const admiralIdRaw = elements.fleetGroupView.querySelector(`[data-fleet-admiral="${slot}"]`)?.value || ""; const selected = Array.from(elements.fleetGroupView.querySelectorAll(`[data-fleet-check="${slot}"]:checked`)); const ships = selected.map((item) => { const shipId = Number(item.dataset.shipId); const line = elements.fleetGroupView.querySelector(`[data-fleet-line="${slot}"][data-ship-id="${shipId}"]`)?.value || "front"; return { shipId, line }; }).filter((item) => Number(item.shipId) > 0); saveFleetGroup(slot, name, ships, admiralIdRaw ? Number(admiralIdRaw) : null); }); });
 }
 
 async function loadFleetGroups() {
@@ -2637,75 +2764,17 @@ async function saveFleetGroup(slot, name, ships, admiralId = null) {
   }
 }
 
-function renderCity(data) {
+// Current city renderer: building effects, next costs, and city summary.
+function renderCityV2(data){
   cityState = data || null;
   if (!elements.cityView) return;
   const buildings = Array.isArray(data?.buildings) ? data.buildings : [];
   const bonuses = data?.bonuses || {};
   elements.cityView.innerHTML = buildings.length
-    ? buildings.map((item) => `
-      <div class="growth-item">
-        <div>
-          <strong>${item.name} Lv.${item.level}</strong>
-          <span>${item.description}</span>
-          <span>다음 업그레이드: 금속 ${Number(item.nextCost?.metal || 0).toLocaleString()}, 연료 ${Number(item.nextCost?.fuel || 0).toLocaleString()}</span>
-        </div>
-        <button type="button" data-upgrade-city="${item.key}">업그레이드</button>
-      </div>
-    `).join("")
-    : `<div class="growth-item"><div>도시 데이터가 없습니다.</div></div>`;
-
-  elements.cityView.insertAdjacentHTML("beforeend", `
-    <div class="growth-item">
-      <div>
-        <strong>도시 보너스 요약</strong>
-        <span>기초 생산 +금속 ${Number(bonuses.baseMetalFlat || 0)} / +연료 ${Number(bonuses.baseFuelFlat || 0)}</span>
-        <span>전투력 +${Math.round(Number(bonuses.combatBonus || 0) * 100)}%, 이동 +${Math.round(Number(bonuses.movementBonus || 0) * 100)}%</span>
-        <span>식민지 상한 ${Number(bonuses.colonyCap || 0)} / 연구 상한 ${Number(bonuses.researchCap || 0)} / 함선 보유 상한 ${Number(bonuses.populationCap || 0)}</span>
-        <span>제작 라인 ${Number(bonuses.buildLines || 1)} / 제작 시간 배율 x${Number(bonuses.buildTimeMultiplier || 1).toFixed(2)}</span>
-      </div>
-    </div>
-  `);
-  Array.from(elements.cityView.querySelectorAll("[data-upgrade-city]")).forEach((button) => {
-    button.addEventListener("click", () => upgradeCityBuilding(button.dataset.upgradeCity));
-  });
-}
-
-function renderCityV2(data) {
-  cityState = data || null;
-  if (!elements.cityView) return;
-  const buildings = Array.isArray(data?.buildings) ? data.buildings : [];
-  const bonuses = data?.bonuses || {};
-  elements.cityView.innerHTML = buildings.length
-    ? buildings.map((item) => `
-      <div class="growth-item">
-        <div>
-          <strong>${item.name} Lv.${item.level}</strong>
-          <span>${item.description}</span>
-          <span>현재 효과: ${item.currentEffect || "-"}</span>
-          <span>다음 레벨 효과: ${item.nextEffect || "-"}</span>
-          <span>다음 업그레이드 비용: 금속 ${Number(item.nextCost?.metal || 0).toLocaleString()}, 연료 ${Number(item.nextCost?.fuel || 0).toLocaleString()}</span>
-        </div>
-        <button type="button" data-upgrade-city="${item.key}">업그레이드</button>
-      </div>
-    `).join("")
-    : `<div class="growth-item"><div>도시 정보를 불러오지 못했습니다.</div></div>`;
-
-  elements.cityView.insertAdjacentHTML("beforeend", `
-    <div class="growth-item">
-      <div>
-        <strong>도시 종합 현황</strong>
-        <span>기지 자원 보너스: +금속 ${Number(bonuses.baseMetalFlat || 0)} / +연료 ${Number(bonuses.baseFuelFlat || 0)}</span>
-        <span>전투 보너스 +${Math.round(Number(bonuses.combatBonus || 0) * 100)}%, 이동 보너스 +${Math.round(Number(bonuses.movementBonus || 0) * 100)}%</span>
-        <span>식민지(점령지): ${Number(data?.colonyCount || 0)} / ${Number(bonuses.colonyCap || 0)}</span>
-        <span>연구 상한 ${Number(bonuses.researchCap || 0)} / 함선 보유 상한 ${Number(bonuses.populationCap || 0)}</span>
-        <span>생산 라인 ${Number(bonuses.buildLines || 1)} / 생산 시간 계수 x${Number(bonuses.buildTimeMultiplier || 1).toFixed(2)}</span>
-      </div>
-    </div>
-  `);
-  Array.from(elements.cityView.querySelectorAll("[data-upgrade-city]")).forEach((button) => {
-    button.addEventListener("click", () => upgradeCityBuilding(button.dataset.upgradeCity));
-  });
+    ? buildings.map((item) => `<div class="growth-item"><div><strong>${item.name} Lv.${item.level}</strong><span>${item.description}</span><span>\ud604\uc7ac \ud6a8\uacfc: ${item.currentEffect || "-"}</span><span>\ub2e4\uc74c \ub808\ubca8 \ud6a8\uacfc: ${item.nextEffect || "-"}</span><span>\ub2e4\uc74c \uc5c5\uadf8\ub808\uc774\ub4dc \ube44\uc6a9: \uae08\uc18d ${Number(item.nextCost?.metal || 0).toLocaleString()}, \uc5f0\ub8cc ${Number(item.nextCost?.fuel || 0).toLocaleString()}</span></div><button type="button" data-upgrade-city="${item.key}">\uc5c5\uadf8\ub808\uc774\ub4dc</button></div>`).join("")
+    : `<div class="growth-item"><div>\ub3c4\uc2dc \uc815\ubcf4\ub97c \ubd88\ub7ec\uc624\uc9c0 \ubabb\ud588\uc2b5\ub2c8\ub2e4.</div></div>`;
+  elements.cityView.insertAdjacentHTML("beforeend", `<div class="growth-item"><div><strong>\ub3c4\uc2dc \uc885\ud569 \ud604\ud669</strong><span>\uae30\ucd08 \uc790\uc6d0 \ubcf4\ub108\uc2a4 +\uae08\uc18d ${Number(bonuses.baseMetalFlat || 0)} / +\uc5f0\ub8cc ${Number(bonuses.baseFuelFlat || 0)}</span><span>\uc804\ud22c \ubcf4\ub108\uc2a4 +${Math.round(Number(bonuses.combatBonus || 0) * 100)}%, \uc774\ub3d9 \ubcf4\ub108\uc2a4 +${Math.round(Number(bonuses.movementBonus || 0) * 100)}%</span><span>\uc2dd\ubbfc\uc9c0(\uc810\ub839\uc9c0): ${Number(data?.colonyCount || 0)} / ${Number(bonuses.colonyCap || 0)}</span><span>\uc5f0\uad6c \uc0c1\ud55c ${Number(bonuses.researchCap || 0)} / \ud568\uc120 \ubcf4\uc720 \uc0c1\ud55c ${Number(bonuses.populationCap || 0)}</span><span>\uc0dd\uc0b0 \ub77c\uc778 ${Number(bonuses.buildLines || 1)} / \uc0dd\uc0b0 \uc2dc\uac04 \uacc4\uc218 x${Number(bonuses.buildTimeMultiplier || 1).toFixed(2)}</span></div></div>`);
+  Array.from(elements.cityView.querySelectorAll("[data-upgrade-city]")).forEach((button) => button.addEventListener("click", () => upgradeCityBuilding(button.dataset.upgradeCity)));
 }
 
 async function loadCity() {
@@ -2777,143 +2846,22 @@ async function resetProductionLogs() {
   }
 }
 
-function renderGarrisonOverview(data) {
+// Current garrison battle renderer with outpost log filtering.
+function renderGarrisonOverviewV2(data){
   garrisonOverviewState = data || null;
   if (!elements.garrisonBattleView) return;
   const zones = Array.isArray(data?.zones) ? data.zones : [];
   const alerts = Array.isArray(data?.alerts) ? data.alerts : [];
   const records = Array.isArray(data?.records) ? data.records : [];
-
-  const zoneHtml = zones.length
-    ? zones.map((zone) => `
-      <div class="growth-item">
-        <div>
-          <strong>Lv.${zone.level} ${zone.zoneName}</strong>
-          <span>주둔 전투력 ${Number(zone.assignedPower || 0).toLocaleString()}</span>
-          <span>${(zone.assignedShips || []).map((ship) => `${ship.designName} ${ship.quantity}척`).join(", ") || "주둔 편성 없음"}</span>
-        </div>
-      </div>
-    `).join("")
-    : `<div class="growth-item"><div>점령지가 없습니다.</div></div>`;
-
-  const alertHtml = alerts.length
-    ? alerts.map((item) => `
-      <div class="growth-item">
-        <div>
-          <strong>${item.targetKind === "outpost" ? `전초기지 ${item.targetName}` : "본진"} 공격 경보</strong>
-          <span>${item.attackerUsername} / 전투력 ${Number(item.attackPower || 0).toLocaleString()} / 함선 ${Number(item.shipCount || 0)}척</span>
-          <span>도착까지 ${formatSeconds(Math.max(0, Number(item.remainingSeconds || 0)))}</span>
-        </div>
-      </div>
-    `).join("")
-    : `<div class="growth-item"><div>현재 침공 경보가 없습니다.</div></div>`;
-
-  const recordHtml = records.length
-    ? records.slice(0, 20).map((item) => `
-      <div class="growth-item">
-        <div>
-          <strong>${item.title} / ${item.result}</strong>
-          <span>${new Date(item.createdAt).toLocaleString()}</span>
-          <span>${Array.isArray(item.log) ? item.log.slice(0, 2).join(" / ") : ""}</span>
-        </div>
-      </div>
-    `).join("")
-    : `<div class="growth-item"><div>주둔 전투 기록이 없습니다.</div></div>`;
-
-  elements.garrisonBattleView.innerHTML = `
-    <div class="growth-item"><div><strong>침공 경보</strong></div></div>
-    ${alertHtml}
-    <div class="growth-item"><div><strong>점령지 주둔 현황</strong></div></div>
-    ${zoneHtml}
-    <div class="growth-item"><div><strong>주둔 전투 기록</strong></div></div>
-    ${recordHtml}
-  `;
-}
-
-function renderGarrisonOverviewV2(data) {
-  garrisonOverviewState = data || null;
-  if (!elements.garrisonBattleView) return;
-  const zones = Array.isArray(data?.zones) ? data.zones : [];
-  const alerts = Array.isArray(data?.alerts) ? data.alerts : [];
-  const records = Array.isArray(data?.records) ? data.records : [];
-  if (!zones.some((zone) => Number(zone.zoneId) === Number(garrisonZoneFilterId))) {
-    garrisonZoneFilterId = null;
-  }
+  if (!zones.some((zone) => Number(zone.zoneId) === Number(garrisonZoneFilterId))) garrisonZoneFilterId = null;
   const activeZone = zones.find((zone) => Number(zone.zoneId) === Number(garrisonZoneFilterId)) || null;
-
-  const zoneFilterHtml = zones.length
-    ? zones.map((zone) => `
-      <button type="button" class="${Number(zone.zoneId) === Number(garrisonZoneFilterId) ? "active" : ""}" data-garrison-zone-filter="${zone.zoneId}">
-        Lv.${zone.level} ${zone.zoneName}
-      </button>
-    `).join("")
-    : `<span class="hint">점령지가 없습니다.</span>`;
-
-  const filteredRecords = activeZone
-    ? records.filter((item) => String(item.title || "").includes(activeZone.zoneName))
-    : records;
-
-  const zoneHtml = zones.length
-    ? zones.map((zone) => `
-      <div class="growth-item">
-        <div>
-          <strong>Lv.${zone.level} ${zone.zoneName}</strong>
-          <span>주둔 전투력 ${Number(zone.assignedPower || 0).toLocaleString()}</span>
-          <span>${(zone.assignedShips || []).map((ship) => `${ship.designName} ${ship.quantity}척`).join(", ") || "주둔 편성 없음"}</span>
-        </div>
-      </div>
-    `).join("")
-    : `<div class="growth-item"><div>점령지가 없습니다.</div></div>`;
-
-  const alertHtml = alerts.length
-    ? alerts.map((item) => `
-      <div class="growth-item">
-        <div>
-          <strong>${item.targetKind === "outpost" ? `전초기지 ${item.targetName}` : "본진"} 공격 경보</strong>
-          <span>${item.attackerUsername} / 전투력 ${Number(item.attackPower || 0).toLocaleString()} / 함선 ${Number(item.shipCount || 0)}척</span>
-          <span>도착까지 ${formatSeconds(Math.max(0, Number(item.remainingSeconds || 0)))}</span>
-        </div>
-      </div>
-    `).join("")
-    : `<div class="growth-item"><div>현재 침공 경보가 없습니다.</div></div>`;
-
-  const recordHtml = filteredRecords.length
-    ? filteredRecords.slice(0, 20).map((item) => `
-      <div class="growth-item">
-        <div>
-          <strong>${item.title} / ${item.result}</strong>
-          <span>${new Date(item.createdAt).toLocaleString()}</span>
-          <span>${Array.isArray(item.log) ? item.log.slice(0, 2).join(" / ") : ""}</span>
-        </div>
-      </div>
-    `).join("")
-    : `<div class="growth-item"><div>${activeZone ? `${activeZone.zoneName} 관련 전투 기록이 없습니다.` : "주둔 전투 기록이 없습니다."}</div></div>`;
-
-  elements.garrisonBattleView.innerHTML = `
-    <div class="growth-item">
-      <div>
-        <strong>전초기지 로그 필터</strong>
-        <div class="button-row">
-          <button type="button" ${activeZone ? "" : "class=\"active\""} data-garrison-zone-filter="all">전체</button>
-          ${zoneFilterHtml}
-        </div>
-      </div>
-    </div>
-    <div class="growth-item"><div><strong>침공 경보</strong></div></div>
-    ${alertHtml}
-    <div class="growth-item"><div><strong>점령지 주둔 현황</strong></div></div>
-    ${zoneHtml}
-    <div class="growth-item"><div><strong>주둔 전투 기록</strong></div></div>
-    ${recordHtml}
-  `;
-
-  Array.from(elements.garrisonBattleView.querySelectorAll("[data-garrison-zone-filter]")).forEach((button) => {
-    button.addEventListener("click", () => {
-      const value = String(button.dataset.garrisonZoneFilter || "");
-      garrisonZoneFilterId = value === "all" ? null : Number(value);
-      renderGarrisonOverviewV2(garrisonOverviewState);
-    });
-  });
+  const zoneFilterHtml = zones.length ? zones.map((zone) => `<button type="button" class="${Number(zone.zoneId) === Number(garrisonZoneFilterId) ? "active" : ""}" data-garrison-zone-filter="${zone.zoneId}">Lv.${zone.level} ${zone.zoneName}</button>`).join("") : `<span class="hint">\uc810\ub839\uc9c0\uac00 \uc5c6\uc2b5\ub2c8\ub2e4.</span>`;
+  const filteredRecords = activeZone ? records.filter((item) => String(item.title || "").includes(activeZone.zoneName)) : records;
+  const zoneHtml = zones.length ? zones.map((zone) => `<div class="growth-item"><div><strong>Lv.${zone.level} ${zone.zoneName}</strong><span>\uc8fc\ub454 \uc804\ud22c\ub825 ${Number(zone.assignedPower || 0).toLocaleString()}</span><span>${(zone.assignedShips || []).map((ship) => `${ship.designName} ${ship.quantity}\ucc99`).join(", ") || "\uc8fc\ub454 \ud568\uc120 \uc5c6\uc74c"}</span></div></div>`).join("") : `<div class="growth-item"><div>\uc810\ub839\uc9c0\uac00 \uc5c6\uc2b5\ub2c8\ub2e4.</div></div>`;
+  const alertHtml = alerts.length ? alerts.map((item) => `<div class="growth-item"><div><strong>${item.targetKind === "outpost" ? `\uc804\ucd08\uae30\uc9c0 ${item.targetName}` : "\ubcf8\uc9c4"} \uacf5\uaca9 \uacbd\ubcf4</strong><span>${item.attackerUsername} / \uc804\ud22c\ub825 ${Number(item.attackPower || 0).toLocaleString()} / \ud568\uc120 ${Number(item.shipCount || 0)}\ucc99</span><span>\ub3c4\ucc29\uae4c\uc9c0 ${formatSeconds(Math.max(0, Number(item.remainingSeconds || 0)))}</span></div></div>`).join("") : `<div class="growth-item"><div>\ud604\uc7ac \uce68\uacf5 \uacbd\ubcf4\uac00 \uc5c6\uc2b5\ub2c8\ub2e4.</div></div>`;
+  const recordHtml = filteredRecords.length ? filteredRecords.slice(0, 20).map((item) => `<div class="growth-item"><div><strong>${item.title} / ${item.result}</strong><span>${new Date(item.createdAt).toLocaleString()}</span><span>${Array.isArray(item.log) ? item.log.slice(0, 2).join(" / ") : ""}</span></div></div>`).join("") : `<div class="growth-item"><div>${activeZone ? `${activeZone.zoneName} \uad00\ub828 \uc804\ud22c \uae30\ub85d\uc774 \uc5c6\uc2b5\ub2c8\ub2e4.` : "\uc8fc\ub454 \uc804\ud22c \uae30\ub85d\uc774 \uc5c6\uc2b5\ub2c8\ub2e4."}</div></div>`;
+  elements.garrisonBattleView.innerHTML = `<div class="growth-item"><div><strong>\uc804\ucd08\uae30\uc9c0 \ub85c\uadf8 \ud544\ud130</strong><div class="button-row"><button type="button" ${activeZone ? "" : "class=\"active\""} data-garrison-zone-filter="all">\uc804\uccb4</button>${zoneFilterHtml}</div></div></div><div class="growth-item"><div><strong>\uce68\uacf5 \uacbd\ubcf4</strong></div></div>${alertHtml}<div class="growth-item"><div><strong>\uc810\ub839\uc9c0 \uc8fc\ub454 \ud604\ud669</strong></div></div>${zoneHtml}<div class="growth-item"><div><strong>\uc8fc\ub454 \uc804\ud22c \uae30\ub85d</strong></div></div>${recordHtml}`;
+  Array.from(elements.garrisonBattleView.querySelectorAll("[data-garrison-zone-filter]")).forEach((button) => button.addEventListener("click", () => { const value = String(button.dataset.garrisonZoneFilter || ""); garrisonZoneFilterId = value === "all" ? null : Number(value); renderGarrisonOverviewV2(garrisonOverviewState); }));
 }
 
 async function loadGarrisonOverview() {
@@ -2926,6 +2874,7 @@ function shouldShowResearchNode(node) {
   return cat === researchCategoryFilter;
 }
 
+// Draws SVG dependency lines between visible tech nodes.
 function drawTechGraphEdges() {
   const canvas = elements.researchView?.querySelector(".tech-graph-canvas");
   const svg = elements.researchView?.querySelector(".tech-edge-layer");
@@ -2971,6 +2920,7 @@ function drawTechGraphEdges() {
   });
 }
 
+// Applies pan/zoom transform to the tech graph canvas.
 function applyTechGraphTransform() {
   const canvas = document.getElementById("techGraphCanvas");
   const zoomLabel = document.getElementById("techGraphZoomLabel");
@@ -3051,6 +3001,7 @@ function setupTechGraphInteraction() {
   applyTechGraphTransform();
 }
 
+// Local research countdown; refreshes from server on completion.
 function startResearchRealtimeTick() {
   if (researchTickTimer) {
     clearInterval(researchTickTimer);
@@ -3080,345 +3031,81 @@ function startResearchRealtimeTick() {
   }, 1000);
 }
 
-function renderResearchHubV3(data) {
-  researchHubState = JSON.parse(JSON.stringify(data || {}));
-  const nodes = Array.isArray(data?.nodes) ? data.nodes : [];
-  if (!nodes.length) {
-    elements.researchView.textContent = "테크트리 정보를 불러오지 못했습니다.";
-    researchButtons = [];
-    return;
-  }
-  const active = data?.activeResearch;
-  const policy = data?.policies || {};
-  const filterOptions = [
-    { key: "all", label: "전체" },
-    { key: "engine", label: "엔진" },
-    { key: "weapon", label: "무기" },
-    { key: "defense", label: "방어" },
-    { key: "utility", label: "보조" }
-  ];
-  if (!filterOptions.some((item) => item.key === researchCategoryFilter)) researchCategoryFilter = "all";
-  const groupedByTier = [1, 2, 3, 4].map((tier) => ({
-    tier,
-    nodes: nodes.filter((node) => Number(node.tier || 1) === tier).filter((node) => shouldShowResearchNode(node))
-  }));
-
-  const renderNode = (node) => {
-    const key = String(node.key || "");
-    const expanded = researchExpandedKeys.has(key);
-    const state = node.researched ? "완료" : node.lockedByBranch ? "분기잠금" : node.available ? "연구 가능" : "잠김";
-    const disabled = node.available ? "" : "disabled";
-    const req = Array.isArray(node.requires) ? node.requires.join(",") : "";
-    return `
-      <article class="tech-graph-node ${expanded ? "expanded" : ""}" data-node-key="${key}" data-requires="${req}">
-        <button type="button" class="tech-node-head" data-node-toggle="${key}">
-          <strong>${node.name}</strong>
-          <span>${state}</span>
-        </button>
-        <div class="tech-node-body">
-          <p>${node.description || ""}</p>
-          <span>비용: 금속 ${Number(node.cost?.metal || 0).toLocaleString()}, 연료 ${Number(node.cost?.fuel || 0).toLocaleString()}</span>
-          <span>시간: ${formatSeconds(Number(node.researchTime || 0))}</span>
-          <span>선행: ${(node.requires || []).length ? node.requires.join(", ") : "없음"}</span>
-          <button type="button" data-tech-start="${node.key}" ${disabled}>연구 시작</button>
-        </div>
-      </article>
-    `;
-  };
-
-  elements.researchView.innerHTML = `
-    <div class="growth-item">
-      <div>
-        <strong>연구 현황</strong>
-        <span>중앙정부 Lv.${Number(policy.governmentLevel || 1)} / 연구소 Lv.${Number(data?.labLevel || 1)} (해금 티어 ${Number(data?.labTierUnlocked || 1)})</span>
-        <span>진행 중 연구: ${active ? `${active.key} / 남은 ` : "없음"}</span>
-        ${active ? `<span id="researchActiveRemaining">${formatSeconds(Number(active.remainingSeconds || 0))}</span>` : ""}
-      </div>
-      <div class="research-speedup-controls">
-        <div class="speedup-controls">
-          <select id="researchSpeedupResource">
-            <option value="fuel">연료</option>
-            <option value="metal">금속</option>
-          </select>
-          <input id="researchSpeedupAmount" type="number" min="1" value="500">
-          <button type="button" id="speedupResearchButton" ${active ? "" : "disabled"}>연구 가속</button>
-        </div>
-        <span class="hint">기본 50재화=1초, 연속 가속 시 최대 100재화=1초</span>
-      </div>
-    </div>
-    <div class="growth-item">
-      <div class="tech-filter-bar">
-        ${filterOptions.map((item) => `<button type="button" class="tech-filter-button ${researchCategoryFilter === item.key ? "active" : ""}" data-tech-filter="${item.key}">${item.label}</button>`).join("")}
-      </div>
-    </div>
-    <div class="tech-graph">
-      <svg class="tech-edge-layer"></svg>
-      <div class="tech-columns">
-        ${groupedByTier.map((col) => `
-          <section class="tech-column">
-            <h4>Tier ${col.tier}</h4>
-            <div class="tech-column-list">
-              ${col.nodes.length ? col.nodes.map(renderNode).join("") : `<div class="hint">표시할 노드 없음</div>`}
-            </div>
-          </section>
-        `).join("")}
-      </div>
-    </div>
-  `;
-
-  researchButtons = Array.from(document.querySelectorAll("[data-tech-start]"));
-  researchButtons.forEach((button) => button.addEventListener("click", () => upgradeResearch(button.dataset.techStart)));
-  Array.from(document.querySelectorAll("[data-tech-filter]")).forEach((button) => {
-    button.addEventListener("click", () => {
-      researchCategoryFilter = String(button.dataset.techFilter || "all");
-      renderResearchHubV3(researchHubState || data);
-    });
-  });
-  Array.from(document.querySelectorAll("[data-node-toggle]")).forEach((button) => {
-    button.addEventListener("click", () => {
-      const key = String(button.dataset.nodeToggle || "");
-      if (!key) return;
-      if (researchExpandedKeys.has(key)) researchExpandedKeys.delete(key);
-      else researchExpandedKeys.add(key);
-      renderResearchHubV3(researchHubState || data);
-    });
-  });
-  document.getElementById("speedupResearchButton")?.addEventListener("click", speedupResearch);
-  requestAnimationFrame(() => drawTechGraphEdges());
-  startResearchRealtimeTick();
-}
-
+// Current research UI: five level tracks plus automatic unlock summary.
 function renderResearchHubV4(data) {
   researchHubState = JSON.parse(JSON.stringify(data || {}));
-  const nodes = Array.isArray(data?.nodes) ? data.nodes : [];
-  if (!nodes.length) {
-    elements.researchView.textContent = "테크트리 정보를 불러오지 못했습니다.";
+  const tracks = Array.isArray(data?.tracks) ? data.tracks : [];
+  const active = data?.activeResearch || null;
+  const policy = data?.policies || {};
+  const unlockSummary = data?.unlockSummary || {};
+  if (!tracks.length) {
+    elements.researchView.textContent = "\uc5f0\uad6c \uc815\ubcf4\ub97c \ubd88\ub7ec\uc624\uc9c0 \ubabb\ud588\uc2b5\ub2c8\ub2e4.";
     researchButtons = [];
     return;
   }
-
-  const active = data?.activeResearch;
-  const policy = data?.policies || {};
   const filterOptions = [
-    { key: "all", label: "전체" },
-    { key: "engine", label: "엔진" },
-    { key: "weapon", label: "무기" },
-    { key: "defense", label: "방어" },
-    { key: "utility", label: "보조" }
+    { key: "all", label: "\uc804\uccb4" },
+    { key: "hull", label: "\ud568\uae09" },
+    { key: "engine", label: "\uc5d4\uc9c4" },
+    { key: "weapon", label: "\ubb34\uae30" },
+    { key: "defense", label: "\ubc29\uc5b4" },
+    { key: "utility", label: "\ubcf4\uc870" }
   ];
   if (!filterOptions.some((item) => item.key === researchCategoryFilter)) researchCategoryFilter = "all";
-
-  const visibleNodes = nodes
-    .filter((node) => shouldShowResearchNode(node))
-    .slice()
-    .sort((a, b) => {
-      const tierDiff = Number(a.tier || 1) - Number(b.tier || 1);
-      if (tierDiff) return tierDiff;
-      const catDiff = String(a.category || "").localeCompare(String(b.category || ""));
-      if (catDiff) return catDiff;
-      return String(a.name || a.key || "").localeCompare(String(b.name || b.key || ""));
-    });
-
-  if (!visibleNodes.length) {
-    elements.researchView.innerHTML = `
-      <div class="growth-item"><strong>현재 필터에서 표시할 연구가 없습니다.</strong></div>
-      <div class="growth-item">
-        <div class="tech-filter-bar">
-          ${filterOptions.map((item) => `<button type="button" class="tech-filter-button ${researchCategoryFilter === item.key ? "active" : ""}" data-tech-filter="${item.key}">${item.label}</button>`).join("")}
-        </div>
-      </div>
-    `;
-    Array.from(document.querySelectorAll("[data-tech-filter]")).forEach((button) => {
-      button.addEventListener("click", () => {
-        researchCategoryFilter = String(button.dataset.techFilter || "all");
-        renderResearchHubV4(researchHubState || data);
-      });
-    });
-    return;
-  }
-
-  const preferredLaneOrder = ["engine", "weapon", "defense", "utility", "industry", "special", "hull"];
-  const foundLaneSet = new Set(visibleNodes.map((node) => String(node.category || "special")));
-  const orderedLanes = preferredLaneOrder.filter((cat) => foundLaneSet.has(cat));
-  Array.from(foundLaneSet)
-    .filter((cat) => !orderedLanes.includes(cat))
-    .sort((a, b) => a.localeCompare(b))
-    .forEach((cat) => orderedLanes.push(cat));
-
-  const laneMap = new Map();
-  orderedLanes.forEach((lane, laneIdx) => laneMap.set(lane, laneIdx));
-  const tierMap = new Map();
-  visibleNodes.forEach((node) => {
-    const tier = Number(node.tier || 1);
-    const lane = String(node.category || "special");
-    if (!tierMap.has(tier)) tierMap.set(tier, new Map());
-    const catMap = tierMap.get(tier);
-    if (!catMap.has(lane)) catMap.set(lane, []);
-    catMap.get(lane).push(node);
-  });
-  const tierValues = Array.from(new Set(visibleNodes.map((node) => Number(node.tier || 1)))).sort((a, b) => a - b);
-  const firstTier = tierValues.length ? tierValues[0] : 1;
-
-  const nodeWidth = 340;
-  const nodeHeight = 200;
-  const tierGap = 760;
-  const stackGap = 300;
-  const baseX = 160;
-  const baseY = 140;
-
-  const laneOffsets = new Map();
-  let laneCursorY = baseY;
-  orderedLanes.forEach((lane) => {
-    let maxCountInLane = 1;
-    tierValues.forEach((tier) => {
-      const inTier = (tierMap.get(Number(tier))?.get(lane) || []).length;
-      if (inTier > maxCountInLane) maxCountInLane = inTier;
-    });
-    const laneBandHeight = ((maxCountInLane - 1) * stackGap) + nodeHeight + 180;
-    laneOffsets.set(lane, laneCursorY);
-    laneCursorY += laneBandHeight;
-  });
-
-  const placed = [];
-  tierValues.forEach((tier) => {
-    const catMap = tierMap.get(tier) || new Map();
-    orderedLanes.forEach((lane) => {
-      const laneNodes = (catMap.get(lane) || []).slice();
-      laneNodes.forEach((node, index) => {
-        const laneIndex = Number(laneMap.get(lane) || 0);
-        const laneBaseY = Number(laneOffsets.get(lane) || (baseY + (laneIndex * (nodeHeight + 180))));
-        const x = baseX + ((Number(tier) - firstTier) * tierGap);
-        const y = laneBaseY + (index * stackGap);
-        placed.push({
-          node,
-          x,
-          y,
-          cx: x + (nodeWidth / 2),
-          cy: y + (nodeHeight / 2)
-        });
-      });
-    });
-  });
-
-  const maxX = Math.max(...placed.map((item) => item.x + nodeWidth), 2000);
-  const maxY = Math.max(...placed.map((item) => item.y + nodeHeight), 1400);
-  const canvasWidth = maxX + 260;
-  const canvasHeight = maxY + 220;
-  const byKey = new Map(placed.map((item) => [String(item.node.key || ""), item]));
-
-  const renderNode = (node) => {
-    const key = String(node?.key || "");
-    const place = byKey.get(key);
-    if (!place) return "";
-    const expanded = researchExpandedKeys.has(key);
-    const stateClass = node.researched
-      ? "state-completed"
-      : node.lockedByBranch
-        ? "state-branch-locked"
-        : node.available
-          ? "state-available"
-          : "state-locked";
-    const stateText = node.researched
-      ? "완료"
-      : node.lockedByBranch
-        ? "분기 잠금"
-        : node.available
-          ? "연구 가능"
-          : "잠김";
-    const researchingClass = active?.key === key ? "state-researching" : "";
-    const disabled = node.available ? "" : "disabled";
-    const req = Array.isArray(node.requires) ? node.requires.join(",") : "";
-    return `
-      <article
-        class="tech-graph-node ${expanded ? "expanded" : ""} ${stateClass} ${researchingClass}"
-        data-node-key="${key}"
-        data-requires="${req}"
-        data-cx="${place.cx}"
-        data-cy="${place.cy}"
-        style="left:${place.x}px;top:${place.y}px;width:${nodeWidth}px;"
-      >
-        <button type="button" class="tech-node-head" data-node-toggle="${key}">
-          <strong>${node.name}</strong>
-          <span>${stateText}</span>
-        </button>
-        <div class="tech-node-body">
-          <p>${node.description || ""}</p>
-          <span>비용: 금속 ${Number(node.cost?.metal || 0).toLocaleString()} / 연료 ${Number(node.cost?.fuel || 0).toLocaleString()}</span>
-          <span>시간: ${formatSeconds(Number(node.researchTime || 0))}</span>
-          <span>선행: ${(node.requires || []).length ? node.requires.join(", ") : "없음"}</span>
-          <button type="button" data-tech-start="${node.key}" ${disabled}>연구 시작</button>
-        </div>
-      </article>
-    `;
+  const categoryOfUnlockItem = (item) => {
+    const direct = String(item?.type || item?.category || "").toLowerCase();
+    if (["hull", "engine", "weapon", "defense", "utility"].includes(direct)) return direct;
+    const value = String(item?.name || "").toLowerCase();
+    if (/(corvette|destroyer|cruiser|monitor|battleship|carrier|dreadnought|titan)/.test(value)) return "hull";
+    if (/engine/.test(value)) return "engine";
+    if (/(weapon|rail|laser|missile|siege|torpedo)/.test(value)) return "weapon";
+    if (/(armor|shield|defense)/.test(value)) return "defense";
+    return "utility";
   };
-
+  const lockedItems = Array.isArray(unlockSummary?.locked) ? unlockSummary.locked : [];
+  const unlockedItems = Array.isArray(unlockSummary?.unlocked) ? unlockSummary.unlocked : [];
+  const filteredLocked = researchCategoryFilter === "all" ? lockedItems : lockedItems.filter((item) => categoryOfUnlockItem(item) === researchCategoryFilter);
+  const filteredUnlocked = researchCategoryFilter === "all" ? unlockedItems : unlockedItems.filter((item) => categoryOfUnlockItem(item) === researchCategoryFilter);
+  const currentTrack = active?.trackType ? tracks.find((track) => String(track.key) === String(active.trackType)) : null;
+  const activeTitle = currentTrack ? `${currentTrack.name} Lv.${Number(active.targetLevel || currentTrack.nextLevel || 1)}` : "\uc5c6\uc74c";
   elements.researchView.innerHTML = `
     <div class="growth-item">
       <div>
-        <strong>연구 현황</strong>
-        <span>중앙정부 Lv.${Number(policy.governmentLevel || 1)} / 연구소 Lv.${Number(data?.labLevel || 1)} (해금 티어 ${Number(data?.labTierUnlocked || 1)})</span>
-        <span>진행 중 연구: ${active ? `${active.key} / 진행 중` : "없음"}</span>
-        ${active ? `<span id="researchActiveRemaining">${formatSeconds(Number(active.remainingSeconds || 0))}</span>` : ""}
+        <strong>\uc5f0\uad6c \ud604\ud669</strong>
+        <span>\uc911\uc559\uc815\ubd80 Lv.${Number(policy.governmentLevel || 1)} / \uc5f0\uad6c\uc18c Lv.${Number(data?.labLevel || 1)}</span>
+        <span>\uc9c4\ud589 \uc911 \uc5f0\uad6c: ${activeTitle}</span>
+        ${active ? `<span id="researchActiveRemaining">\ub0a8\uc740 \uc2dc\uac04 ${formatSeconds(Number(active.remainingSeconds || 0))}</span>` : ""}
       </div>
       <div class="research-speedup-controls">
         <div class="speedup-controls">
           <select id="researchSpeedupResource">
-            <option value="fuel">연료</option>
-            <option value="metal">금속</option>
+            <option value="fuel">\uc5f0\ub8cc</option>
+            <option value="metal">\uae08\uc18d</option>
           </select>
           <input id="researchSpeedupAmount" type="number" min="1" value="500">
-          <button type="button" id="speedupResearchButton" ${active ? "" : "disabled"}>연구 가속</button>
+          <button type="button" id="speedupResearchButton" ${active ? "" : "disabled"}>\uc5f0\uad6c \uac00\uc18d</button>
         </div>
-        <span class="hint">기본 50 자원 = 1초, 연속 가속 디버프 시 최대 100 자원 = 1초</span>
+        <span class="hint">\uac00\uc18d \ud6a8\uc728: \uae30\ubcf8 50 \uc7ac\ud654 = 1\ucd08, \uc5f0\uc18d \uc0ac\uc6a9 \ud328\ub110\ud2f0 \ucd5c\ub300 100 \uc7ac\ud654 = 1\ucd08</span>
       </div>
     </div>
-    <div class="growth-item">
-      <div class="tech-filter-bar">
-        ${filterOptions.map((item) => `<button type="button" class="tech-filter-button ${researchCategoryFilter === item.key ? "active" : ""}" data-tech-filter="${item.key}">${item.label}</button>`).join("")}
-      </div>
+    <div class="growth-item"><div class="tech-filter-bar">${filterOptions.map((item) => `<button type="button" class="tech-filter-button ${researchCategoryFilter === item.key ? "active" : ""}" data-tech-filter="${item.key}">${item.label}</button>`).join("")}</div></div>
+    <div class="shipyard-grid">
+      ${tracks.map((track) => `<div class="growth-item"><div><strong>${track.name}</strong><span>\ud604\uc7ac Lv.${Number(track.level || 0)} / \ub2e4\uc74c Lv.${Number(track.nextLevel || 1)}</span><span>${track.description || ""}</span><span>\ube44\uc6a9: \uae08\uc18d ${Number(track.nextCost?.metal || 0).toLocaleString()} / \uc5f0\ub8cc ${Number(track.nextCost?.fuel || 0).toLocaleString()}</span><span>\uc2dc\uac04: ${formatSeconds(Number(track.nextTime || 0))}</span></div><div class="button-row"><button type="button" data-tech-start="${track.key}" ${(active && !track.researching) ? "disabled" : ""}>\uc5f0\uad6c \uc2dc\uc791</button></div></div>`).join("")}
     </div>
-    <div class="tech-graph-toolbar">
-      <div class="left">
-        <strong>테크 지도</strong>
-        <span class="hint">드래그로 이동, 휠로 확대/축소</span>
-      </div>
-      <div class="right">
-        <button type="button" id="techGraphZoomOut">-</button>
-        <button type="button" id="techGraphZoomIn">+</button>
-        <button type="button" id="techGraphCenter">중앙</button>
-        <span id="techGraphZoomLabel">100%</span>
-      </div>
-    </div>
-    <div id="techGraphViewport" class="tech-graph-viewport">
-      <div id="techGraphCanvas" class="tech-graph-canvas" data-canvas-width="${canvasWidth}" data-canvas-height="${canvasHeight}" style="width:${canvasWidth}px;height:${canvasHeight}px;">
-        <svg class="tech-edge-layer"></svg>
-        ${placed.map((item) => renderNode(item.node)).join("")}
-      </div>
+    <div class="shipyard-grid">
+      <div class="growth-item"><div><strong>\ud574\uae08 \uc644\ub8cc (${filteredUnlocked.length})</strong></div><div class="log-box">${groupUnlockItems(filteredUnlocked, false)}</div></div>
+      <div class="growth-item"><div><strong>\uc7a0\uae08 \ubaa9\ub85d (${filteredLocked.length})</strong></div><div class="log-box">${groupUnlockItems(filteredLocked, true)}</div></div>
     </div>
   `;
-
   researchButtons = Array.from(document.querySelectorAll("[data-tech-start]"));
   researchButtons.forEach((button) => button.addEventListener("click", () => upgradeResearch(button.dataset.techStart)));
   Array.from(document.querySelectorAll("[data-tech-filter]")).forEach((button) => {
     button.addEventListener("click", () => {
-      researchCategoryFilter = String(button.dataset.techFilter || "all");
-      renderResearchHubV4(researchHubState || data);
-    });
-  });
-  Array.from(document.querySelectorAll("[data-node-toggle]")).forEach((button) => {
-    button.addEventListener("click", () => {
-      const key = String(button.dataset.nodeToggle || "");
-      if (!key) return;
-      if (researchExpandedKeys.has(key)) researchExpandedKeys.delete(key);
-      else researchExpandedKeys.add(key);
+      researchCategoryFilter = String(button.datasetTechFilter || button.dataset.techFilter || "all");
       renderResearchHubV4(researchHubState || data);
     });
   });
   document.getElementById("speedupResearchButton")?.addEventListener("click", speedupResearch);
-  requestAnimationFrame(() => {
-    drawTechGraphEdges();
-    setupTechGraphInteraction();
-  });
   startResearchRealtimeTick();
 }
 
@@ -3442,7 +3129,7 @@ async function speedupResearch() {
     }
     renderResearchHubV4(data);
     await loadShipyard();
-    setStatus(data.message || "연구 가속을 적용했습니다.");
+    setStatus(data.message || "\uc5f0\uad6c \uac00\uc18d\uc744 \uc801\uc6a9\ud588\uc2b5\ub2c8\ub2e4.");
   } catch (err) {
     handleAuthError(err);
   } finally {
@@ -3523,21 +3210,6 @@ async function assignAdmiral(id) {
   }
 }
 
-async function reviveAdmiral(id) {
-  clearMessages();
-  setBusy(true);
-  try {
-    const data = await api(`/admirals/${id}/revive`, { method: "POST" });
-    renderAdmirals(data);
-    await loadResources();
-    setStatus(data.message);
-  } catch (err) {
-    handleAuthError(err);
-  } finally {
-    setBusy(false);
-  }
-}
-
 async function exileAdmiral(id) {
   clearMessages();
   setBusy(true);
@@ -3546,23 +3218,6 @@ async function exileAdmiral(id) {
     renderAdmirals(data);
     await loadFleetGroups();
     setStatus(data.message || "\uc81c\ub3c5\uc744 \ucd94\ubc29\ud588\uc2b5\ub2c8\ub2e4.");
-  } catch (err) {
-    handleAuthError(err);
-  } finally {
-    setBusy(false);
-  }
-}
-
-async function saveAdmiralPolicy() {
-  clearMessages();
-  setBusy(true);
-  try {
-    const policy = elements.admiralPolicySelect.value;
-    const data = await api("/admiral-policy", {
-      method: "POST",
-      body: JSON.stringify({ policy })
-    });
-    setStatus(data.message);
   } catch (err) {
     handleAuthError(err);
   } finally {
@@ -3584,7 +3239,7 @@ async function saveStrategicPolicies() {
     });
     await loadResources();
     await loadGrowth();
-    setStatus(data.message || "정책을 저장했습니다.");
+    setStatus(data.message || "\uc815\ucc45\uc744 \uc800\uc7a5\ud588\uc2b5\ub2c8\ub2e4.");
   } catch (err) {
     handleAuthError(err);
   } finally {
@@ -3610,7 +3265,7 @@ async function devLogin() {
   clearMessages();
   const passcode = String(elements.devPasscodeInput.value || "");
   if (!passcode) {
-    setError("개발자 비밀번호를 입력하세요.");
+    setError("\uac1c\ubc1c\uc790 \ube44\ubc00\ubc88\ud638\ub97c \uc785\ub825\ud558\uc138\uc694.");
     return;
   }
   setBusy(true);
@@ -3747,7 +3402,7 @@ async function sendResourceTradeFromTab() {
   const metal = Number(elements.tradeMetalAmountInput?.value || 0);
   const fuel = Number(elements.tradeFuelAmountInput?.value || 0);
   if (!targetUserId) {
-    setError("거래 대상 유저 ID를 입력하세요.");
+    setError("\uac70\ub798 \ub300\uc0c1 \uc720\uc800 ID\ub97c \uc785\ub825\ud558\uc138\uc694.");
     return;
   }
   clearMessages();
@@ -3776,7 +3431,7 @@ async function sendShipTrade() {
   const designId = Number(elements.tradeShipDesignSelect?.value || 0);
   const quantity = Number(elements.tradeShipQtyInput?.value || 0);
   if (!targetUserId || !designId || quantity < 1) {
-    setError("함선 거래 대상/설계안/수량을 확인하세요.");
+    setError("\ud568\uc120 \uac70\ub798 \ub300\uc0c1, \uc124\uacc4\uc548, \uc218\ub7c9\uc744 \ud655\uc778\ud558\uc138\uc694.");
     return;
   }
   clearMessages();
@@ -3792,10 +3447,10 @@ async function sendShipTrade() {
         ? data.ownedShips.map((item) => `
           <div class="growth-item">
             <div><strong>${item.designName}</strong><span>${item.hullName}</span></div>
-            <span>${Number(item.quantity || 0)}척</span>
+            <span>${Number(item.quantity || 0)}\ucc99</span>
           </div>
         `).join("")
-        : `<div class="growth-item"><div>보유 함선이 없습니다.</div></div>`;
+        : `<div class="growth-item"><div>\ubcf4\uc720 \ud568\uc120\uc774 \uc5c6\uc2b5\ub2c8\ub2e4.</div></div>`;
     }
     await Promise.all([loadFleet(), loadShipTradeLogs()]);
   } catch (err) {
@@ -3831,8 +3486,9 @@ async function captureZone(zoneId, fleetSlot = 1) {
   }
 }
 
+// Initial post-login synchronization for all primary panels.
 async function refreshAll() {
-  const [resources, fleet, map, empire, research, admirals, policies, players, options, designs, production, missions, records, trades, shipTrades, city, fleetGroups, garrison] = await Promise.all([
+  const [resources, fleet, map, empire, research, admirals, policies, players, options, designs, production, repairs, missions, records, sessions, trades, shipTrades, city, fleetGroups, garrison] = await Promise.all([
     api("/resources"),
     api("/fleet"),
     api("/map"),
@@ -3844,8 +3500,10 @@ async function refreshAll() {
     api("/shipyard/options"),
     api("/designs"),
     api("/production"),
+    api("/repairs"),
     api("/missions"),
     api("/battle-records"),
+    api("/battle-sessions"),
     api("/trade/logs"),
     api("/trade/ship-logs"),
     api("/city"),
@@ -3868,14 +3526,16 @@ async function refreshAll() {
   renderShipyardOptions();
   renderDesigns(designs);
   renderProduction(production);
+  renderRepairs(repairs);
   activeMissions = Array.isArray(missions?.activeMissions) ? missions.activeMissions : [];
   renderMissionRoute();
   renderBattleRecords(records?.records);
+  renderBattleSessions(sessions?.sessions);
   if (elements.tradeLogView) {
     const logs = Array.isArray(trades?.logs) ? trades.logs : [];
     elements.tradeLogView.innerHTML = logs.length
-      ? logs.map((item) => `<div class="growth-item"><div><strong>${item.fromName} -> ${item.toName}</strong><span>금속 ${Number(item.metal || 0).toLocaleString()} / 연료 ${Number(item.fuel || 0).toLocaleString()}</span></div></div>`).join("")
-      : `<div class="growth-item"><div>거래 기록이 없습니다.</div></div>`;
+      ? logs.map((item) => `<div class="growth-item"><div><strong>${item.fromName} -> ${item.toName}</strong><span>\uae08\uc18d ${Number(item.metal || 0).toLocaleString()} / \uc5f0\ub8cc ${Number(item.fuel || 0).toLocaleString()}</span></div></div>`).join("")
+      : `<div class="growth-item"><div>\uac70\ub798 \uae30\ub85d\uc774 \uc5c6\uc2b5\ub2c8\ub2e4.</div></div>`;
   }
   renderShipTradeLogs(shipTrades?.logs);
   updateDebug({
@@ -3907,10 +3567,33 @@ function logout() {
   setStatus("\ub85c\uadf8\uc544\uc6c3\ud588\uc2b5\ub2c8\ub2e4.");
 }
 
+// Final module display helper. Modules now follow the Notion Family + Mk1~Mk3 model.
+function componentNameById(id) {
+  const found = shipyardOptions.components.find((item) => Number(item.id) === Number(id));
+  if (!found) return `#${id}`;
+  return found.name;
+}
+
+// Final module option label used by design slot selects.
+function optionLabel(component) {
+  const bonus = Number(component.powerBonus || 0) > 0 ? `, +\uc804\ub825\ud55c\uacc4 ${component.powerBonus}` : "";
+  const lockedText = component.unlocked === false ? ` (\uc7a0\uae08: ${component.unlockRequirementText || "\uc5f0\uad6c \ud544\uc694"})` : "";
+  return `${component.name} / +\uacf5\uaca9 ${component.attackBonus}, +\ubc29\uc5b4 ${component.defenseBonus}, +HP ${component.hpBonus}, +\uc18d\ub3c4 ${component.speedBonus}${bonus} / \uc804\ub825 ${component.powerCost}, \uae08\uc18d ${component.metalCost}, \uc5f0\ub8cc ${component.fuelCost}${lockedText}`;
+}
+
+// Wires UI events once during startup. Optional controls are guarded.
 function bindEvents() {
   elements.signupButton.addEventListener("click", signup);
   elements.loginButton.addEventListener("click", login);
   elements.logoutButton.addEventListener("click", logout);
+  elements.quickStartButton?.addEventListener("click", quickStart);
+  elements.enterCurrentSessionButton?.addEventListener("click", enterCurrentSession);
+  elements.createRoomButton?.addEventListener("click", createRoom);
+  elements.joinInviteButton?.addEventListener("click", joinInviteRoom);
+  elements.refreshLobbyButton?.addEventListener("click", () => loadLobby().catch(handleAuthError));
+  elements.lobbyRecruitNormalButton?.addEventListener("click", () => recruitLobbyAdmiral("normal"));
+  elements.lobbyRecruitPremiumButton?.addEventListener("click", () => recruitLobbyAdmiral("premium"));
+  elements.endSessionButton?.addEventListener("click", endCurrentSession);
   elements.refreshResourcesButton.addEventListener("click", loadResources);
   elements.refreshFleetButton.addEventListener("click", loadFleet);
   elements.refreshZonesButton.addEventListener("click", loadZones);
@@ -3919,6 +3602,7 @@ function bindEvents() {
   elements.toggleZoneSearchButton.addEventListener("click", toggleZoneSearch);
   elements.zoneSearchInput.addEventListener("input", renderZoneSearchList);
   elements.zoneLevelFilter.addEventListener("change", renderZoneSearchList);
+  elements.zoneLayerFilter?.addEventListener("change", renderZoneSearchList);
   elements.zoneOwnerFilter.addEventListener("change", renderZoneSearchList);
   elements.playerSearchInput?.addEventListener("input", renderPlayerSearchList);
   elements.drawAdmiralButton.addEventListener("click", drawAdmiral);
@@ -3947,7 +3631,6 @@ function bindEvents() {
   elements.buildSubtabButton.addEventListener("click", () => showProductionSubtab("build"));
   elements.productionDesignSelect.addEventListener("change", renderSelectedProductionDesign);
   elements.resetBattleRecordsButton.addEventListener("click", resetBattleRecords);
-  elements.saveAdmiralPolicyButton.addEventListener("click", saveAdmiralPolicy);
   elements.savePolicyButton?.addEventListener("click", saveStrategicPolicies);
   elements.tradeResourceButton?.addEventListener("click", sendResourceTradeFromTab);
   elements.tradeShipButton?.addEventListener("click", sendShipTrade);
@@ -3958,7 +3641,7 @@ function bindEvents() {
     createSlotSelects();
     renderDesignPreview();
   });
-  [elements.engineSlots, elements.weaponSlots, elements.defenseSlots, elements.utilitySlots].forEach((container) => {
+  [elements.engineSlots, elements.weaponSlots, elements.defenseSlots, elements.utilitySlots].filter(Boolean).forEach((container) => {
     container.addEventListener("change", renderDesignPreview);
   });
 
@@ -3990,13 +3673,10 @@ async function restoreSession() {
   }
 
   const username = localStorage.getItem(USERNAME_KEY) || "\uc0ac\ub839\uad00";
-  showGame(username);
+  showLobby(username);
 
   try {
-    await refreshAll();
-    showTab(activeTab);
-    showProductionSubtab("design");
-    ensureAlertPolling();
+    await loadLobby();
     setStatus("\uc800\uc7a5\ub41c \ud1a0\ud070\uc73c\ub85c \uc811\uc18d\uc744 \ubcf5\uad6c\ud588\uc2b5\ub2c8\ub2e4.");
   } catch (err) {
     clearRealtimeTimers();
