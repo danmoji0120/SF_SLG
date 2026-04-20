@@ -42,13 +42,11 @@
     return Array.isArray(window.lobbyAdmiralState?.admirals) ? window.lobbyAdmiralState.admirals : [];
   }
 
-  function getProfile() {
-    return window.lobbyState?.profile || {};
-  }
-
   function buildMergedAdmiral(admiral) {
     const meta = ADMIRAL_CARD_DATA[admiral?.name] || {};
     return {
+      id: admiral?.id || null,
+      isOwned: Boolean(admiral?.isOwned ?? admiral?.id),
       name: admiral?.name || meta.name || 'Unknown Admiral',
       nickname: meta.nickname || admiral?.nickname || '-',
       rarity: admiral?.rarity || meta.rarity || 'Common',
@@ -255,6 +253,22 @@
     });
   }
 
+  async function selectFromModal(kind, item) {
+    if (!item?.id || typeof window.selectLobbyAdmiral !== 'function') {
+      window.setError?.('이 제독은 아직 직접 지정할 수 없습니다.');
+      return;
+    }
+    try {
+      await window.selectLobbyAdmiral(kind, Number(item.id));
+      closeModal();
+      renderAll();
+      if (typeof window.loadLobby === 'function') await window.loadLobby();
+    } catch (err) {
+      if (typeof window.handleAuthError === 'function') window.handleAuthError(err);
+      else window.setError?.(err?.message || '제독 지정에 실패했습니다.');
+    }
+  }
+
   function openModal(name, codexMode) {
     const modal = document.getElementById('admiralDetailModal');
     const card = document.getElementById('admiralDetailCard');
@@ -286,7 +300,7 @@
           <div class="admiral-info-line"><strong>금지 요소</strong><span>${locked ? '미확인' : item.forbidden}</span></div>
         </div>
       </div>
-      ${locked ? '<div class="admiral-empty" style="margin-top:14px;">도감의 미보유 제독은 이름과 역할 일부만 공개하고, 나머지는 획득 후 열리도록 구성했습니다.</div>' : `<div class="button-row" style="margin-top:14px;"><button type="button" data-detail-action="featured">대표 제독으로 보기</button><button type="button" data-detail-action="session">다음 세션 제독 확인</button><button type="button" data-detail-action="recruit">한 번 더 영입</button></div>`}
+      ${locked ? '<div class="admiral-empty" style="margin-top:14px;">도감의 미보유 제독은 이름과 역할 일부만 공개하고, 나머지는 획득 후 열리도록 구성했습니다.</div>' : `<div class="button-row" style="margin-top:14px;"><button type="button" data-detail-action="featured" ${item.isFeatured ? 'disabled' : ''}>대표 제독으로 지정</button><button type="button" data-detail-action="session" ${item.isSessionSelected ? 'disabled' : ''}>다음 세션 제독으로 지정</button><button type="button" data-detail-action="recruit">한 번 더 영입</button></div>`}
     `;
     card.querySelector('#closeAdmiralDetailButton')?.addEventListener('click', closeModal);
     card.querySelector('[data-detail-action="recruit"]')?.addEventListener('click', () => {
@@ -294,8 +308,8 @@
       document.querySelector('[data-admiral-subtab="recruit"]')?.click();
       document.getElementById('lobbyRecruitPremiumButton')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     });
-    card.querySelector('[data-detail-action="featured"]')?.addEventListener('click', () => window.setStatus?.(`${item.name}는 현재 대표 제독 후보입니다. 기존 로비 제독 카드의 대표 지정 버튼을 사용해 적용하세요.`));
-    card.querySelector('[data-detail-action="session"]')?.addEventListener('click', () => window.setStatus?.(`${item.name}는 다음 세션 제독 후보입니다. 기존 로비 제독 카드의 세션 지정 버튼을 사용해 적용하세요.`));
+    card.querySelector('[data-detail-action="featured"]')?.addEventListener('click', () => selectFromModal('featured', item));
+    card.querySelector('[data-detail-action="session"]')?.addEventListener('click', () => selectFromModal('session', item));
     modal.classList.remove('hidden');
     state.modalOpen = true;
   }
