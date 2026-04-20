@@ -1,9 +1,15 @@
 .lobby-bgm-widget {
-  margin: 14px 0 0;
+  position: fixed;
+  left: 16px;
+  bottom: 16px;
+  z-index: 140;
+  width: min(320px, calc(100vw - 24px));
   padding: 12px 14px;
   border-radius: 14px;
-  background: rgba(8, 13, 17, 0.78);
-  border: 1px solid rgba(155, 183, 201, 0.18);
+  background: rgba(8, 13, 17, 0.88);
+  border: 1px solid rgba(155, 183, 201, 0.24);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(8px);
 }
 
 .lobby-bgm-head {
@@ -33,7 +39,25 @@
   width: 100%;
 }
 
+.lobby-bgm-widget .button-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.lobby-bgm-widget button {
+  min-height: 32px;
+  padding: 6px 10px;
+}
+
 @media (max-width: 720px) {
+  .lobby-bgm-widget {
+    left: 12px;
+    right: 12px;
+    bottom: 12px;
+    width: auto;
+  }
+
   .lobby-bgm-head {
     flex-direction: column;
     align-items: stretch;
