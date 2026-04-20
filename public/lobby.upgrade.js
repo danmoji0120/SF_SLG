@@ -55,6 +55,18 @@
     return section;
   }
 
+  function ensureCard(id, html, parent) {
+    let node = document.getElementById(id);
+    if (!node) {
+      node = document.createElement('section');
+      node.id = id;
+      node.className = 'card lobby-room-card';
+      node.innerHTML = html;
+    }
+    parent?.appendChild(node);
+    return node;
+  }
+
   function ensureUpgradeSections() {
     ensureMissionCard();
     if (document.getElementById('lobbyTabsShell')) return;
@@ -163,103 +175,115 @@
 
     [quickStart, status].filter(Boolean).forEach((node) => homeGrid?.appendChild(node));
 
-    if (!document.getElementById('lobbyOverviewCard')) {
-      const overview = document.createElement('section');
-      overview.id = 'lobbyOverviewCard';
-      overview.className = 'card lobby-room-card lobby-highlight-card';
-      overview.innerHTML = `
-        <div class="panel-head">
-          <div>
-            <h3>Lobby Overview</h3>
-            <p class="hint">다음 행동과 진행 상태를 빠르게 확인합니다.</p>
-          </div>
+    ensureCard('lobbyOverviewCard', `
+      <div class="panel-head">
+        <div>
+          <h3>Lobby Overview</h3>
+          <p class="hint">다음 행동과 진행 상태를 빠르게 확인합니다.</p>
         </div>
-        <div id="lobbyOverviewView"></div>
-      `;
-      homeExtra?.appendChild(overview);
-    } else {
-      homeExtra?.appendChild(document.getElementById('lobbyOverviewCard'));
-    }
+      </div>
+      <div id="lobbyOverviewView"></div>
+    `, homeExtra);
+
+    ensureCard('lobbyShortcutCard', `
+      <div class="panel-head">
+        <div>
+          <h3>Quick Actions</h3>
+          <p class="hint">세션 재입장, 방 이동, 결과 확인을 빠르게 실행합니다.</p>
+        </div>
+      </div>
+      <div id="lobbyShortcutView"></div>
+    `, homeExtra);
 
     const roomGrid = document.createElement('div');
     roomGrid.className = 'lobby-panel-grid-2';
     [createRoom, inviteCode].filter(Boolean).forEach((node) => roomGrid.appendChild(node));
     room.appendChild(roomGrid);
-    if (!document.getElementById('lobbyRoomChecklistCard')) {
-      const checklist = document.createElement('section');
-      checklist.id = 'lobbyRoomChecklistCard';
-      checklist.className = 'card lobby-room-card';
-      checklist.innerHTML = `
-        <div class="panel-head">
-          <div>
-            <h3>Room Checklist</h3>
-            <p class="hint">현재 방의 시작 조건과 참가자 상태를 정리합니다.</p>
-          </div>
+
+    ensureCard('lobbyRoomChecklistCard', `
+      <div class="panel-head">
+        <div>
+          <h3>Room Checklist</h3>
+          <p class="hint">현재 방의 시작 조건과 참가자 상태를 정리합니다.</p>
         </div>
-        <div id="lobbyRoomChecklistView"></div>
-      `;
-      room.appendChild(checklist);
-    } else {
-      room.appendChild(document.getElementById('lobbyRoomChecklistCard'));
-    }
+      </div>
+      <div id="lobbyRoomChecklistView"></div>
+    `, room);
+
+    ensureCard('lobbyHostPanelCard', `
+      <div class="panel-head">
+        <div>
+          <h3>Host Panel</h3>
+          <p class="hint">현재 API 기준으로 가능한 방장 액션을 정리합니다.</p>
+        </div>
+      </div>
+      <div id="lobbyHostPanelView"></div>
+    `, room);
+
     rooms && room.appendChild(rooms);
 
     if (creditShop) shop.appendChild(creditShop);
-    if (!document.getElementById('lobbyShopUpgradeCard')) {
-      const card = document.createElement('section');
-      card.id = 'lobbyShopUpgradeCard';
-      card.className = 'card lobby-room-card';
-      card.innerHTML = `
-        <div class="panel-head">
-          <div>
-            <h3>Shop Bundles</h3>
-            <p class="hint">기존 영입 API를 묶어 실제 상품처럼 사용합니다.</p>
-          </div>
+    ensureCard('lobbyShopUpgradeCard', `
+      <div class="panel-head">
+        <div>
+          <h3>Shop Bundles</h3>
+          <p class="hint">기존 영입 API를 묶어 실제 상품처럼 사용합니다.</p>
         </div>
-        <div id="lobbyShopUpgradeView" class="lobby-shop-grid"></div>
-      `;
-      shop.appendChild(card);
-    } else {
-      shop.appendChild(document.getElementById('lobbyShopUpgradeCard'));
-    }
+      </div>
+      <div id="lobbyShopUpgradeView" class="lobby-shop-grid"></div>
+    `, shop);
+    ensureCard('lobbyCreditGuideCard', `
+      <div class="panel-head">
+        <div>
+          <h3>Credit Usage Guide</h3>
+          <p class="hint">현재 구현에서 크레딧을 쓰는 핵심 루트를 요약합니다.</p>
+        </div>
+      </div>
+      <div class="lobby-empty-note">현재 크레딧은 제독 영입과 영입 묶음상품 소비에 사용됩니다. 세션용 소비 아이템은 서버 상점 라우트가 추가되면 연결됩니다.</div>
+    `, shop);
 
     lobbyAdmirals && admiral.appendChild(lobbyAdmirals);
-    missionCard && mission.appendChild(missionCard);
-    if (!document.getElementById('lobbyMissionGuideCard')) {
-      const guide = document.createElement('section');
-      guide.id = 'lobbyMissionGuideCard';
-      guide.className = 'card lobby-room-card';
-      guide.innerHTML = `
-        <div class="panel-head">
-          <div>
-            <h3>Mission Notes</h3>
-            <p class="hint">현재 미션은 프론트 추적형입니다. 서버 크레딧 지급 연동은 아직 없습니다.</p>
-          </div>
+    ensureCard('lobbyAdmiralGuideCard', `
+      <div class="panel-head">
+        <div>
+          <h3>Admiral Guide</h3>
+          <p class="hint">대표 제독과 다음 세션 제독 선택이 로비 성능에 연결됩니다.</p>
         </div>
-        <div class="lobby-empty-note">크레딧 실지급이 필요한 미션 보상은 서버 라우트가 추가되면 즉시 붙일 수 있도록 UI만 먼저 분리했습니다.</div>
-      `;
-      mission.appendChild(guide);
-    } else {
-      mission.appendChild(document.getElementById('lobbyMissionGuideCard'));
-    }
+      </div>
+      <div id="lobbyAdmiralGuideView"></div>
+    `, admiral);
 
-    if (!document.getElementById('lobbySettlementDetailCard')) {
-      const detail = document.createElement('section');
-      detail.id = 'lobbySettlementDetailCard';
-      detail.className = 'card lobby-room-card';
-      detail.innerHTML = `
-        <div class="panel-head">
-          <div>
-            <h3>Settlement Detail</h3>
-            <p class="hint">최근 세션의 점수와 보상 산식을 분해해서 보여줍니다.</p>
-          </div>
+    missionCard && mission.appendChild(missionCard);
+    ensureCard('lobbyMissionGuideCard', `
+      <div class="panel-head">
+        <div>
+          <h3>Mission Notes</h3>
+          <p class="hint">현재 미션은 프론트 추적형입니다. 서버 크레딧 지급 연동은 아직 없습니다.</p>
         </div>
-        <div id="lobbySettlementDetailView"></div>
-      `;
-      result.appendChild(detail);
-    } else {
-      result.appendChild(document.getElementById('lobbySettlementDetailCard'));
-    }
+      </div>
+      <div class="lobby-empty-note">크레딧 실지급이 필요한 미션 보상은 서버 라우트가 추가되면 즉시 붙일 수 있도록 UI만 먼저 분리했습니다.</div>
+    `, mission);
+
+    ensureCard('lobbySettlementDetailCard', `
+      <div class="panel-head">
+        <div>
+          <h3>Settlement Detail</h3>
+          <p class="hint">최근 세션의 점수와 보상 산식을 분해해서 보여줍니다.</p>
+        </div>
+      </div>
+      <div id="lobbySettlementDetailView"></div>
+    `, result);
+
+    ensureCard('lobbySettlementHistoryCard', `
+      <div class="panel-head">
+        <div>
+          <h3>Settlement History</h3>
+          <p class="hint">최근 세션 보상 로그를 확인합니다.</p>
+        </div>
+      </div>
+      <div id="lobbyRewardLogView"></div>
+    `, result);
+
     sessionResult && result.appendChild(sessionResult);
   }
 
@@ -396,14 +420,34 @@
       </div>
       <div class="lobby-empty-note" style="margin-top:12px;">${currentSession ? `현재 세션 진행 중: ${currentSession.roomName || 'Session'} / ${roomStatusLabel(currentSession.status)}` : '현재 진행 중인 세션이 없습니다. 방을 만들거나 참가 후 세션을 시작하세요.'}</div>
     `;
+
+    const shortcutView = document.getElementById('lobbyShortcutView');
+    if (shortcutView) {
+      shortcutView.innerHTML = `
+        <div class="button-row">
+          <button type="button" data-shortcut="quick">즉시 솔로 시작</button>
+          <button type="button" data-shortcut="room">방 탭으로 이동</button>
+          <button type="button" data-shortcut="mission">미션 탭으로 이동</button>
+          <button type="button" data-shortcut="result">정산 탭으로 이동</button>
+          <button type="button" data-shortcut="enter" ${currentSession ? '' : 'disabled'}>현재 세션 입장</button>
+        </div>
+      `;
+      shortcutView.querySelector('[data-shortcut="quick"]')?.addEventListener('click', () => window.elements?.quickStartButton?.click());
+      shortcutView.querySelector('[data-shortcut="room"]')?.addEventListener('click', () => setLobbyTab(1));
+      shortcutView.querySelector('[data-shortcut="mission"]')?.addEventListener('click', () => setLobbyTab(4));
+      shortcutView.querySelector('[data-shortcut="result"]')?.addEventListener('click', () => setLobbyTab(5));
+      shortcutView.querySelector('[data-shortcut="enter"]')?.addEventListener('click', () => window.enterCurrentSession?.());
+    }
   }
 
   function renderRoomChecklist() {
     const view = document.getElementById('lobbyRoomChecklistView');
+    const hostView = document.getElementById('lobbyHostPanelView');
     if (!view) return;
     const room = upgradeState.extra.profile?.joinedRoom || null;
     if (!room) {
       view.innerHTML = '<div class="lobby-empty-note">참가 중인 방이 없습니다.</div>';
+      if (hostView) hostView.innerHTML = '<div class="lobby-empty-note">현재 방이 없어 방장 기능을 표시할 수 없습니다.</div>';
       return;
     }
     const players = Array.isArray(room.players) ? room.players : [];
@@ -431,6 +475,27 @@
         `).join('')}
       </div>
     `;
+
+    if (!hostView) return;
+    if (!room.isHost) {
+      hostView.innerHTML = '<div class="lobby-empty-note">방장만 시작과 운영 관련 액션을 직접 실행할 수 있습니다. 현재는 준비 상태 확인과 시작 가능 여부만 표시합니다.</div>';
+      return;
+    }
+    const canStart = (room.mode === 'solo' && players.length === 1) || (room.mode === 'multi' && players.length >= 2 && nonHost.every((player) => player.isReady));
+    hostView.innerHTML = `
+      <div class="lobby-checklist">
+        <div class="lobby-check-item ${canStart ? 'done' : 'pending'}"><strong>세션 시작 가능</strong><span>${canStart ? '가능' : '조건 미충족'}</span></div>
+        <div class="lobby-check-item"><strong>방 모드</strong><span>${room.mode === 'multi' ? '멀티' : '솔로'}</span></div>
+        <div class="lobby-check-item"><strong>방 상태</strong><span>${roomStatusLabel(room.status)}</span></div>
+      </div>
+      <div class="button-row" style="margin-top:12px;">
+        <button type="button" data-host-action="refresh">방 상태 새로고침</button>
+        <button type="button" data-host-action="start" ${canStart ? '' : 'disabled'}>세션 시작</button>
+      </div>
+      <div class="lobby-empty-note" style="margin-top:12px;">방 이름 변경, 강퇴, 위임, 해산은 서버 라우트가 추가되면 바로 연결할 수 있도록 방장 전용 패널 위치만 먼저 확보했습니다.</div>
+    `;
+    hostView.querySelector('[data-host-action="refresh"]')?.addEventListener('click', () => window.loadLobby?.());
+    hostView.querySelector('[data-host-action="start"]')?.addEventListener('click', () => window.startRoom?.(room.id));
   }
 
   function renderSettlementDetail() {
@@ -471,9 +536,25 @@
     view.innerHTML = logs.length ? `<div class="lobby-history-list">${logs.map((item) => `
       <div class="lobby-history-item">
         <strong>Session #${item.sessionId || '-'}</strong>
-        <div class="hint">+${Number(item.creditReward || 0).toLocaleString()} credits · rank ${item.detail?.rank || '-'}</div>
+        <div class="hint">+${Number(item.creditReward || 0).toLocaleString()} credits · rank ${item.detail?.rank || '-'} · total ${Number(item.detail?.score?.totalScore || 0).toLocaleString()}</div>
       </div>
     `).join('')}</div>` : '<div class="lobby-empty-note">보상 로그가 없습니다.</div>';
+  }
+
+  function renderAdmiralGuide() {
+    const view = document.getElementById('lobbyAdmiralGuideView');
+    if (!view) return;
+    const profile = window.lobbyState?.profile || {};
+    const admirals = Array.isArray(window.lobbyAdmiralState?.admirals) ? window.lobbyAdmiralState.admirals : [];
+    const featured = profile.featuredAdmiralName || '미지정';
+    const selected = profile.selectedSessionAdmiralName || '미선택';
+    view.innerHTML = `
+      <div class="lobby-checklist">
+        <div class="lobby-check-item done"><strong>대표 제독</strong><span>${featured}</span></div>
+        <div class="lobby-check-item ${profile.selectedSessionAdmiralName ? 'done' : 'pending'}"><strong>다음 세션 제독</strong><span>${selected}</span></div>
+        <div class="lobby-check-item done"><strong>총 보유 제독</strong><span>${admirals.length.toLocaleString()}명</span></div>
+      </div>
+    `;
   }
 
   async function refreshLobbyUpgradeData() {
@@ -492,6 +573,7 @@
       renderSettlementDetail();
       renderRewardHistory();
       renderShopBundles();
+      renderAdmiralGuide();
     } catch (err) {
       console.warn('[lobby.upgrade] refresh failed', err);
     }
@@ -527,6 +609,7 @@
       renderMissionTracker();
       renderShopBundles();
       renderOverview();
+      renderAdmiralGuide();
     });
     wrapGlobal('renderSessionSummary', (original) => function wrappedSessionSummary(summary) {
       original.call(this, summary);
