@@ -172,6 +172,7 @@
     const lobbyAdmirals = findSectionByHeading('Lobby Admirals');
     const creditShop = document.getElementById('creditShopCard');
     const missionCard = document.getElementById('lobbyMissionCard');
+    const admiralLibraryShell = document.getElementById('admiralLibraryShell');
 
     [quickStart, status].filter(Boolean).forEach((node) => homeGrid?.appendChild(node));
 
@@ -242,6 +243,7 @@
       <div class="lobby-empty-note">현재 크레딧은 제독 영입과 영입 묶음상품 소비에 사용됩니다. 세션용 소비 아이템은 서버 상점 라우트가 추가되면 연결됩니다.</div>
     `, shop);
 
+    admiralLibraryShell && admiral.appendChild(admiralLibraryShell);
     lobbyAdmirals && admiral.appendChild(lobbyAdmirals);
     ensureCard('lobbyAdmiralGuideCard', `
       <div class="panel-head">
