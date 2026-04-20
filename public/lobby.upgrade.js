@@ -15,7 +15,8 @@
       recruitLogs: []
     },
     installed: false,
-    shopBusy: false
+    shopBusy: false,
+    refreshScheduled: false
   };
 
   const SHOP_PRODUCTS = [
@@ -30,10 +31,6 @@
   function safeApi(path, options) {
     if (typeof window.api !== 'function') return Promise.reject(new Error('api unavailable'));
     return window.api(path, options);
-  }
-
-  function qs(selector, root = document) {
-    return root.querySelector(selector);
   }
 
   function qsa(selector, root = document) {
@@ -122,14 +119,6 @@
 
   function getLobbyPanel(key) {
     return document.querySelector(`[data-lobby-panel="${key}"]`);
-  }
-
-  function moveToPanel(node, panelKey, wrapperClass = '') {
-    if (!node) return;
-    const panel = getLobbyPanel(panelKey);
-    if (!panel) return;
-    if (wrapperClass && !node.classList.contains(wrapperClass)) node.classList.add(wrapperClass);
-    panel.appendChild(node);
   }
 
   function findSectionByHeading(text) {
@@ -508,6 +497,18 @@
     }
   }
 
+  function scheduleLobbyRefresh() {
+    if (upgradeState.refreshScheduled) return;
+    upgradeState.refreshScheduled = true;
+    requestAnimationFrame(() => {
+      upgradeState.refreshScheduled = false;
+      const lobbyPanel = document.getElementById('lobbyPanel');
+      if (!lobbyPanel || lobbyPanel.classList.contains('hidden')) return;
+      ensureUpgradeSections();
+      redistributeLobbySections();
+    });
+  }
+
   function wrapGlobal(name, fn) {
     const original = window[name];
     if (typeof original !== 'function') return;
@@ -559,12 +560,12 @@
     installOverrides();
     setLobbyTab(0);
     const observer = new MutationObserver(() => {
-      if (!document.getElementById('lobbyPanel')?.classList.contains('hidden')) {
-        ensureUpgradeSections();
-        redistributeLobbySections();
-      }
+      scheduleLobbyRefresh();
     });
-    observer.observe(document.body, { childList: true, subtree: true });
+    const lobbyPanel = document.getElementById('lobbyPanel');
+    if (lobbyPanel) {
+      observer.observe(lobbyPanel, { childList: true, subtree: true });
+    }
     refreshLobbyUpgradeData();
   }
 
