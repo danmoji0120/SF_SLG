@@ -72,6 +72,18 @@
     });
   }
 
+  function ensureModal() {
+    let modal = document.getElementById('admiralDetailModal');
+    if (modal) return modal;
+    modal = document.createElement('div');
+    modal.id = 'admiralDetailModal';
+    modal.className = 'admiral-modal hidden';
+    modal.innerHTML = `<div class="admiral-modal-card" id="admiralDetailCard"></div>`;
+    modal.addEventListener('click', (event) => { if (event.target === modal) closeModal(); });
+    document.body.appendChild(modal);
+    return modal;
+  }
+
   function ensureShell() {
     const admiralPanel = document.querySelector('[data-lobby-panel="admiral"]');
     if (!admiralPanel) return null;
@@ -117,15 +129,6 @@
         if (!button) return;
         setSubtab(String(button.dataset.admiralSubtab || 'recruit'));
       });
-    }
-
-    if (!document.getElementById('admiralDetailModal')) {
-      const modal = document.createElement('div');
-      modal.id = 'admiralDetailModal';
-      modal.className = 'admiral-modal hidden';
-      modal.innerHTML = `<div class="admiral-modal-card" id="admiralDetailCard"></div>`;
-      document.body.appendChild(modal);
-      modal.addEventListener('click', (event) => { if (event.target === modal) closeModal(); });
     }
 
     const recruitCard = qsa('#lobbyPanel .card, #lobbyPanel .lobby-room-card').find((node) => qs('h3', node)?.textContent.trim() === 'Lobby Admirals');
@@ -270,7 +273,7 @@
   }
 
   function openModal(name, codexMode) {
-    const modal = document.getElementById('admiralDetailModal');
+    const modal = ensureModal();
     const card = document.getElementById('admiralDetailCard');
     if (!modal || !card) return;
     const owned = getOwnedAdmirals().find((item) => item.name === name);
@@ -315,7 +318,13 @@
   }
 
   function closeModal() {
-    document.getElementById('admiralDetailModal')?.classList.add('hidden');
+    const modal = document.getElementById('admiralDetailModal');
+    const card = document.getElementById('admiralDetailCard');
+    if (card) card.innerHTML = '';
+    if (modal) {
+      modal.classList.add('hidden');
+      modal.remove();
+    }
     state.modalOpen = false;
   }
 
