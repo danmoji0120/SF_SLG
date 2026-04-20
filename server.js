@@ -3467,6 +3467,20 @@ async function getAssignedAdmiral(userId) {
   );
 }
 
+async function applyLobbySessionAdmiral(userId) {
+  const profile = await getLobbyProfile(userId);
+  const admiralId = Number(profile?.selectedSessionAdmiralId || 0);
+  if (!admiralId) return null;
+  const admiral = await get(
+    "SELECT id FROM admirals WHERE id = ? AND user_id = ? AND status = 'active'",
+    [admiralId, userId]
+  );
+  if (!admiral) return null;
+  await run("UPDATE admirals SET assigned = 0 WHERE user_id = ?", [userId]);
+  await run("UPDATE admirals SET assigned = 1 WHERE id = ? AND user_id = ?", [admiralId, userId]);
+  return admiralId;
+}
+
 function commanderXpForNextLevel(level) {
   return Math.floor(240 + level * 180 + level * level * 65);
 }
@@ -5022,6 +5036,12 @@ async function deleteUserCompletely(userId) {
     await run("DELETE FROM fleet_groups WHERE user_id = ?", [userId]);
     await run("DELETE FROM city_buildings WHERE user_id = ?", [userId]);
     await run("DELETE FROM ship_trade_logs WHERE from_user_id = ? OR to_user_id = ?", [userId, userId]);
+    await run("DELETE FROM session_players WHERE user_id = ?", [userId]);
+    await run("DELETE FROM session_reward_logs WHERE user_id = ?", [userId]);
+    await run("DELETE FROM lobby_recruit_logs WHERE user_id = ?", [userId]);
+    await run("DELETE FROM lobby_profiles WHERE user_id = ?", [userId]);
+    await run("DELETE FROM room_players WHERE user_id = ?", [userId]);
+    await run("UPDATE rooms SET status = 'ended', updated_at = ? WHERE host_user_id = ?", [Date.now(), userId]);
     await run("DELETE FROM admirals WHERE user_id = ?", [userId]);
     await run("DELETE FROM commander_progress WHERE user_id = ?", [userId]);
     await run("DELETE FROM research WHERE user_id = ?", [userId]);
@@ -5815,6 +5835,18 @@ app.get("/lobby/profile", requireAuth, async (req, res) => {
 app.get("/lobby", requireAuth, async (req, res) => {
   try {
     const profile = await getLobbyProfile(req.user.id);
+    const joinedRoomRow = await get(
+      `
+        SELECT r.*, u.username AS host_username
+        FROM rooms r
+        JOIN room_players rp ON rp.room_id = r.id
+        JOIN users u ON u.id = r.host_user_id
+        WHERE rp.user_id = ? AND r.status IN ('waiting', 'starting', 'in_game')
+        ORDER BY r.id DESC
+        LIMIT 1
+      `,
+      [req.user.id]
+    );
     const rooms = await all(
       `
         SELECT r.*, u.username AS host_username
@@ -5828,6 +5860,7 @@ app.get("/lobby", requireAuth, async (req, res) => {
     return res.json({
       profile,
       currentSession: await getCurrentSessionForUser(req.user.id),
+      joinedRoom: joinedRoomRow ? await formatRoom(joinedRoomRow, req.user.id) : null,
       rooms: await Promise.all(rooms.map((room) => formatRoom(room, req.user.id)))
     });
   } catch (err) {
@@ -6063,6 +6096,7 @@ app.post("/rooms/:id/start", requireAuth, async (req, res) => {
     );
     for (const player of players) {
       await ensureLobbyProfile(player.user_id);
+      await applyLobbySessionAdmiral(player.user_id);
       await ensureBase(player.user_id);
       await ensureStarterDesign(player.user_id);
       await backfillShipsFromOwnedShips(player.user_id);
@@ -8005,6 +8039,17 @@ app.post("/admirals/:id/exile", requireAuth, async (req, res) => {
     await run("BEGIN TRANSACTION");
     try {
       await run("UPDATE fleet_groups SET admiral_id = NULL WHERE user_id = ? AND admiral_id = ?", [req.user.id, admiralId]);
+      await run(
+        `
+          UPDATE lobby_profiles
+          SET featured_admiral_id = CASE WHEN featured_admiral_id = ? THEN NULL ELSE featured_admiral_id END,
+              selected_session_admiral_id = CASE WHEN selected_session_admiral_id = ? THEN NULL ELSE selected_session_admiral_id END,
+              updated_at = ?
+          WHERE user_id = ?
+        `,
+        [admiralId, admiralId, Date.now(), req.user.id]
+      );
+      await run("UPDATE lobby_recruit_logs SET admiral_id = NULL WHERE user_id = ? AND admiral_id = ?", [req.user.id, admiralId]);
       await run("DELETE FROM admirals WHERE id = ? AND user_id = ?", [admiralId, req.user.id]);
       await run("COMMIT");
     } catch (err) {
@@ -8800,6 +8845,15 @@ app.post("/admin/users/:id/reset", requireAuth, requireAdmin, async (req, res) =
       await run("DELETE FROM fleet_groups WHERE user_id = ?", [userId]);
       await run("DELETE FROM city_buildings WHERE user_id = ?", [userId]);
       await run("DELETE FROM ship_trade_logs WHERE from_user_id = ? OR to_user_id = ?", [userId, userId]);
+      await run("DELETE FROM session_players WHERE user_id = ?", [userId]);
+      await run("DELETE FROM session_reward_logs WHERE user_id = ?", [userId]);
+      await run("DELETE FROM lobby_recruit_logs WHERE user_id = ?", [userId]);
+      await run(
+        "UPDATE lobby_profiles SET credit = 0, featured_admiral_id = NULL, selected_session_admiral_id = NULL, equipped_theme_id = 'default', updated_at = ? WHERE user_id = ?",
+        [Date.now(), userId]
+      );
+      await run("DELETE FROM room_players WHERE user_id = ?", [userId]);
+      await run("UPDATE rooms SET status = 'ended', updated_at = ? WHERE host_user_id = ?", [Date.now(), userId]);
       await run("DELETE FROM admirals WHERE user_id = ?", [userId]);
       await ensureStarterDesign(userId);
       await backfillShipsFromOwnedShips(userId);
@@ -8807,6 +8861,7 @@ app.post("/admin/users/:id/reset", requireAuth, requireAdmin, async (req, res) =
         "INSERT OR IGNORE INTO city_buildings (user_id, shipyard_level, government_level, housing_level, research_lab_level, tactical_center_level) VALUES (?, 1, 1, 1, 1, 1)",
         [userId]
       );
+      await ensureLobbyProfile(userId);
       await ensureFleetGroups(userId);
       await run("COMMIT");
     } catch (err) {

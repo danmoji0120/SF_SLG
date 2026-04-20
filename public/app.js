@@ -53,10 +53,25 @@ let researchCategoryFilter = "all";
 let researchExpandedKeys = new Set();
 let researchHubState = null;
 let researchTickTimer = null;
+let techGraphView = { scale: 1, x: 40, y: 40 };
 let filteredUnlocked = [];
 let filteredLocked = [];
 let lobbyState = { profile: null, rooms: [], joinedRoom: null, currentSession: null };
 let lobbyAdmiralState = { admirals: [], recruitTypes: [], logs: [] };
+
+function syncPublicState() {
+  window.elements = elements;
+  window.captureButtons = captureButtons;
+  window.researchButtons = researchButtons;
+  window.admiralButtons = admiralButtons;
+  window.pvpButtons = pvpButtons;
+  window.currentZones = currentZones;
+  window.currentPlayers = currentPlayers;
+  window.activeMissions = activeMissions;
+  window.battleSessionPoller = battleSessionPoller;
+  window.lobbyState = lobbyState;
+  window.lobbyAdmiralState = lobbyAdmiralState;
+}
 
 // Groups research unlock rows by hull/module family.
 function groupUnlockItems(items, includeRequirement) {
@@ -347,6 +362,7 @@ function renderLobby(data) {
     joinedRoom: data?.joinedRoom || null,
     currentSession: data?.currentSession || null
   };
+  syncPublicState();
   const profile = lobbyState.profile || {};
   if (elements.lobbyCreditView) elements.lobbyCreditView.textContent = Number(profile.credit || 0).toLocaleString();
   if (elements.lobbyProfileView) {
@@ -416,6 +432,7 @@ function renderLobbyAdmirals(data, recruitLogsData = null) {
     admirals: Array.isArray(state.admirals) ? state.admirals : [],
     logs: Array.isArray(recruitLogsData?.logs) ? recruitLogsData.logs : lobbyAdmiralState.logs
   };
+  syncPublicState();
   if (elements.lobbyRecruitInfoView) {
     elements.lobbyRecruitInfoView.innerHTML = lobbyAdmiralState.recruitTypes.length
       ? lobbyAdmiralState.recruitTypes.map((type) => `
@@ -464,7 +481,7 @@ async function loadLobbyAdmirals() {
     api("/lobby/admirals"),
     api("/lobby/recruit-logs")
   ]);
-  renderLobbyAdmirals(admirals, logs);
+  (window.renderLobbyAdmirals || renderLobbyAdmirals)(admirals, logs);
   return admirals;
 }
 
@@ -527,7 +544,7 @@ function renderRoomList(rooms) {
 
 async function loadLobby() {
   const data = await api("/lobby");
-  renderLobby(data);
+  (window.renderLobby || renderLobby)(data);
   await loadLobbyAdmirals();
   return data;
 }
@@ -541,7 +558,7 @@ async function recruitLobbyAdmiral(type) {
       body: JSON.stringify({ type })
     });
     setStatus(data.message || "Admiral recruited.");
-    renderLobbyAdmirals(data, await api("/lobby/recruit-logs"));
+    (window.renderLobbyAdmirals || renderLobbyAdmirals)(data, await api("/lobby/recruit-logs"));
     await loadLobby();
   } catch (err) {
     handleAuthError(err);
@@ -560,7 +577,7 @@ async function selectLobbyAdmiral(kind, admiralId) {
       body: JSON.stringify({ admiralId })
     });
     setStatus(data.message || "Admiral selected.");
-    renderLobbyAdmirals(data, await api("/lobby/recruit-logs"));
+    (window.renderLobbyAdmirals || renderLobbyAdmirals)(data, await api("/lobby/recruit-logs"));
     await loadLobby();
   } catch (err) {
     handleAuthError(err);
@@ -3662,6 +3679,99 @@ function bindEvents() {
   elements.devPasscodeInput.addEventListener("keydown", (event) => {
     if (event.key === "Enter") devLogin();
   });
+
+  elements.lobbyPanel?.addEventListener("click", handleLobbyDelegatedClick, true);
+}
+
+function handleLobbyDelegatedClick(event) {
+  const button = event.target.closest("button");
+  if (!button || !elements.lobbyPanel?.contains(button) || button.disabled) return;
+
+  let action = null;
+  if (button.id === "quickStartButton") action = () => quickStart();
+  else if (button.id === "enterCurrentSessionButton" || button.dataset.enterSession) action = () => enterCurrentSession();
+  else if (button.id === "createRoomButton") action = () => createRoom();
+  else if (button.id === "joinInviteButton") action = () => joinInviteRoom();
+  else if (button.id === "refreshLobbyButton") action = () => loadLobby().catch(handleAuthError);
+  else if (button.id === "lobbyRecruitNormalButton") action = () => recruitLobbyAdmiral("normal");
+  else if (button.id === "lobbyRecruitPremiumButton") action = () => recruitLobbyAdmiral("premium");
+  else if (button.dataset.joinRoom) action = () => joinRoom(Number(button.dataset.joinRoom));
+  else if (button.dataset.readyRoom) action = () => toggleRoomReady(Number(button.dataset.readyRoom));
+  else if (button.dataset.startRoom) action = () => startRoom(Number(button.dataset.startRoom));
+  else if (button.dataset.leaveRoom) action = () => leaveRoom(Number(button.dataset.leaveRoom));
+  else if (button.dataset.featuredAdmiral) action = () => selectLobbyAdmiral("featured", Number(button.dataset.featuredAdmiral));
+  else if (button.dataset.sessionAdmiral) action = () => selectLobbyAdmiral("session", Number(button.dataset.sessionAdmiral));
+  else if (button.dataset.hostAction === "refresh") action = () => loadLobby().catch(handleAuthError);
+  else if (button.dataset.hostAction === "start") {
+    const roomId = Number(lobbyState.joinedRoom?.id || window.lobbyState?.joinedRoom?.id || 0);
+    action = () => roomId ? startRoom(roomId) : setError("시작할 방을 찾을 수 없습니다.");
+  } else if (button.dataset.shopAction === "normal" || button.dataset.shopAction === "premium") {
+    action = () => recruitLobbyAdmiral(String(button.dataset.shopAction));
+  } else if (button.dataset.shortcut) {
+    const shortcut = String(button.dataset.shortcut);
+    action = () => {
+      if (shortcut === "quick") return quickStart();
+      if (shortcut === "enter") return enterCurrentSession();
+      const tabKey = { room: "room", mission: "mission", result: "result", admiral: "admiral", shop: "shop" }[shortcut];
+      if (tabKey) document.querySelector(`[data-lobby-tab="${tabKey}"]`)?.click();
+    };
+  }
+
+  if (!action) return;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  action();
+}
+
+function exposePublicApi() {
+  Object.assign(window, {
+    TOKEN_KEY,
+    USERNAME_KEY,
+    api,
+    clearMessages,
+    setBusy,
+    setStatus,
+    setError,
+    handleAuthError,
+    loadLobby,
+    renderLobby,
+    renderLobbyAdmirals,
+    renderCurrentRoom,
+    renderSessionSummary,
+    renderRewardLogs,
+    loadLobbyAdmirals,
+    recruitLobbyAdmiral,
+    selectLobbyAdmiral,
+    quickStart,
+    enterCurrentSession,
+    createRoom,
+    joinRoom,
+    joinInviteRoom,
+    toggleRoomReady,
+    startRoom,
+    leaveRoom,
+    roomStatusLabel,
+    endCurrentSession,
+    showLobby,
+    showGame,
+    showAuth,
+    refreshAll,
+    loadGrowth,
+    renderAdmirals,
+    renderPolicyPanel,
+    renderPlayers,
+    renderPlayerSearchList,
+    loadPlayers,
+    assignZoneGarrison,
+    attackPlayer,
+    renderBattleSessions,
+    retreatBattleSession,
+    ensureBattleSessionPolling,
+    ensureMissionPolling,
+    renderMissionRoute,
+    updateDebug
+  });
+  syncPublicState();
 }
 
 async function restoreSession() {
@@ -3686,5 +3796,6 @@ async function restoreSession() {
   }
 }
 
+exposePublicApi();
 bindEvents();
 restoreSession();
