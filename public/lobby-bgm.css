@@ -1,0 +1,41 @@
+.lobby-bgm-widget {
+  margin: 14px 0 0;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(8, 13, 17, 0.78);
+  border: 1px solid rgba(155, 183, 201, 0.18);
+}
+
+.lobby-bgm-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.lobby-bgm-head strong,
+.lobby-bgm-head span {
+  display: block;
+}
+
+.lobby-bgm-head span {
+  color: #b7c4cf;
+  font-size: 13px;
+}
+
+.lobby-bgm-controls {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.lobby-bgm-controls input[type="range"] {
+  width: 100%;
+}
+
+@media (max-width: 720px) {
+  .lobby-bgm-head {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
