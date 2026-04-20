@@ -1,5 +1,5 @@
 (() => {
-  const ADMIRAL_CATALOG = {
+  const FALLBACK_CATALOG = {
     '카이로 벤': { rarity: 'Common', nickname: '도망자', role: '기동', summary: '이동속도 +10%, 후퇴 성공률 +5%' },
     '마야 렌': { rarity: 'Common', nickname: '패치워크', role: '정비 / 복구', summary: '전투 종료 후 수리 효율 +15%' },
     '드릭 할버': { rarity: 'Common', nickname: '퍼스트 샷', role: '선제타격', summary: '첫 공격 피해 +15%' },
@@ -34,8 +34,11 @@
 
   const state = {
     installed: false,
-    activeSubtab: "recruit",
-    modalOpen: false
+    activeSubtab: 'recruit',
+    modalOpen: false,
+    catalog: { ...FALLBACK_CATALOG },
+    catalogReady: false,
+    catalogPromise: null
   };
 
   function qs(selector, root = document) {
@@ -47,25 +50,74 @@
   }
 
   function rarityClass(value) {
-    return String(value || "R").toLowerCase();
+    return String(value || 'R').toLowerCase();
   }
 
   function admirals() {
     return Array.isArray(window.lobbyAdmiralState?.admirals) ? window.lobbyAdmiralState.admirals : [];
   }
 
+  function getCatalog() {
+    return state.catalog || FALLBACK_CATALOG;
+  }
+
+  function loadCatalogData() {
+    if (state.catalogPromise) return state.catalogPromise;
+    state.catalogPromise = new Promise((resolve) => {
+      const applyCatalog = () => {
+        const entries = Array.isArray(window.ADMIRAL_CATALOG_DATA?.catalog) ? window.ADMIRAL_CATALOG_DATA.catalog : [];
+        if (entries.length) {
+          state.catalog = Object.fromEntries(entries.map((entry) => [entry.name, {
+            rarity: entry.rarity,
+            nickname: entry.nickname,
+            role: entry.role,
+            summary: entry.summary,
+            combatBonus: entry.combatBonus,
+            resourceBonus: entry.resourceBonus,
+            costBonus: entry.costBonus
+          }]));
+        }
+        state.catalogReady = true;
+        resolve(state.catalog);
+      };
+
+      if (window.ADMIRAL_CATALOG_DATA?.catalog) {
+        applyCatalog();
+        return;
+      }
+
+      const existing = document.querySelector('script[data-admiral-catalog-script="1"]');
+      if (existing) {
+        existing.addEventListener('load', applyCatalog, { once: true });
+        existing.addEventListener('error', () => resolve(state.catalog), { once: true });
+        return;
+      }
+
+      const script = document.createElement('script');
+      script.src = '/data/admiral-catalog.js?v=1';
+      script.async = true;
+      script.dataset.admiralCatalogScript = '1';
+      script.addEventListener('load', applyCatalog, { once: true });
+      script.addEventListener('error', () => resolve(state.catalog), { once: true });
+      document.head.appendChild(script);
+    }).finally(() => {
+      render();
+    });
+    return state.catalogPromise;
+  }
+
   function ensureShell() {
     const panel = qs('[data-lobby-system-panel="admiral"], [data-lobby-panel="admiral"]');
     if (!panel) return null;
-    let shell = document.getElementById("admiralLibraryShell");
+    let shell = document.getElementById('admiralLibraryShell');
     if (shell) {
       if (shell.parentElement !== panel) panel.prepend(shell);
       return shell;
     }
 
-    shell = document.createElement("section");
-    shell.id = "admiralLibraryShell";
-    shell.className = "card lobby-room-card";
+    shell = document.createElement('section');
+    shell.id = 'admiralLibraryShell';
+    shell.className = 'card lobby-room-card';
     shell.innerHTML = `
       <div class="panel-head">
         <div>
@@ -88,18 +140,16 @@
     `;
     panel.prepend(shell);
 
-    shell.addEventListener("click", (event) => {
-      const subtab = event.target.closest("[data-admiral-subtab]");
+    shell.addEventListener('click', (event) => {
+      const subtab = event.target.closest('[data-admiral-subtab]');
       if (subtab) {
         event.preventDefault();
         setSubtab(subtab.dataset.admiralSubtab);
         return;
       }
 
-      const card = event.target.closest("[data-admiral-card-id]");
-      if (card) {
-        openModal(card.dataset.admiralCardId);
-      }
+      const card = event.target.closest('[data-admiral-card-id]');
+      if (card) openModal(card.dataset.admiralCardId);
     });
     return shell;
   }
@@ -107,9 +157,9 @@
   function moveRecruitCard() {
     const shell = ensureShell();
     const recruitPanel = qs('[data-admiral-subpanel="recruit"]', shell);
-    const recruitCard = qsa("#lobbyPanel .card, #lobbyPanel .lobby-room-card").find((card) => {
-      if (card.id === "admiralLibraryShell") return false;
-      return qs("h3", card)?.textContent.trim() === "Lobby Admirals";
+    const recruitCard = qsa('#lobbyPanel .card, #lobbyPanel .lobby-room-card').find((card) => {
+      if (card.id === 'admiralLibraryShell') return false;
+      return qs('h3', card)?.textContent.trim() === 'Lobby Admirals';
     });
     if (recruitCard && recruitPanel && recruitCard.parentElement !== recruitPanel) {
       recruitPanel.appendChild(recruitCard);
@@ -117,12 +167,12 @@
   }
 
   function setSubtab(key) {
-    state.activeSubtab = key || "recruit";
-    qsa("#admiralLibraryShell [data-admiral-subtab]").forEach((button) => {
-      button.classList.toggle("active", button.dataset.admiralSubtab === state.activeSubtab);
+    state.activeSubtab = key || 'recruit';
+    qsa('#admiralLibraryShell [data-admiral-subtab]').forEach((button) => {
+      button.classList.toggle('active', button.dataset.admiralSubtab === state.activeSubtab);
     });
-    qsa("#admiralLibraryShell [data-admiral-subpanel]").forEach((panel) => {
-      panel.classList.toggle("active", panel.dataset.admiralSubpanel === state.activeSubtab);
+    qsa('#admiralLibraryShell [data-admiral-subpanel]').forEach((panel) => {
+      panel.classList.toggle('active', panel.dataset.admiralSubpanel === state.activeSubtab);
     });
   }
 
@@ -135,8 +185,8 @@
 
   function loungeCardHtml(admiral) {
     const tags = [];
-    if (admiral.isFeatured) tags.push(`<span class="admiral-tag highlight">대표</span>`);
-    if (admiral.isSessionSelected) tags.push(`<span class="admiral-tag highlight">다음 세션</span>`);
+    if (admiral.isFeatured) tags.push('<span class="admiral-tag highlight">대표</span>');
+    if (admiral.isSessionSelected) tags.push('<span class="admiral-tag highlight">다음 세션</span>');
     return `
       <article class="admiral-card" data-admiral-card-id="owned:${admiral.id}">
         <div class="admiral-card-header">
@@ -146,7 +196,7 @@
           </div>
           <span class="admiral-rarity ${rarityClass(admiral.rarity)}">${admiral.rarity}</span>
         </div>
-        <div class="admiral-tags">${tags.join("") || `<span class="admiral-tag">보유</span>`}</div>
+        <div class="admiral-tags">${tags.join('') || '<span class="admiral-tag">보유</span>'}</div>
       </article>
     `;
   }
@@ -172,7 +222,7 @@
 
   function buildCodexEntries() {
     const ownedMap = new Map(admirals().map((admiral) => [admiral.name, admiral]));
-    return Object.entries(ADMIRAL_CATALOG).map(([name, meta]) => ({
+    return Object.entries(getCatalog()).map(([name, meta]) => ({
       key: name,
       name,
       rarity: meta.rarity,
@@ -190,24 +240,24 @@
 
   function renderLists() {
     const list = admirals();
-    const lounge = document.getElementById("admiralLoungeView");
-    const codex = document.getElementById("admiralCodexView");
-    const empty = `<div class="admiral-empty">아직 보유한 제독이 없습니다. 영입 탭에서 제독을 획득하세요.</div>`;
-    if (lounge) lounge.innerHTML = list.length ? list.map(loungeCardHtml).join("") : empty;
+    const lounge = document.getElementById('admiralLoungeView');
+    const codex = document.getElementById('admiralCodexView');
+    const empty = '<div class="admiral-empty">아직 보유한 제독이 없습니다. 영입 탭에서 제독을 획득하세요.</div>';
+    if (lounge) lounge.innerHTML = list.length ? list.map(loungeCardHtml).join('') : empty;
     if (codex) {
       const entries = buildCodexEntries();
-      codex.innerHTML = entries.length ? entries.map((entry) => codexCardHtml(entry, entry.owned)).join("") : `<div class="admiral-empty">도감 데이터가 없습니다.</div>`;
+      codex.innerHTML = entries.length ? entries.map((entry) => codexCardHtml(entry, entry.owned)).join('') : '<div class="admiral-empty">도감 데이터가 없습니다.</div>';
     }
   }
 
   function ensureModal() {
-    let modal = document.getElementById("admiralDetailModal");
+    let modal = document.getElementById('admiralDetailModal');
     if (modal) return modal;
-    modal = document.createElement("div");
-    modal.id = "admiralDetailModal";
-    modal.className = "admiral-modal hidden";
-    modal.innerHTML = `<div class="admiral-modal-card" id="admiralDetailCard"></div>`;
-    modal.addEventListener("click", (event) => {
+    modal = document.createElement('div');
+    modal.id = 'admiralDetailModal';
+    modal.className = 'admiral-modal hidden';
+    modal.innerHTML = '<div class="admiral-modal-card" id="admiralDetailCard"></div>';
+    modal.addEventListener('click', (event) => {
       if (event.target === modal) closeModal();
     });
     document.body.appendChild(modal);
@@ -216,22 +266,23 @@
 
   function openModal(cardId) {
     if (!cardId) return;
-    const [kind, raw] = String(cardId).split(":");
+    const [kind, raw] = String(cardId).split(':');
     let admiral = null;
     let locked = false;
+    const catalog = getCatalog();
     if (kind === 'owned') {
       admiral = admirals().find((item) => Number(item.id) === Number(raw));
     } else if (kind === 'catalog') {
-      const meta = ADMIRAL_CATALOG[raw];
+      const meta = catalog[raw];
       const owned = admirals().find((item) => item.name === raw);
       locked = !owned;
       admiral = owned || (meta ? { name: raw, rarity: meta.rarity, nickname: meta.nickname, role: meta.role, summary: meta.summary } : null);
     }
     if (!admiral) return;
 
-    const meta = ADMIRAL_CATALOG[admiral.name] || {};
+    const meta = catalog[admiral.name] || {};
     const modal = ensureModal();
-    const card = document.getElementById("admiralDetailCard");
+    const card = document.getElementById('admiralDetailCard');
     card.innerHTML = `
       <div class="panel-head">
         <div>
@@ -246,23 +297,23 @@
         <div class="admiral-info-line"><strong>효과</strong><span>${locked ? '획득 전까지 숨겨집니다.' : (meta.summary || statLine(admiral))}</span></div>
         <div class="admiral-info-line"><strong>상태</strong><span>${locked ? '미획득' : `${admiral.isFeatured ? '대표 제독' : '대표 미지정'} / ${admiral.isSessionSelected ? '다음 세션 배치' : '세션 미선택'}`}</span></div>
       </div>
-      ${locked ? `<div class="admiral-empty" style="margin-top:14px;">이 제독은 아직 획득하지 않았습니다. 영입에서 발견하면 상세가 공개됩니다.</div>` : `<div class="button-row" style="margin-top:14px;"><button type="button" data-featured-admiral="${admiral.id}" ${admiral.isFeatured ? "disabled" : ""}>대표 제독</button><button type="button" data-session-admiral="${admiral.id}" ${admiral.isSessionSelected ? "disabled" : ""}>다음 세션</button></div>`}
+      ${locked ? '<div class="admiral-empty" style="margin-top:14px;">이 제독은 아직 획득하지 않았습니다. 영입에서 발견하면 상세가 공개됩니다.</div>' : `<div class="button-row" style="margin-top:14px;"><button type="button" data-featured-admiral="${admiral.id}" ${admiral.isFeatured ? 'disabled' : ''}>대표 제독</button><button type="button" data-session-admiral="${admiral.id}" ${admiral.isSessionSelected ? 'disabled' : ''}>다음 세션</button></div>`}
     `;
-    qs("[data-admiral-close]", card)?.addEventListener("click", closeModal);
-    qs("[data-featured-admiral]", card)?.addEventListener("click", async () => {
-      await window.selectLobbyAdmiral?.("featured", admiral.id);
+    qs('[data-admiral-close]', card)?.addEventListener('click', closeModal);
+    qs('[data-featured-admiral]', card)?.addEventListener('click', async () => {
+      await window.selectLobbyAdmiral?.('featured', admiral.id);
       closeModal();
     });
-    qs("[data-session-admiral]", card)?.addEventListener("click", async () => {
-      await window.selectLobbyAdmiral?.("session", admiral.id);
+    qs('[data-session-admiral]', card)?.addEventListener('click', async () => {
+      await window.selectLobbyAdmiral?.('session', admiral.id);
       closeModal();
     });
-    modal.classList.remove("hidden");
+    modal.classList.remove('hidden');
     state.modalOpen = true;
   }
 
   function closeModal() {
-    document.getElementById("admiralDetailModal")?.classList.add("hidden");
+    document.getElementById('admiralDetailModal')?.classList.add('hidden');
     state.modalOpen = false;
   }
 
@@ -274,15 +325,15 @@
   }
 
   function hideLegacyGrowthAdmiralCard() {
-    const admiralView = document.getElementById("admiralView");
-    const drawButton = document.getElementById("drawAdmiralButton");
-    const card = (drawButton || admiralView)?.closest(".card");
-    if (card) card.style.display = "none";
+    const admiralView = document.getElementById('admiralView');
+    const drawButton = document.getElementById('drawAdmiralButton');
+    const card = (drawButton || admiralView)?.closest('.card');
+    if (card) card.style.display = 'none';
   }
 
   function wrap(name) {
     const original = window[name];
-    if (typeof original !== "function" || original.__admiralSystemWrapped) return;
+    if (typeof original !== 'function' || original.__admiralSystemWrapped) return;
     const wrapped = function wrappedAdmiralSystem(...args) {
       const result = original.apply(this, args);
       Promise.resolve(result).finally(render);
@@ -297,17 +348,18 @@
     state.installed = true;
     window.renderAdmiralSystem = render;
     hideLegacyGrowthAdmiralCard();
-    wrap("renderLobby");
-    wrap("renderLobbyAdmirals");
-    wrap("loadLobby");
-    document.addEventListener("keydown", (event) => {
-      if (event.key === "Escape" && state.modalOpen) closeModal();
+    wrap('renderLobby');
+    wrap('renderLobbyAdmirals');
+    wrap('loadLobby');
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && state.modalOpen) closeModal();
     });
+    loadCatalogData();
     render();
   }
 
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", install, { once: true });
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', install, { once: true });
   } else {
     install();
   }
