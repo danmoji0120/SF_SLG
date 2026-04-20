@@ -134,6 +134,10 @@
   backdrop-filter: blur(6px);
 }
 
+.admiral-modal.hidden {
+  display: none;
+}
+
 .admiral-modal-card {
   width: min(920px, calc(100vw - 32px));
   max-height: min(88vh, 900px);
