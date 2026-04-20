@@ -82,8 +82,17 @@
   display: block;
   width: 100%;
   height: 100%;
+}
+
+.admiral-card-image {
   object-fit: cover;
   object-position: center top;
+}
+
+.admiral-portrait-image {
+  object-fit: contain;
+  object-position: center center;
+  background: rgba(5, 9, 12, 0.9);
 }
 
 .admiral-card-header {
@@ -207,7 +216,7 @@
   overflow: hidden;
   border-radius: 12px;
   border: 1px solid rgba(59, 83, 100, 0.8);
-  background: radial-gradient(circle at top left, rgba(129,199,189,0.22), transparent 34%), linear-gradient(180deg, rgba(17,25,34,0.96), rgba(8,13,17,0.98));
+  background: rgba(5, 9, 12, 0.9);
 }
 
 .admiral-portrait-image-modal {
