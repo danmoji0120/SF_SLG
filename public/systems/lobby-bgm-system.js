@@ -91,6 +91,7 @@
   function pause() {
     const audio = ensureAudio();
     audio.pause();
+    audio.currentTime = 0;
     if (!state.enabled) state.statusMessage = 'BGM 꺼짐';
     renderWidget();
   }
@@ -104,7 +105,11 @@
     state.enabled = Boolean(enabled);
     localStorage.setItem(LOBBY_BGM_ENABLED_KEY, state.enabled ? '1' : '0');
     state.statusMessage = state.enabled ? 'BGM 켜짐' : 'BGM 꺼짐';
-    syncPlayback();
+    if (state.enabled) {
+      syncPlayback();
+    } else {
+      pause();
+    }
     renderWidget();
   }
 
@@ -120,8 +125,11 @@
     state.currentIndex = (state.currentIndex + 1) % TRACKS.length;
     forceLoadCurrentTrack();
     state.statusMessage = `${currentTrack().title} 선택`;
-    if (shouldPlayInLobby()) play();
-    else renderWidget();
+    if (state.enabled && shouldPlayInLobby()) {
+      play();
+    } else {
+      renderWidget();
+    }
   }
 
   function ensureWidget() {
@@ -131,19 +139,32 @@
     widget.id = 'lobbyBgmWidget';
     widget.className = 'lobby-bgm-widget';
     document.body.appendChild(widget);
-    widget.addEventListener('input', (event) => {
-      const target = event.target;
-      if (target.matches('[data-bgm-volume]')) setVolume(target.value);
-    });
-    widget.addEventListener('click', (event) => {
-      const button = event.target.closest('button');
-      if (!button) return;
+    return widget;
+  }
+
+  function bindWidgetControls(widget) {
+    const toggleButton = widget.querySelector('#lobbyBgmToggleButton');
+    const nextButton = widget.querySelector('#lobbyBgmNextButton');
+    const volumeRange = widget.querySelector('#lobbyBgmVolumeRange');
+
+    toggleButton?.addEventListener('click', (event) => {
       event.preventDefault();
       event.stopPropagation();
-      if (button.dataset.bgmToggle) setEnabled(!state.enabled);
-      if (button.dataset.bgmNext) nextTrack();
+      state.userInteracted = true;
+      setEnabled(!state.enabled);
     });
-    return widget;
+
+    nextButton?.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      state.userInteracted = true;
+      nextTrack();
+    });
+
+    volumeRange?.addEventListener('input', (event) => {
+      state.userInteracted = true;
+      setVolume(event.target.value);
+    });
   }
 
   function renderWidget(message = '') {
@@ -158,16 +179,17 @@
           <span>${track.title}</span>
         </div>
         <div class="button-row">
-          <button type="button" data-bgmToggle="1">${state.enabled ? '끄기' : '켜기'}</button>
-          <button type="button" data-bgmNext="1">다음 곡</button>
+          <button id="lobbyBgmToggleButton" type="button">${state.enabled ? '끄기' : '켜기'}</button>
+          <button id="lobbyBgmNextButton" type="button">다음 곡</button>
         </div>
       </div>
       <div class="lobby-bgm-controls">
         <label for="lobbyBgmVolumeRange">음량 ${Math.round(state.volume * 100)}%</label>
-        <input id="lobbyBgmVolumeRange" data-bgm-volume="1" type="range" min="0" max="1" step="0.01" value="${state.volume}">
+        <input id="lobbyBgmVolumeRange" type="range" min="0" max="1" step="0.01" value="${state.volume}">
       </div>
       <div class="hint">${message || state.statusMessage || (state.enabled ? (isPlaying ? '로비에서만 재생 중' : '로비 진입 시 자동 재생') : 'BGM 비활성화')}</div>
     `;
+    bindWidgetControls(widget);
     widget.classList.toggle('hidden', document.getElementById('lobbyPanel')?.classList.contains('hidden'));
   }
 
