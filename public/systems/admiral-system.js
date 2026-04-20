@@ -61,6 +61,24 @@
     return state.catalog || FALLBACK_CATALOG;
   }
 
+  function admiralImageFile(name) {
+    return String(name || '')
+      .trim()
+      .replace(/\s+/g, '-')
+      .replace(/[\\/:*?"<>|]/g, '')
+      .toLowerCase();
+  }
+
+  function admiralImagePath(name) {
+    return `/img/admirals/${admiralImageFile(name)}.png`;
+  }
+
+  function admiralImageHtml(name, alt, variant = 'card') {
+    const path = admiralImagePath(name);
+    const className = variant === 'modal' ? 'admiral-portrait-image admiral-portrait-image-modal' : 'admiral-card-image';
+    return `<div class="${variant === 'modal' ? 'admiral-portrait-media' : 'admiral-card-media'}"><img src="${path}" alt="${alt}" class="${className}" loading="lazy" onerror="this.parentElement.classList.add('missing'); this.remove();"></div>`;
+  }
+
   function loadCatalogData() {
     if (state.catalogPromise) return state.catalogPromise;
     state.catalogPromise = new Promise((resolve) => {
@@ -189,6 +207,7 @@
     if (admiral.isSessionSelected) tags.push('<span class="admiral-tag highlight">다음 세션</span>');
     return `
       <article class="admiral-card" data-admiral-card-id="owned:${admiral.id}">
+        ${admiralImageHtml(admiral.name, admiral.name, 'card')}
         <div class="admiral-card-header">
           <div>
             <strong>${admiral.name}</strong>
@@ -204,6 +223,7 @@
   function codexCardHtml(entry, owned) {
     return `
       <article class="admiral-card ${owned ? '' : 'locked'}" data-admiral-card-id="catalog:${entry.name}">
+        ${admiralImageHtml(entry.name, owned ? entry.name : '미획득 제독', 'card')}
         <div class="admiral-card-header">
           <div>
             <strong>${owned ? entry.name : '???'}</strong>
@@ -291,11 +311,20 @@
         </div>
         <button type="button" data-admiral-close>닫기</button>
       </div>
-      <div class="admiral-info-list">
-        <div class="admiral-info-line"><strong>코드명</strong><span>${locked ? '미확인' : (meta.nickname || admiral.nickname || '-')}</span></div>
-        <div class="admiral-info-line"><strong>역할</strong><span>${locked ? '미확인' : (meta.role || admiral.role || '-')}</span></div>
-        <div class="admiral-info-line"><strong>효과</strong><span>${locked ? '획득 전까지 숨겨집니다.' : (meta.summary || statLine(admiral))}</span></div>
-        <div class="admiral-info-line"><strong>상태</strong><span>${locked ? '미획득' : `${admiral.isFeatured ? '대표 제독' : '대표 미지정'} / ${admiral.isSessionSelected ? '다음 세션 배치' : '세션 미선택'}`}</span></div>
+      <div class="admiral-modal-grid">
+        <div class="admiral-portrait">
+          ${admiralImageHtml(admiral.name, locked ? '미획득 제독' : admiral.name, 'modal')}
+          <span class="admiral-rarity ${rarityClass(meta.rarity || admiral.rarity)}">${meta.rarity || admiral.rarity}</span>
+          <div class="name">${locked ? '???' : admiral.name}</div>
+          <div class="hint">${locked ? '획득 후 상세가 공개됩니다.' : `${meta.nickname || admiral.nickname || '-'} · ${meta.role || admiral.role || '-'}`}</div>
+        </div>
+        <div class="admiral-info-list">
+          <div class="admiral-info-line"><strong>코드명</strong><span>${locked ? '미확인' : (meta.nickname || admiral.nickname || '-')}</span></div>
+          <div class="admiral-info-line"><strong>역할</strong><span>${locked ? '미확인' : (meta.role || admiral.role || '-')}</span></div>
+          <div class="admiral-info-line"><strong>효과</strong><span>${locked ? '획득 전까지 숨겨집니다.' : (meta.summary || statLine(admiral))}</span></div>
+          <div class="admiral-info-line"><strong>상태</strong><span>${locked ? '미획득' : `${admiral.isFeatured ? '대표 제독' : '대표 미지정'} / ${admiral.isSessionSelected ? '다음 세션 배치' : '세션 미선택'}`}</span></div>
+          <div class="admiral-info-line"><strong>이미지 경로</strong><span>${admiralImagePath(admiral.name)}</span></div>
+        </div>
       </div>
       ${locked ? '<div class="admiral-empty" style="margin-top:14px;">이 제독은 아직 획득하지 않았습니다. 영입에서 발견하면 상세가 공개됩니다.</div>' : `<div class="button-row" style="margin-top:14px;"><button type="button" data-featured-admiral="${admiral.id}" ${admiral.isFeatured ? 'disabled' : ''}>대표 제독</button><button type="button" data-session-admiral="${admiral.id}" ${admiral.isSessionSelected ? 'disabled' : ''}>다음 세션</button></div>`}
     `;
