@@ -1,6 +1,7 @@
 const https = require("https");
 const Module = require("module");
 const path = require("path");
+const { applySessionPatch } = require("./server_session_patch");
 
 const ORIGINAL_SERVER_URL = "https://raw.githubusercontent.com/danmoji0120/SF_SLG/08b49d7db5b8316f0084fb9598901773c22778cc/server.js";
 
@@ -60,6 +61,8 @@ function patchSource(source) {
     'const admiral = pickLobbyAdmiral(RESOURCE_RECRUIT_TYPE);',
     "/admirals/draw recruit selection"
   );
+
+  patched = applySessionPatch(patched);
 
   return patched;
 }
